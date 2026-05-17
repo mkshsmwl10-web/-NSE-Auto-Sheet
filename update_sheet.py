@@ -8,8 +8,16 @@ from datetime import datetime, timedelta
 import os
 import json
 
-# Credentials Setup
+# =========================
+# 1. Google Credentials
+# =========================
+
 creds_json = os.environ.get('GCP_CREDENTIALS')
+
+if not creds_json:
+    print("CRITICAL ERROR: GCP_CREDENTIALS Secret Missing!")
+    exit(1)
+
 creds_dict = json.loads(creds_json)
 
 scope = [
@@ -24,14 +32,20 @@ creds = ServiceAccountCredentials.from_json_keyfile_dict(
 
 client = gspread.authorize(creds)
 
-# Google Sheet ID
+# =========================
+# 2. Google Sheet Setup
+# =========================
+
 spreadsheet_id = "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E"
 
 worksheet = client.open_by_key(
     spreadsheet_id
 ).worksheet("Top 250 Stocks")
 
-# NSE Data Fetcher
+# =========================
+# 3. NSE Bhavcopy Fetcher
+# =========================
+
 def fetch_bhavcopy_for_date(date_obj):
 
     date_str = date_obj.strftime("%Y%m%d")
@@ -39,10 +53,12 @@ def fetch_bhavcopy_for_date(date_obj):
     url = f"https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{date_str}_F_0000.csv.zip"
 
     headers = {
-        'User-Agent': 'Mozilla/5.0'
+        "User-Agent": "Mozilla/5.0"
     }
 
     try:
+
+        print(f"Checking Bhavcopy for {date_str}")
 
         response = requests.get(
             url,
@@ -50,67 +66,119 @@ def fetch_bhavcopy_for_date(date_obj):
             timeout=20
         )
 
-        if response.status_code == 200:
+        if response.status_code != 200:
+            print("File not found")
+            return None
 
-            with zipfile.ZipFile(
-                io.BytesIO(response.content)
-            ) as z:
+        with zipfile.ZipFile(
+            io.BytesIO(response.content)
+        ) as z:
 
-                csv_filename = z.namelist()[0]
+            csv_filename = z.namelist()[0]
 
-                with z.open(csv_filename) as f:
+            with z.open(csv_filename) as f:
 
-                    df = pd.read_csv(f)
+                df = pd.read_csv(f)
 
-                    sym_col = 'TckrSymb'
-                    close_col = 'ClsPric'
-                    vol_col = 'TtlTradgVol'
-                    series_col = 'SctySrs'
+        # Remove extra spaces
+        df.columns = [c.strip() for c in df.columns]
 
-                    # EQ only
-                    df = df[
-                        df[series_col]
-                        .astype(str)
-                        .str.strip() == 'EQ'
-                    ]
+        # Dynamic column names
+        sym_col = next(
+            (c for c in ['TckrSymb', 'SYMBOL'] if c in df.columns),
+            None
+        )
 
-                    # Remove ETFs
-                    filter_keywords = 'BEES|ETF|GOLD|LIQUID|SILVER'
+        close_col = next(
+            (c for c in ['ClsPric', 'CLOSE'] if c in df.columns),
+            None
+        )
 
-                    df = df[
-                        ~df[sym_col]
-                        .astype(str)
-                        .str.contains(
-                            filter_keywords,
-                            case=False,
-                            na=False
-                        )
-                    ]
+        series_col = next(
+            (c for c in ['SctySrs', 'SERIES'] if c in df.columns),
+            None
+        )
 
-                    df_top = df.sort_values(
-                        by=vol_col,
-                        ascending=False
-                    ).head(250)
+        turnover_col = next(
+            (
+                c for c in [
+                    'TtlTrfVal',
+                    'TtlTrdVal',
+                    'TURNOVER_LACS',
+                    'TURNOVER'
+                ]
+                if c in df.columns
+            ),
+            None
+        )
 
-                    return df_top[
-                        [sym_col, vol_col, close_col]
-                    ].values.tolist()
+        if not all([sym_col, close_col, turnover_col]):
+            print("Required columns missing")
+            return None
 
-        return None
+        # EQ Series only
+        if series_col:
+            df = df[
+                df[series_col]
+                .astype(str)
+                .str.strip() == 'EQ'
+            ]
+
+        # Remove ETF / BEES
+        filter_keywords = 'BEES|ETF|GOLD|LIQUID|SILVER|INDEX'
+
+        df = df[
+            ~df[sym_col]
+            .astype(str)
+            .str.contains(
+                filter_keywords,
+                case=False,
+                na=False
+            )
+        ]
+
+        # Numeric conversion
+        df[turnover_col] = pd.to_numeric(
+            df[turnover_col],
+            errors='coerce'
+        )
+
+        df = df.dropna(subset=[turnover_col])
+
+        # Sort by Turnover
+        df_top = df.sort_values(
+            by=turnover_col,
+            ascending=False
+        ).head(250)
+
+        # Final output
+        final_df = df_top[
+            [sym_col, turnover_col, close_col]
+        ]
+
+        return final_df.values.tolist()
 
     except Exception as e:
-        print(e)
+
+        print(f"NSE Fetch Error: {str(e)}")
+
         return None
 
-# Main Logic
+# =========================
+# 4. Main Execution Logic
+# =========================
+
 date = datetime.now()
 
 data_to_insert = None
 
-for i in range(5):
+fetched_date_str = ""
+
+for i in range(7):
 
     test_date = date - timedelta(days=i)
 
+    # Skip Saturday/Sunday
     if test_date.weekday() >= 5:
         continue
 
@@ -119,16 +187,58 @@ for i in range(5):
     )
 
     if data_to_insert:
+
+        fetched_date_str = test_date.strftime(
+            '%d-%b-%Y'
+        )
+
         break
 
-# Update Sheet
+# =========================
+# 5. Update Google Sheet
+# =========================
+
 if data_to_insert:
 
-    worksheet.batch_clear(['A2:C251'])
+    try:
 
-    worksheet.update(
-        'A2',
-        data_to_insert
+        # Clear old data
+        worksheet.batch_clear(['A2:C251'])
+
+        # Insert new data
+        worksheet.update(
+            'A2',
+            data_to_insert
+        )
+
+        # Status message
+        ist_now = (
+            datetime.utcnow() +
+            timedelta(hours=5, minutes=30)
+        ).strftime('%d-%b %H:%M')
+
+        status_msg = (
+            f"Data Date: {fetched_date_str} | "
+            f"Updated: {ist_now} IST"
+        )
+
+        worksheet.update(
+            'K2',
+            [[status_msg]]
+        )
+
+        print(
+            f"SUCCESS: Top 250 Turnover Stocks Updated for {fetched_date_str}"
+        )
+
+    except Exception as e:
+
+        print(
+            f"Google Sheet Update Error: {str(e)}"
+        )
+
+else:
+
+    print(
+        "FAILED: No Bhavcopy Data Found in Last 7 Days"
     )
-
-    print("SUCCESS: Sheet Updated!")
