@@ -199,11 +199,6 @@ for i in range(7):
 # =========================
 # 5. Update Google Sheet
 # =========================
-
-# =========================
-# 5. Update Google Sheet
-# =========================
-
 if data_to_insert:
 
     try:
