@@ -230,7 +230,6 @@ if data_to_insert:
             ])
 
         if history_rows:
-
             macd_sheet.append_rows(
                 history_rows,
                 value_input_option='RAW'
@@ -267,5 +266,3 @@ else:
     print(
         "FAILED: No Bhavcopy Data Found in Last 7 Days"
     )
-        break
-
