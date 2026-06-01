@@ -211,30 +211,31 @@ if data_to_insert:
             data_to_insert
         )
 
-        # =========================
-        # Save History For MACD
-        # =========================
+      # =========================
+# Save History For MACD
+# =========================
 
-        today_db = datetime.now().strftime("%Y-%m-%d")
+today_db = datetime.now().strftime("%Y-%m-%d")
 
-        history_rows = []
+history_rows = []
 
-        for row in data_to_insert:
+for row in data_to_insert:
 
-            symbol = row[0]
-            close_price = row[2]
+    symbol = row[0]
+    close_price = row[2]
 
-            history_rows.append([
-                today_db,
-                symbol,
-                close_price
-            ])
+    history_rows.append([
+        today_db,
+        symbol,
+        close_price
+    ])
 
-        if history_rows:
-            macd_sheet.append_rows(
-                history_rows,
-                value_input_option='RAW'
-            )
+if history_rows:
+
+    macd_sheet.append_rows(
+        history_rows,
+        value_input_option='RAW'
+    )
 
         # Status message
         ist_now = (
