@@ -189,11 +189,13 @@ for i in range(7):
         test_date
     )
 
-    if data_to_insert:
+   if data_to_insert:
 
-        fetched_date_str = test_date.strftime(
-            '%d-%b-%Y'
-        )
+    fetched_date_str = test_date.strftime(
+        '%d-%b-%Y'
+    )
+
+    break
 # =========================
 # 5. Update Google Sheet
 # =========================
@@ -211,32 +213,63 @@ if data_to_insert:
             data_to_insert
         )
 
-      # =========================
-# Save History For MACD
-# =========================
+        # =========================
+        # Save History For MACD
+        # =========================
 
-today_db = datetime.now().strftime("%Y-%m-%d")
+        today_db = datetime.now().strftime("%Y-%m-%d")
 
-history_rows = []
+        history_rows = []
 
-for row in data_to_insert:
+        for row in data_to_insert:
 
-    symbol = row[0]
-    close_price = row[2]
+            symbol = row[0]
+            close_price = row[2]
 
-    history_rows.append([
-        today_db,
-        symbol,
-        close_price
-    ])
+            history_rows.append([
+                today_db,
+                symbol,
+                close_price
+            ])
 
-if history_rows:
+        if history_rows:
 
-    macd_sheet.append_rows(
-        history_rows,
-        value_input_option='RAW'
+            macd_sheet.append_rows(
+                history_rows,
+                value_input_option='RAW'
+            )
+
+        # Status message
+        ist_now = (
+            datetime.utcnow() +
+            timedelta(hours=5, minutes=30)
+        ).strftime('%d-%b %H:%M')
+
+        status_msg = (
+            f"Data Date: {fetched_date_str} | "
+            f"Updated: {ist_now} IST"
+        )
+
+        worksheet.update(
+            'K2',
+            [[status_msg]]
+        )
+
+        print(
+            f"SUCCESS: Top 250 Turnover Stocks Updated for {fetched_date_str}"
+        )
+
+    except Exception as e:
+
+        print(
+            f"Google Sheet Update Error: {str(e)}"
+        )
+
+else:
+
+    print(
+        "FAILED: No Bhavcopy Data Found in Last 7 Days"
     )
-
         # Status message
         ist_now = (
             datetime.utcnow() +
