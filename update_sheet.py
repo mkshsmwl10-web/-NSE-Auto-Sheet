@@ -270,25 +270,6 @@ else:
     print(
         "FAILED: No Bhavcopy Data Found in Last 7 Days"
     )
-        # Status message
-        ist_now = (
-            datetime.utcnow() +
-            timedelta(hours=5, minutes=30)
-        ).strftime('%d-%b %H:%M')
-
-        status_msg = (
-            f"Data Date: {fetched_date_str} | "
-            f"Updated: {ist_now} IST"
-        )
-
-        worksheet.update(
-            'K2',
-            [[status_msg]]
-        )
-
-        print(
-            f"SUCCESS: Top 250 Turnover Stocks Updated for {fetched_date_str}"
-        )
 
     except Exception as e:
 
