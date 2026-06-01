@@ -270,15 +270,3 @@ else:
     print(
         "FAILED: No Bhavcopy Data Found in Last 7 Days"
     )
-
-    except Exception as e:
-
-        print(
-            f"Google Sheet Update Error: {str(e)}"
-        )
-
-else:
-
-    print(
-        "FAILED: No Bhavcopy Data Found in Last 7 Days"
-    )
