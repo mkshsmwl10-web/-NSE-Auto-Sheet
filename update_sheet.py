@@ -189,13 +189,13 @@ for i in range(7):
         test_date
     )
 
-   if data_to_insert:
+    if data_to_insert:
 
-    fetched_date_str = test_date.strftime(
-        '%d-%b-%Y'
-    )
+        fetched_date_str = test_date.strftime(
+            '%d-%b-%Y'
+        )
 
-    break
+        break
 # =========================
 # 5. Update Google Sheet
 # =========================
