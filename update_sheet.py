@@ -215,7 +215,35 @@ if data_to_insert:
             'A2',
             data_to_insert
         )
+# =========================
+# Update MACD250
+# =========================
 
+macd250_sheet.batch_clear(['A2:J251'])
+
+macd250_rows = []
+
+for row in data_to_insert:
+
+    symbol = row[0]
+
+    macd250_rows.append([
+        symbol,
+        "NA",  # M0
+        "NA",  # M-1
+        "NA",  # M-2
+        "NA",  # W0
+        "NA",  # W-1
+        "NA",  # W-2
+        "NA",  # D0
+        "NA",  # D-1
+        "NA"   # D-2
+    ])
+
+macd250_sheet.update(
+    'A2',
+    macd250_rows
+)
         # =========================
         # Save History For MACD
         # =========================
