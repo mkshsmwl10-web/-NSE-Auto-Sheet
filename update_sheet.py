@@ -45,6 +45,9 @@ worksheet = client.open_by_key(
 macd_sheet = client.open_by_key(
     spreadsheet_id
 ).worksheet("MACD_HISTORY")
+macd250_sheet = client.open_by_key(
+    spreadsheet_id
+).worksheet("MACD250")
 # =========================
 # 3. NSE Bhavcopy Fetcher
 # =========================
