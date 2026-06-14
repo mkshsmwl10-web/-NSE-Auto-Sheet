@@ -245,7 +245,6 @@ if data_to_insert:
             'A2',
             macd250_rows
         )
-)
         # =========================
         # Save History For MACD
         # =========================
