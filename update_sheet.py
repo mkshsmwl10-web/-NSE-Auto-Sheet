@@ -216,13 +216,15 @@ if data_to_insert:
             data_to_insert
         )
 
-         # =========================
-        # Update MACD200
-        # =========================
+   ```
+    # =========================
+    # Update MACD200
+    # =========================
 
-        macd200_sheet.batch_clear(['A2:J1000'])
+    macd200_sheet.batch_clear(['A2:J1000'])
 
-        macd200_rows = []
+    macd200_rows = []
+
     for row in data_to_insert:
 
         symbol = row[0]
@@ -239,16 +241,17 @@ if data_to_insert:
             "NA",
             "NA"
         ])
+
+    macd200_sheet.update(
+        'A2',
+        macd200_rows
+    )
+
+    # =========================
+    # Save History For MACD
+    # =========================
 ```
 
-
-macd200_sheet.update(
-    'A2',
-    macd200_rows
-)
-        # =========================
-        # Save History For MACD
-        # =========================
 
         today_db = datetime.now().strftime("%Y-%m-%d")
 
