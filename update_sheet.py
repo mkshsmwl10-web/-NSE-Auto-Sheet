@@ -208,7 +208,7 @@ if data_to_insert:
     try:
 
         # Clear old data
-        worksheet.batch_clear(['A2:C201'])
+      worksheet.batch_clear(['A2:C1000'])
 
         # Insert new data
         worksheet.update(
@@ -220,31 +220,31 @@ if data_to_insert:
         # Update MACD200
         # =========================
 
-        macd200_sheet.batch_clear(['A2:J201'])
+       macd200_sheet.batch_clear(['A2:J1000'])
 
-        macd201_rows = []
+macd200_rows = []
 
-        for row in data_to_insert:
+for row in data_to_insert:
 
-            symbol = row[0]
+    symbol = row[0]
 
-            macd201_rows.append([
-                symbol,
-                "NA",
-                "NA",
-                "NA",
-                "NA",
-                "NA",
-                "NA",
-                "NA",
-                "NA",
-                "NA"
-            ])
+    macd200_rows.append([
+        symbol,
+        "NA",
+        "NA",
+        "NA",
+        "NA",
+        "NA",
+        "NA",
+        "NA",
+        "NA",
+        "NA"
+    ])
 
-        macd201_sheet.update(
-            'A2',
-            macd201_rows
-        )
+macd200_sheet.update(
+    'A2',
+    macd200_rows
+)
         # =========================
         # Save History For MACD
         # =========================
