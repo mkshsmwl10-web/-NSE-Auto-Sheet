@@ -40,7 +40,7 @@ spreadsheet_id = "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E"
 
 worksheet = client.open_by_key(
     spreadsheet_id
-).worksheet("Top 250 Stocks")
+).worksheet("NIFTY200")
 
 macd_sheet = client.open_by_key(
     spreadsheet_id
