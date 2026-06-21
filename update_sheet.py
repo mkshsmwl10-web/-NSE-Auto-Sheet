@@ -208,7 +208,7 @@ if data_to_insert:
     try:
 
         # Clear old data
-      worksheet.batch_clear(['A2:C1000'])
+        worksheet.batch_clear(['A2:C1000'])
 
         # Insert new data
         worksheet.update(
