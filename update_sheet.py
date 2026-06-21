@@ -207,6 +207,10 @@ if data_to_insert:
 
     try:
 
+    
+Isko badal kar:
+
+```python
         # Clear old data
         worksheet.batch_clear(['A2:C1000'])
 
@@ -216,14 +220,13 @@ if data_to_insert:
             data_to_insert
         )
 
-   ```
-    # =========================
-    # Update MACD200
-    # =========================
+        # =========================
+        # Update MACD200
+        # =========================
 
-    macd200_sheet.batch_clear(['A2:J1000'])
+        macd200_sheet.batch_clear(['A2:J1000'])
 
-    macd200_rows = []
+        macd200_rows = []
 
     for row in data_to_insert:
 
