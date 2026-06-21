@@ -205,40 +205,30 @@ for i in range(7):
 
 if data_to_insert:
 
-    try:
+```
+try:
 
-        # Clear old data
-        worksheet.batch_clear(['A2:C1000'])
+    # Clear old data
+    worksheet.batch_clear(['A2:C1000'])
 
-        # Insert new data
-        worksheet.update(
-            'A2',
-            data_to_insert
-        )
+    # Insert new data
+    worksheet.update(
+        'A2',
+        data_to_insert
+    )
 
-    # =========================
     # Update MACD200
-    # =========================
-
     macd200_sheet.batch_clear(['A2:J1000'])
 
     macd200_rows = []
 
     for row in data_to_insert:
 
-        symbol = row[0]
-
         macd200_rows.append([
-            symbol,
-            "NA",
-            "NA",
-            "NA",
-            "NA",
-            "NA",
-            "NA",
-            "NA",
-            "NA",
-            "NA"
+            row[0],
+            "NA","NA","NA",
+            "NA","NA","NA",
+            "NA","NA","NA"
         ])
 
     macd200_sheet.update(
@@ -246,61 +236,56 @@ if data_to_insert:
         macd200_rows
     )
 
-    # =========================
     # Save History For MACD
-    # =========================
-
     today_db = datetime.now().strftime("%Y-%m-%d")
 
+    history_rows = []
 
-        history_rows = []
+    for row in data_to_insert:
 
-        for row in data_to_insert:
+        history_rows.append([
+            today_db,
+            row[0],
+            row[2]
+        ])
 
-            symbol = row[0]
-            close_price = row[2]
+    if history_rows:
 
-            history_rows.append([
-                today_db,
-                symbol,
-                close_price
-            ])
-
-        if history_rows:
-
-            macd_sheet.append_rows(
-                history_rows,
-                value_input_option='RAW'
-            )
-
-        # Status message
-        ist_now = (
-            datetime.utcnow() +
-            timedelta(hours=5, minutes=30)
-        ).strftime('%d-%b %H:%M')
-
-        status_msg = (
-            f"Data Date: {fetched_date_str} | "
-            f"Updated: {ist_now} IST"
+        macd_sheet.append_rows(
+            history_rows,
+            value_input_option='RAW'
         )
 
-        worksheet.update(
-            'K2',
-            [[status_msg]]
-        )
+    ist_now = (
+        datetime.utcnow() +
+        timedelta(hours=5, minutes=30)
+    ).strftime('%d-%b %H:%M')
 
-        print(
-            f"SUCCESS: NIFTY200 Turnover Stocks Updated for {fetched_date_str}"
-        )
+    status_msg = (
+        f"Data Date: {fetched_date_str} | "
+        f"Updated: {ist_now} IST"
+    )
 
-    except Exception as e:
+    worksheet.update(
+        'K2',
+        [[status_msg]]
+    )
 
-        print(
-            f"Google Sheet Update Error: {str(e)}"
-        )
+    print(
+        f"SUCCESS: NIFTY200 Updated for {fetched_date_str}"
+    )
+
+except Exception as e:
+
+    print(
+        f"Google Sheet Update Error: {str(e)}"
+    )
+```
 
 else:
 
-    print(
-        "FAILED: No Bhavcopy Data Found in Last 7 Days"
-    )
+```
+print(
+    "FAILED: No Bhavcopy Data Found in Last 7 Days"
+)
+```
