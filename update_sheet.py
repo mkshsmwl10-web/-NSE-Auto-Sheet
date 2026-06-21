@@ -220,26 +220,33 @@ if data_to_insert:
         # Update MACD200
         # =========================
 
-       macd200_sheet.batch_clear(['A2:J1000'])
+     ```
+    # =========================
+    # Update MACD200
+    # =========================
 
-macd200_rows = []
+    macd200_sheet.batch_clear(['A2:J1000'])
 
-for row in data_to_insert:
+    macd200_rows = []
 
-    symbol = row[0]
+    for row in data_to_insert:
 
-    macd200_rows.append([
-        symbol,
-        "NA",
-        "NA",
-        "NA",
-        "NA",
-        "NA",
-        "NA",
-        "NA",
-        "NA",
-        "NA"
-    ])
+        symbol = row[0]
+
+        macd200_rows.append([
+            symbol,
+            "NA",
+            "NA",
+            "NA",
+            "NA",
+            "NA",
+            "NA",
+            "NA",
+            "NA",
+            "NA"
+        ])
+```
+
 
 macd200_sheet.update(
     'A2',
