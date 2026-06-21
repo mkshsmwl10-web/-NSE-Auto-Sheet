@@ -205,8 +205,6 @@ for i in range(7):
 
 if data_to_insert:
 
-if data_to_insert:
-
     try:
 
         worksheet.batch_clear(['A2:C1000'])
