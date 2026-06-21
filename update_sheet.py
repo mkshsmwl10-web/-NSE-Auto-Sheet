@@ -205,7 +205,7 @@ for i in range(7):
 
 if data_to_insert:
 
-```
+
 try:
 
     # Clear old data
