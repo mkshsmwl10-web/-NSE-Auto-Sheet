@@ -45,9 +45,9 @@ worksheet = client.open_by_key(
 macd_sheet = client.open_by_key(
     spreadsheet_id
 ).worksheet("MACD_HISTORY")
-macd250_sheet = client.open_by_key(
+macd200_sheet = client.open_by_key(
     spreadsheet_id
-).worksheet("MACD250")
+).worksheet("MACD200")
 # =========================
 # 3. NSE Bhavcopy Fetcher
 # =========================
@@ -155,7 +155,7 @@ def fetch_bhavcopy_for_date(date_obj):
         df_top = df.sort_values(
             by=turnover_col,
             ascending=False
-        ).head(250)
+        ).head(200)
 
         # Final output
         final_df = df_top[
@@ -208,7 +208,7 @@ if data_to_insert:
     try:
 
         # Clear old data
-        worksheet.batch_clear(['A2:C251'])
+        worksheet.batch_clear(['A2:C201'])
 
         # Insert new data
         worksheet.update(
@@ -217,18 +217,18 @@ if data_to_insert:
         )
 
         # =========================
-        # Update MACD250
+        # Update MACD200
         # =========================
 
-        macd250_sheet.batch_clear(['A2:J251'])
+        macd200_sheet.batch_clear(['A2:J201'])
 
-        macd250_rows = []
+        macd201_rows = []
 
         for row in data_to_insert:
 
             symbol = row[0]
 
-            macd250_rows.append([
+            macd201_rows.append([
                 symbol,
                 "NA",
                 "NA",
@@ -241,9 +241,9 @@ if data_to_insert:
                 "NA"
             ])
 
-        macd250_sheet.update(
+        macd201_sheet.update(
             'A2',
-            macd250_rows
+            macd201_rows
         )
         # =========================
         # Save History For MACD
@@ -288,7 +288,7 @@ if data_to_insert:
         )
 
         print(
-            f"SUCCESS: Top 250 Turnover Stocks Updated for {fetched_date_str}"
+            f"SUCCESS: NIFTY200 Turnover Stocks Updated for {fetched_date_str}"
         )
 
     except Exception as e:
