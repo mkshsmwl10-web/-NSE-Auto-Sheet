@@ -216,7 +216,6 @@ if data_to_insert:
             data_to_insert
         )
 
-   ```
     # =========================
     # Update MACD200
     # =========================
@@ -252,7 +251,6 @@ if data_to_insert:
     # =========================
 
     today_db = datetime.now().strftime("%Y-%m-%d")
-```
 
 
         history_rows = []
