@@ -34,7 +34,7 @@ client = gspread.authorize(creds)
 
 SPREADSHEET_ID = "13Jy8xJB9l6SQ124aEIAF3wFJRvJIUXX6jOH61rFb3zY"
 
-sheet = client.open_by_key(SPREADSHEET_ID).worksheet("Sheet2")
+sheet = client.open_by_key(SPREADSHEET_ID).worksheet("sheet2")
 
 # Read ETF Codes from Column A
 symbols = sheet.col_values(1)[1:]
