@@ -40,6 +40,7 @@ sheet = client.open_by_key(SPREADSHEET_ID).worksheet("sheet2")
 symbols = sheet.col_values(1)[1:]
 
 print(f"Total ETFs Found : {len(symbols)}")
+print(symbols)
 
 for s in symbols:
     print(s)
