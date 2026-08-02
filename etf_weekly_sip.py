@@ -41,6 +41,7 @@ symbols = sheet.col_values(1)[1:]
 
 print(f"Total ETFs Found : {len(symbols)}")
 print(symbols)
+print("ETF SCRIPT STARTED")
 
 for s in symbols:
     print(s)
