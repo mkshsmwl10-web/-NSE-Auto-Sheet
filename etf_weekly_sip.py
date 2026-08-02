@@ -55,7 +55,7 @@ for s in symbols:
     ticker = s.replace("NSE:", "") + ".NS"
 
     print(f"Processing {ticker}")
-Run python update_sheet.py
+
 for s in symbols:
 
     if not s:
@@ -135,4 +135,4 @@ sheet.update(
 )
 
 print("ETF WEEKLY SIP SHEET UPDATED")
-/home/runner/work/-NSE-Auto-Sheet/-NSE-Auto-Sheet/update_sheet.py:212: DeprecationWarning: The order of arguments in worksheet.update() has c
+
