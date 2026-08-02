@@ -92,6 +92,47 @@ for s in symbols:
             round(diff, 2),
             signal
         ])
+        # ==========================
+# Update Sheet R:V
+# ==========================
+
+from datetime import datetime
+
+sheet.batch_clear(["R2:V100"])
+
+output = []
+
+for s, row in zip(symbols, results):
+
+    output.append([
+        s,
+        row[0],
+        row[1],
+        row[2],
+        row[3],
+        datetime.now().strftime("%d-%b-%Y %H:%M")
+    ])
+
+sheet.update(
+    "R1",
+    [
+        [
+            "ETF",
+            "Weekly Close",
+            "20W SMA",
+            "Difference %",
+            "Signal",
+            "Updated"
+        ]
+    ]
+)
+
+sheet.update(
+    "R2",
+    output
+)
+
+print("ETF WEEKLY SIP SHEET UPDATED")
 
     except Exception as e:
 
