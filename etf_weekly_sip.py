@@ -43,9 +43,7 @@ print(f"Total ETFs Found : {len(symbols)}")
 
 for s in symbols:
     print(s)
-    # ==========================
-# TEST YFINANCE
-# ==========================
+results = []
 
 for s in symbols:
 
@@ -54,18 +52,45 @@ for s in symbols:
 
     ticker = s.replace("NSE:", "") + ".NS"
 
-    print(f"Checking {ticker}")
+    print(f"Processing {ticker}")
 
-    df = yf.download(
-        ticker,
-        period="30wk",
-        interval="1wk",
-        progress=False,
-        auto_adjust=False
-    )
+    try:
 
-    if df.empty:
-        print("No Data")
-    else:
-        print(df[['Close']].tail())
-        break
+        df = yf.download(
+            ticker,
+            period="30wk",
+            interval="1wk",
+            progress=False,
+            auto_adjust=False
+        )
+
+        if df.empty or len(df) < 20:
+            print(f"Not enough data : {ticker}")
+            continue
+
+        close = float(df["Close"].iloc[-1])
+
+        sma20 = float(df["Close"].tail(20).mean())
+
+        diff = ((close - sma20) / sma20) * 100
+
+        signal = "BUY" if close < sma20 else "WAIT"
+
+        print(
+            ticker,
+            close,
+            sma20,
+            round(diff, 2),
+            signal
+        )
+
+        results.append([
+            close,
+            sma20,
+            round(diff, 2),
+            signal
+        ])
+
+    except Exception as e:
+
+        print(ticker, str(e))
