@@ -92,6 +92,7 @@ for s in symbols:
             round(diff, 2),
             signal
         ])
+        
         # ==========================
 # Update Sheet R:V
 # ==========================
