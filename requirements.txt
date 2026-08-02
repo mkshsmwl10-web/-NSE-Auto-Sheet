@@ -1,0 +1,6 @@
+gspread
+gspread-dataframe
+pandas
+yfinance
+oauth2client
+numpy
