@@ -22,7 +22,9 @@ jobs:
         run: |
           pip install -r requirements.txt
 
-      - name: Run Python Script
+      - name: Run Python Scripts
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-        run: python update_sheet.py
+        run: |
+          python update_sheet.py
+          python etf_weekly_sip.py
