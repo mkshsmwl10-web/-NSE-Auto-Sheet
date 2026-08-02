@@ -72,7 +72,7 @@ for s in symbols:
 
         close = float(df["Close"].iloc[-1].iloc[0])
 
-sma20 = float(df["Close"].tail(20).mean().iloc[0])
+        sma20 = float(df["Close"].tail(20).mean().iloc[0])
 
         diff = ((close - sma20) / sma20) * 100
 
@@ -92,9 +92,6 @@ sma20 = float(df["Close"].tail(20).mean().iloc[0])
             round(diff, 2),
             signal
         ])
-close = float(df["Close"].iloc[-1].iloc[0])
-
-sma20 = float(df["Close"].tail(20).mean().iloc[0])
 
     except Exception as e:
 
