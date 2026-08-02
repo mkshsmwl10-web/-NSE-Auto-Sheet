@@ -43,3 +43,29 @@ print(f"Total ETFs Found : {len(symbols)}")
 
 for s in symbols:
     print(s)
+    # ==========================
+# TEST YFINANCE
+# ==========================
+
+for s in symbols:
+
+    if not s:
+        continue
+
+    ticker = s.replace("NSE:", "") + ".NS"
+
+    print(f"Checking {ticker}")
+
+    df = yf.download(
+        ticker,
+        period="30wk",
+        interval="1wk",
+        progress=False,
+        auto_adjust=False
+    )
+
+    if df.empty:
+        print("No Data")
+    else:
+        print(df[['Close']].tail())
+        break
