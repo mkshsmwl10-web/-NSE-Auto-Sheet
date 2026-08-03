@@ -65,7 +65,7 @@ for s in symbols:
 
     print(f"Processing {ticker}")
 
-    try:
+        try:
 
         df = yf.download(
             ticker,
@@ -81,33 +81,32 @@ for s in symbols:
 
         import math
 
-close_series = df["Close"].dropna()
+        close_series = df["Close"].dropna()
 
-if len(close_series) < 20:
-    continue
+        if len(close_series) < 20:
+            continue
 
-close = float(close_series.iloc[-1])
-sma20 = float(close_series.tail(20).mean())
+        close = float(close_series.iloc[-1])
+        sma20 = float(close_series.tail(20).mean())
 
-if math.isnan(close) or math.isnan(sma20):
-    continue
+        if math.isnan(close) or math.isnan(sma20):
+            continue
 
         diff = round(((close - sma20) / sma20) * 100, 2)
 
         signal = "BUY" if close < sma20 else "WAIT"
 
-        print(ticker, close, sma20, round(diff,2), signal)
+        print(ticker, close, sma20, diff, signal)
 
         results.append([
             close,
             sma20,
-            round(diff,2),
+            diff,
             signal
         ])
 
     except Exception as e:
         print(ticker, str(e))
-
 
 # ==========================
 # UPDATE GOOGLE SHEET
