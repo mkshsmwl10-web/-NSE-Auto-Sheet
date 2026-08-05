@@ -281,3 +281,90 @@ else:
     print(
         "FAILED: No Bhavcopy Data Found in Last 7 Days"
     )
+# ==========================================================
+# MODULE 3 - PART 1
+# READ MACD HISTORY + MACD FUNCTIONS
+# ==========================================================
+
+import numpy as np
+
+# ---------------------------------
+# Read MACD_HISTORY Sheet
+# ---------------------------------
+
+history_data = macd_sheet.get_all_values()
+
+if len(history_data) <= 1:
+    print("MACD_HISTORY Empty")
+    exit()
+
+history_df = pd.DataFrame(
+    history_data[1:],
+    columns=history_data[0]
+)
+
+history_df["Date"] = pd.to_datetime(history_df["Date"])
+
+history_df["Close"] = pd.to_numeric(
+    history_df["Close"],
+    errors="coerce"
+)
+
+history_df = history_df.dropna(subset=["Close"])
+
+history_df = history_df.sort_values(
+    ["Symbol", "Date"]
+)
+
+# ---------------------------------
+# MACD Function
+# ---------------------------------
+
+def calculate_macd(df):
+
+    df = df.copy()
+
+    df["EMA12"] = df["Close"].ewm(
+        span=12,
+        adjust=False
+    ).mean()
+
+    df["EMA26"] = df["Close"].ewm(
+        span=26,
+        adjust=False
+    ).mean()
+
+    df["MACD"] = (
+        df["EMA12"] -
+        df["EMA26"]
+    )
+
+    df["SIGNAL"] = df["MACD"].ewm(
+        span=9,
+        adjust=False
+    ).mean()
+
+    df["HIST"] = (
+        df["MACD"] -
+        df["SIGNAL"]
+    )
+
+    return df
+
+# ---------------------------------
+# Histogram + Arrow
+# ---------------------------------
+
+def hist_arrow(hist_now, hist_prev):
+
+    if pd.isna(hist_now):
+        return "NA"
+
+    arrow = "↑"
+
+    if hist_now < hist_prev:
+        arrow = "↓"
+
+    return f"{hist_now:+.2f}{arrow}"
+
+print("MODULE 3 PART 1 LOADED")
