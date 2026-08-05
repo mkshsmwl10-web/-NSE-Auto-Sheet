@@ -525,3 +525,13 @@ for symbol in symbols:
         ])
 
 print("MODULE 3 PART 2 LOADED")
+# =====================================
+# Update MACD200 Sheet
+# =====================================
+
+macd200_sheet.update(
+    range_name="B2:J201",
+    values=macd200_output
+)
+
+print("MACD200 UPDATED SUCCESSFULLY")
