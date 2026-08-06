@@ -36,7 +36,7 @@ client = gspread.authorize(creds)
 # GOOGLE SHEET
 # ======================================
 
-spreadsheet_id = "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E"
+SPREADSHEET_ID = "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E"
 
 sheet_nifty = client.open_by_key(
     SPREADSHEET_ID
