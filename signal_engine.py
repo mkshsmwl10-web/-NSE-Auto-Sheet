@@ -223,17 +223,16 @@ for _, row in df.iterrows():
     score = 0
     signal = "WAIT"
 
-    # Weekly Turn Score
+       # Weekly Turn Score
+    if weekly == "TURN UP":
+        score += 70
 
-   if weekly == "TURN UP":
-    score += 70
-
-elif weekly == "RISING":
-    score += 40
+    elif weekly == "RISING":
+        score += 40
 
     # Daily Positive Score
-   if daily_positive_signal == "YES":
-    score += 30
+    if daily_positive_signal == "YES":
+        score += 30
 
     # Bonus for Fresh Daily Cross
     if daily_cross_signal == "YES":
@@ -252,7 +251,6 @@ elif weekly == "RISING":
 
     else:
         signal = "WAIT"
-
     output.append([
         weekly,
         daily_positive_signal,
