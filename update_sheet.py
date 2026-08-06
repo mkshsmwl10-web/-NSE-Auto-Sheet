@@ -237,6 +237,32 @@ sheet_nifty.update(
 )
 
 print("NIFTY200 UPDATED")
+# ======================================
+# MODULE 2
+# INITIALIZE NIFTY200_FIXED
+# ======================================
+
+fixed_data = sheet_fixed.get_all_values()
+
+# Only initialize if sheet is empty
+if len(fixed_data) <= 1:
+
+    print("Initializing NIFTY200_FIXED...")
+
+    # Clear old data
+    sheet_fixed.batch_clear(["A2:C1000"])
+
+    # Copy today's Top 200
+    sheet_fixed.update(
+        "A2",
+        rows
+    )
+
+    print("NIFTY200_FIXED CREATED")
+
+else:
+
+    print("NIFTY200_FIXED already exists")
 
 print("MODULE 1 SUCCESS")
 
