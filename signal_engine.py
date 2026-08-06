@@ -86,6 +86,29 @@ for col in new_columns:
         raise Exception(f"Column Missing : {col}")
 
 print("Signal Columns Found")
+# ======================================
+# MACD VALUE PARSER
+# ======================================
+
+def get_value(text):
+
+    text = str(text).strip()
+
+    if text == "" or text == "NA":
+        return None
+
+    text = (
+        text.replace("↑", "")
+            .replace("↓", "")
+            .replace("+", "")
+    )
+
+    try:
+        return float(text)
+    except:
+        return None
+
+print("MACD Parser Loaded")
 
 # ======================================
 # TEMP TEST SIGNAL
