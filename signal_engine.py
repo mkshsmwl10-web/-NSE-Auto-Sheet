@@ -50,6 +50,7 @@ if len(data) == 0:
     raise Exception("MACD200 Sheet is Empty")
 
 print("GOOGLE SHEET CONNECTED SUCCESSFULLY")
+
 # ======================================
 # CREATE DATAFRAME
 # ======================================
@@ -64,7 +65,12 @@ required_columns = [
 ]
 
 for col in required_columns:
-    # ======================================
+    if col not in df.columns:
+        raise Exception(f"Column Missing : {col}")
+
+print("All Required Columns Found")
+
+# ======================================
 # CHECK SIGNAL COLUMNS
 # ======================================
 
@@ -80,13 +86,14 @@ for col in new_columns:
         raise Exception(f"Column Missing : {col}")
 
 print("Signal Columns Found")
+
 # ======================================
 # TEMP TEST SIGNAL
 # ======================================
 
 output = []
 
-for row in df.itertuples():
+for _ in df.itertuples():
 
     output.append([
         "TEST",
@@ -101,7 +108,4 @@ sheet.update(
 )
 
 print("Signal Columns Updated")
-    if col not in df.columns:
-        raise Exception(f"Column Missing : {col}")
-
-print("All Required Columns Found")
+print("SIGNAL ENGINE COMPLETED SUCCESSFULLY")
