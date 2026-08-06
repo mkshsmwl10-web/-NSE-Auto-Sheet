@@ -224,6 +224,7 @@ for _, row in df.iterrows():
     signal = "WAIT"
 
     # Weekly Turn Score
+
    if weekly == "TURN UP":
     score += 70
 
