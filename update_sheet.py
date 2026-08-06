@@ -571,6 +571,23 @@ for symbol in symbols:
     ])
 
 print("MODULE 4 PART 3B LOADED")
+# =====================================================
+# MODULE 4 - PART 3C
+# UPDATE MACD200 SHEET
+# =====================================================
+
+if len(macd200_output) != 200:
+
+    print(f"WARNING: Only {len(macd200_output)} Symbols Processed")
+
+sheet_macd200.update(
+    range_name="B2:J201",
+    values=macd200_output
+)
+
+print("MACD200 UPDATED SUCCESSFULLY")
+
+print("ALL MODULES COMPLETED")
 
 print("MODULE 1 SUCCESS")
 
