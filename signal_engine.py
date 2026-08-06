@@ -129,6 +129,21 @@ def weekly_turn(w2, w1, w0):
     return "FLAT"
 
 print("Weekly Turn Detector Loaded")
+# ======================================
+# DAILY CONFIRMATION
+# ======================================
+
+def daily_confirm(d0):
+
+    if d0 is None:
+        return "NO"
+
+    if d0 > 0:
+        return "YES"
+
+    return "NO"
+
+print("Daily Confirmation Loaded")
 
 # ======================================
 # TEMP TEST SIGNAL
