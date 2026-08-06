@@ -110,7 +110,7 @@ def get_value(text):
 
 print("MACD Parser Loaded")
 # ======================================
-# WEEKLY TURN DETECTOR
+# WEEKLY FRESH TURN DETECTOR
 # ======================================
 
 def weekly_turn(w2, w1, w0):
@@ -118,17 +118,25 @@ def weekly_turn(w2, w1, w0):
     if None in [w2, w1, w0]:
         return "NA"
 
-    # Histogram rising
-    if w2 < w1 < w0:
+    # Fresh Turn Up
+    # Histogram pehle gir raha tha, ab mud gaya
+    if w2 > w1 and w0 > w1:
         return "TURN UP"
 
-    # Histogram falling
-    if w2 > w1 > w0:
+    # Fresh Turn Down
+    # Histogram pehle badh raha tha, ab neeche mud gaya
+    if w2 < w1 and w0 < w1:
         return "TURN DOWN"
 
-    return "FLAT"
+    # Already Rising
+    if w2 < w1 < w0:
+        return "RISING"
 
-print("Weekly Turn Detector Loaded")
+    # Already Falling
+    if w2 > w1 > w0:
+        return "FALLING"
+
+    return "FLAT"
 # ======================================
 # DAILY CONFIRMATION
 # ======================================
