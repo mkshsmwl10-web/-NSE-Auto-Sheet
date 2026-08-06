@@ -169,6 +169,16 @@ print("Daily Cross Detector Loaded")
 output = []
 
 for _, row in df.iterrows():
+    print(
+    row["Symbol"],
+    "W:",
+    row["W-2"],
+    row["W-1"],
+    row["W0"],
+    "D:",
+    row["D-1"],
+    row["D0"]
+)
 
     w2 = get_value(row["W-2"])
     w1 = get_value(row["W-1"])
