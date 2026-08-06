@@ -64,6 +64,22 @@ required_columns = [
 ]
 
 for col in required_columns:
+    # ======================================
+# CHECK SIGNAL COLUMNS
+# ======================================
+
+new_columns = [
+    "Weekly_Turn",
+    "Daily_Cross",
+    "Signal",
+    "Score"
+]
+
+for col in new_columns:
+    if col not in df.columns:
+        raise Exception(f"Column Missing : {col}")
+
+print("Signal Columns Found")
     if col not in df.columns:
         raise Exception(f"Column Missing : {col}")
 
