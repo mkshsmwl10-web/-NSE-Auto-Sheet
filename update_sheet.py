@@ -411,6 +411,71 @@ def hist_arrow(current_hist, previous_hist):
 
 
 print("MODULE 4 PART 2 LOADED")
+# =====================================================
+# MODULE 4 - PART 3A
+# DAILY MACD
+# =====================================================
+
+symbols = sheet_macd200.col_values(1)[1:]
+
+macd200_output = []
+
+for symbol in symbols:
+
+    df = history_df[
+        history_df["Symbol"] == symbol
+    ].copy()
+
+    if len(df) < 35:
+
+        macd200_output.append([
+            "NA","NA","NA",
+            "NA","NA","NA",
+            "NA","NA","NA"
+        ])
+
+        continue
+
+    daily = calculate_macd(df)
+
+    hist = daily["HIST"].tolist()
+
+    D0 = hist_arrow(
+        hist[-1],
+        hist[-2]
+    )
+
+    D1 = hist_arrow(
+        hist[-2],
+        hist[-3]
+    )
+
+    D2 = hist_arrow(
+        hist[-3],
+        hist[-4]
+    )
+
+    # Weekly / Monthly next Part
+    W0 = W1 = W2 = "NA"
+    M0 = M1 = M2 = "NA"
+
+    macd200_output.append([
+
+        M0,
+        M1,
+        M2,
+
+        W0,
+        W1,
+        W2,
+
+        D0,
+        D1,
+        D2
+
+    ])
+
+print("MODULE 4 PART 3A LOADED")
 
 print("MODULE 1 SUCCESS")
 
