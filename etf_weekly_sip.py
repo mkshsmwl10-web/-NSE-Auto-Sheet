@@ -14,13 +14,31 @@ client = gspread.authorize(creds)
 SPREADSHEET_ID="13Jy8xJB9l6SQ124aEIAF3wFJRvJIUXX6jOH61rFb3zY"
 sheet=client.open_by_key(SPREADSHEET_ID).worksheet("sheet2")
 
-symbols=[s for s in sheet.col_values(1)[1:] if s.strip()]
+symbols = []
+
+for s in sheet.col_values(1)[1:]:
+
+    s = str(s).strip()
+
+    if (
+        s == ""
+        or s.startswith("#")
+        or s == "NA"
+        or s == "N/A"
+        or s == "#NUM!"
+        or s == "#N/A"
+    ):
+        continue
+
+    symbols.append(s)
 print("ETF SCRIPT STARTED", len(symbols))
 
 header=[["ETF","Weekly Close","20W SMA","Difference %","Signal"]]
 rows=[]
 
 for s in symbols:
+    if "#" in s:
+    continue
     ticker=s.replace("NSE:","")+".NS"
     print("Processing",ticker)
     try:
