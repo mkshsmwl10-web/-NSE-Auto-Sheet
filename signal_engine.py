@@ -181,7 +181,6 @@ print("Daily Signal Engine Loaded")
 
 print("Daily Cross Detector Loaded")
 
-
 # ======================================
 # REAL SIGNAL ENGINE
 # ======================================
@@ -189,16 +188,17 @@ print("Daily Cross Detector Loaded")
 output = []
 
 for _, row in df.iterrows():
+
     print(
-    row["Symbol"],
-    "W:",
-    row["W-2"],
-    row["W-1"],
-    row["W0"],
-    "D:",
-    row["D-1"],
-    row["D0"]
-)
+        row["Symbol"],
+        "W:",
+        row["W-2"],
+        row["W-1"],
+        row["W0"],
+        "D:",
+        row["D-1"],
+        row["D0"]
+    )
 
     w2 = get_value(row["W-2"])
     w1 = get_value(row["W-1"])
@@ -207,46 +207,50 @@ for _, row in df.iterrows():
     d1 = get_value(row["D-1"])
     d0 = get_value(row["D0"])
 
-
     weekly = weekly_turn(w2, w1, w0)
 
-   daily_positive_signal = daily_positive(d0)
-
-daily_cross_signal = daily_cross(d1, d0)
+    daily_positive_signal = daily_positive(d0)
+    daily_cross_signal = daily_cross(d1, d0)
 
     score = 0
-signal = "WAIT"
-
-# Weekly Turn
-if weekly == "TURN UP":
-    score += 60
-
-# Daily Positive
-if daily_positive_signal == "YES":
-    score += 40
-
-# Final Signal
-if score == 100:
-    signal = "BUY"
-
-elif score >= 60:
-    signal = "WATCH"
-
-else:
     signal = "WAIT"
 
+    # Weekly Turn Score
+    if weekly == "TURN UP":
+        score += 60
 
-   output.append([
-    weekly,
-    daily_positive_signal,
-    signal,
-    score
-])
+    # Daily Positive Score
+    if daily_positive_signal == "YES":
+        score += 40
+
+    # Bonus for Fresh Daily Cross
+    if daily_cross_signal == "YES":
+        score += 10
+
+    # Maximum Score = 100
+    if score > 100:
+        score = 100
+
+    # Final Signal
+    if score >= 100:
+        signal = "BUY"
+
+    elif score >= 60:
+        signal = "WATCH"
+
+    else:
+        signal = "WAIT"
+
+    output.append([
+        weekly,
+        daily_positive_signal,
+        signal,
+        score
+    ])
 
 sheet.update(
     range_name="K2:N201",
     values=output
 )
-
 
 print("UPGRADED SIGNAL ENGINE COMPLETED")
