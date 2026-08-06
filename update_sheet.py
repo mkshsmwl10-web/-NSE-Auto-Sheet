@@ -279,6 +279,61 @@ for _, row in bhavcopy.iterrows():
     today_close[symbol] = close
 
 print(f"Today's Close Dictionary : {len(today_close)} Symbols")
+# ======================================
+# MODULE 3 - PART 2
+# APPEND TODAY DATA TO MACD_HISTORY
+# ======================================
+
+today_db = datetime.now().strftime("%Y-%m-%d")
+
+# Read existing history
+history_data = sheet_history.get_all_values()
+
+# Prevent duplicate append
+already_exists = False
+
+if len(history_data) > 1:
+
+    for row in history_data[1:]:
+
+        if len(row) >= 2 and row[0] == today_db:
+
+            already_exists = True
+            break
+
+if already_exists:
+
+    print(f"{today_db} already exists in MACD_HISTORY")
+
+else:
+
+    fixed_data = sheet_fixed.get_all_values()
+
+    history_rows = []
+
+    for row in fixed_data[1:]:
+
+        if len(row) == 0:
+            continue
+
+        symbol = row[0].strip()
+
+        if symbol in today_close:
+
+            history_rows.append([
+                today_db,
+                symbol,
+                today_close[symbol]
+            ])
+
+    if history_rows:
+
+        sheet_history.append_rows(
+            history_rows,
+            value_input_option="RAW"
+        )
+
+        print(f"Added {len(history_rows)} rows to MACD_HISTORY")
 
 print("MODULE 1 SUCCESS")
 
