@@ -150,13 +150,13 @@ print("Daily Confirmation Loaded")
 
 output = []
 
-for row in df.itertuples():
+for _, row in df.iterrows():
 
-    w2 = get_value(row._6)   # W-2
-    w1 = get_value(row._5)   # W-1
-    w0 = get_value(row._4)   # W0
+    w2 = get_value(row["W-2"])
+    w1 = get_value(row["W-1"])
+    w0 = get_value(row["W0"])
 
-    d0 = get_value(row._7)   # D0
+    d0 = get_value(row["D0"])
 
     weekly = weekly_turn(w2, w1, w0)
     daily = daily_confirm(d0)
@@ -165,17 +165,14 @@ for row in df.itertuples():
     score = 0
 
     if weekly == "TURN UP":
-        score += 60
+        score = 60
         if daily == "YES":
             signal = "BUY"
-            score += 40
+            score = 100
 
     elif weekly == "TURN DOWN":
         signal = "SELL"
         score = 0
-
-    else:
-        signal = "WAIT"
 
     output.append([
         weekly,
