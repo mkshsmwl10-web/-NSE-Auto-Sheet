@@ -145,6 +145,24 @@ def daily_confirm(d0):
 
 print("Daily Confirmation Loaded")
 # ======================================
+# DAILY MACD CROSS DETECTOR
+# ======================================
+
+def daily_cross(d1, d0):
+
+    if d1 is None or d0 is None:
+        return "NO"
+
+    if d1 <= 0 and d0 > 0:
+        return "YES"
+
+    return "NO"
+
+
+print("Daily Cross Detector Loaded")
+
+
+# ======================================
 # REAL SIGNAL ENGINE
 # ======================================
 
@@ -156,23 +174,40 @@ for _, row in df.iterrows():
     w1 = get_value(row["W-1"])
     w0 = get_value(row["W0"])
 
+    d1 = get_value(row["D-1"])
     d0 = get_value(row["D0"])
 
+
     weekly = weekly_turn(w2, w1, w0)
-    daily = daily_confirm(d0)
 
-    signal = "WAIT"
+    daily = daily_cross(d1, d0)
+
+
     score = 0
+    signal = "WAIT"
 
+
+    # Weekly confirmation
     if weekly == "TURN UP":
-        score = 60
-        if daily == "YES":
-            signal = "BUY"
-            score = 100
+        score += 2
 
-    elif weekly == "TURN DOWN":
-        signal = "SELL"
-        score = 0
+
+    # Daily confirmation
+    if daily == "YES":
+        score += 2
+
+
+    # Final Decision
+
+    if score >= 4:
+        signal = "STRONG BUY"
+
+    elif score >= 2:
+        signal = "WATCH"
+
+    else:
+        signal = "WAIT"
+
 
     output.append([
         weekly,
@@ -181,9 +216,11 @@ for _, row in df.iterrows():
         score
     ])
 
+
 sheet.update(
     range_name="K2:N201",
     values=output
 )
 
-print("REAL SIGNAL ENGINE COMPLETED")
+
+print("UPGRADED SIGNAL ENGINE COMPLETED")
