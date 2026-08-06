@@ -369,6 +369,48 @@ history_df = history_df.sort_values(
 print(
     f"MACD_HISTORY Loaded : {len(history_df)} Rows"
 )
+# =====================================================
+# MODULE 4 - PART 2
+# MACD FUNCTIONS
+# =====================================================
+
+def calculate_macd(df):
+
+    df = df.copy()
+
+    df["EMA12"] = df["Close"].ewm(
+        span=12,
+        adjust=False
+    ).mean()
+
+    df["EMA26"] = df["Close"].ewm(
+        span=26,
+        adjust=False
+    ).mean()
+
+    df["MACD"] = df["EMA12"] - df["EMA26"]
+
+    df["SIGNAL"] = df["MACD"].ewm(
+        span=9,
+        adjust=False
+    ).mean()
+
+    df["HIST"] = df["MACD"] - df["SIGNAL"]
+
+    return df
+
+
+def hist_arrow(current_hist, previous_hist):
+
+    if pd.isna(current_hist):
+        return "NA"
+
+    arrow = "↑" if current_hist >= previous_hist else "↓"
+
+    return f"{current_hist:+.2f}{arrow}"
+
+
+print("MODULE 4 PART 2 LOADED")
 
 print("MODULE 1 SUCCESS")
 
