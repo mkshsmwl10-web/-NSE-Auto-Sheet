@@ -50,3 +50,21 @@ if len(data) == 0:
     raise Exception("MACD200 Sheet is Empty")
 
 print("GOOGLE SHEET CONNECTED SUCCESSFULLY")
+# ======================================
+# CREATE DATAFRAME
+# ======================================
+
+df = pd.DataFrame(data)
+
+required_columns = [
+    "Symbol",
+    "M0","M-1","M-2",
+    "W0","W-1","W-2",
+    "D0","D-1","D-2"
+]
+
+for col in required_columns:
+    if col not in df.columns:
+        raise Exception(f"Column Missing : {col}")
+
+print("All Required Columns Found")
