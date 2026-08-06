@@ -334,6 +334,41 @@ else:
         )
 
         print(f"Added {len(history_rows)} rows to MACD_HISTORY")
+        # =====================================================
+# MODULE 4 - PART 1
+# READ MACD_HISTORY
+# =====================================================
+
+history_data = sheet_history.get_all_values()
+
+if len(history_data) <= 1:
+    raise Exception("MACD_HISTORY Empty")
+
+history_df = pd.DataFrame(
+    history_data[1:],
+    columns=history_data[0]
+)
+
+history_df["Date"] = pd.to_datetime(
+    history_df["Date"]
+)
+
+history_df["Close"] = pd.to_numeric(
+    history_df["Close"],
+    errors="coerce"
+)
+
+history_df = history_df.dropna(
+    subset=["Close"]
+)
+
+history_df = history_df.sort_values(
+    ["Symbol", "Date"]
+)
+
+print(
+    f"MACD_HISTORY Loaded : {len(history_df)} Rows"
+)
 
 print("MODULE 1 SUCCESS")
 
