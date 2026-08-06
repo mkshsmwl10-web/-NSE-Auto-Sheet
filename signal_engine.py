@@ -109,6 +109,26 @@ def get_value(text):
         return None
 
 print("MACD Parser Loaded")
+# ======================================
+# WEEKLY TURN DETECTOR
+# ======================================
+
+def weekly_turn(w2, w1, w0):
+
+    if None in [w2, w1, w0]:
+        return "NA"
+
+    # Histogram rising
+    if w2 < w1 < w0:
+        return "TURN UP"
+
+    # Histogram falling
+    if w2 > w1 > w0:
+        return "TURN DOWN"
+
+    return "FLAT"
+
+print("Weekly Turn Detector Loaded")
 
 # ======================================
 # TEMP TEST SIGNAL
