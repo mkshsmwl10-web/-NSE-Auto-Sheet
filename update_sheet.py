@@ -263,6 +263,22 @@ if len(fixed_data) <= 1:
 else:
 
     print("NIFTY200_FIXED already exists")
+    # ======================================
+# MODULE 3 - PART 1
+# CREATE TODAY CLOSE DICTIONARY
+# ======================================
+
+today_close = {}
+
+for _, row in bhavcopy.iterrows():
+
+    symbol = str(row[symbol_col]).strip()
+
+    close = float(row[close_col])
+
+    today_close[symbol] = close
+
+print(f"Today's Close Dictionary : {len(today_close)} Symbols")
 
 print("MODULE 1 SUCCESS")
 
