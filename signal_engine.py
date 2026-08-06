@@ -144,20 +144,44 @@ def daily_confirm(d0):
     return "NO"
 
 print("Daily Confirmation Loaded")
-
 # ======================================
-# TEMP TEST SIGNAL
+# REAL SIGNAL ENGINE
 # ======================================
 
 output = []
 
-for _ in df.itertuples():
+for row in df.itertuples():
+
+    w2 = get_value(row._6)   # W-2
+    w1 = get_value(row._5)   # W-1
+    w0 = get_value(row._4)   # W0
+
+    d0 = get_value(row._7)   # D0
+
+    weekly = weekly_turn(w2, w1, w0)
+    daily = daily_confirm(d0)
+
+    signal = "WAIT"
+    score = 0
+
+    if weekly == "TURN UP":
+        score += 60
+        if daily == "YES":
+            signal = "BUY"
+            score += 40
+
+    elif weekly == "TURN DOWN":
+        signal = "SELL"
+        score = 0
+
+    else:
+        signal = "WAIT"
 
     output.append([
-        "TEST",
-        "YES",
-        "BUY",
-        100
+        weekly,
+        daily,
+        signal,
+        score
     ])
 
 sheet.update(
@@ -165,5 +189,4 @@ sheet.update(
     values=output
 )
 
-print("Signal Columns Updated")
-print("SIGNAL ENGINE COMPLETED SUCCESSFULLY")
+print("REAL SIGNAL ENGINE COMPLETED")
