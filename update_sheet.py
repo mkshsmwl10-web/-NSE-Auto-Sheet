@@ -476,6 +476,101 @@ for symbol in symbols:
     ])
 
 print("MODULE 4 PART 3A LOADED")
+# =====================================================
+# MODULE 4 - PART 3B
+# WEEKLY + MONTHLY MACD
+# =====================================================
+
+macd200_output = []
+
+for symbol in symbols:
+
+    df = history_df[
+        history_df["Symbol"] == symbol
+    ].copy()
+
+    if len(df) < 35:
+
+        macd200_output.append([
+            "NA","NA","NA",
+            "NA","NA","NA",
+            "NA","NA","NA"
+        ])
+        continue
+
+    # ----------------------
+    # DAILY
+    # ----------------------
+
+    daily = calculate_macd(df)
+
+    d_hist = daily["HIST"].tolist()
+
+    D0 = hist_arrow(d_hist[-1], d_hist[-2])
+    D1 = hist_arrow(d_hist[-2], d_hist[-3])
+    D2 = hist_arrow(d_hist[-3], d_hist[-4])
+
+    # ----------------------
+    # WEEKLY
+    # ----------------------
+
+    weekly = (
+        df
+        .set_index("Date")
+        .resample("W-FRI")
+        .last()
+        .dropna()
+        .reset_index()
+    )
+
+    if len(weekly) >= 35:
+
+        weekly = calculate_macd(weekly)
+
+        w_hist = weekly["HIST"].tolist()
+
+        W0 = hist_arrow(w_hist[-1], w_hist[-2])
+        W1 = hist_arrow(w_hist[-2], w_hist[-3])
+        W2 = hist_arrow(w_hist[-3], w_hist[-4])
+
+    else:
+
+        W0 = W1 = W2 = "NA"
+
+    # ----------------------
+    # MONTHLY
+    # ----------------------
+
+    monthly = (
+        df
+        .set_index("Date")
+        .resample("ME")
+        .last()
+        .dropna()
+        .reset_index()
+    )
+
+    if len(monthly) >= 35:
+
+        monthly = calculate_macd(monthly)
+
+        m_hist = monthly["HIST"].tolist()
+
+        M0 = hist_arrow(m_hist[-1], m_hist[-2])
+        M1 = hist_arrow(m_hist[-2], m_hist[-3])
+        M2 = hist_arrow(m_hist[-3], m_hist[-4])
+
+    else:
+
+        M0 = M1 = M2 = "NA"
+
+    macd200_output.append([
+        M0, M1, M2,
+        W0, W1, W2,
+        D0, D1, D2
+    ])
+
+print("MODULE 4 PART 3B LOADED")
 
 print("MODULE 1 SUCCESS")
 
