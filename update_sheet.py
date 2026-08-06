@@ -38,21 +38,34 @@ client = gspread.authorize(creds)
 
 spreadsheet_id = "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E"
 
-worksheet = client.open_by_key(
+fixed_sheet = client.open_by_key(
     spreadsheet_id
-).worksheet("NIFTY200")
-
+).fixed_sheet("NIFTY200")
+fixed_sheet = client.open_by_key(
+    spreadsheet_id
+).fixed_sheet("NIFTY200_FIXED")
 macd_sheet = client.open_by_key(
     spreadsheet_id
-).worksheet("MACD_HISTORY")
+).fixed_sheet("MACD_HISTORY")
 macd200_sheet = client.open_by_key(
     spreadsheet_id
-).worksheet("MACD200")
+).fixed_sheet("MACD200")
 # =========================
 # 3. NSE Bhavcopy Fetcher
 # =========================
 
 def fetch_bhavcopy_for_date(date_obj):
+    # =========================
+# Today's Bhavcopy Dictionary
+# =========================
+
+today_data = {}
+
+for row in data_to_insert:
+    symbol = str(row[0]).strip()
+    close = row[2]
+
+    today_data[symbol] = close
 
     date_str = date_obj.strftime("%Y%m%d")
 
@@ -236,7 +249,7 @@ if data_to_insert:
 
         history_rows = []
 
-        for row in data_to_insert:
+        for row in fixed_sheet.get_all_values()
 
             history_rows.append([
                 today_db,
@@ -261,7 +274,7 @@ if data_to_insert:
             f"Updated: {ist_now} IST"
         )
 
-        worksheet.update(
+       fixed_sheet.update(
             'K2',
             [[status_msg]]
         )
@@ -535,3 +548,14 @@ macd200_sheet.update(
 )
 
 print("MACD200 UPDATED SUCCESSFULLY")
+# =========================
+# Read Fixed NIFTY200 List
+# =========================
+
+fixed_rows = fixed_sheet.get_all_values()
+
+fixed_symbols = [
+    row[0].strip()
+    for row in fixed_rows[1:]
+    if row and row[0].strip()
+]
