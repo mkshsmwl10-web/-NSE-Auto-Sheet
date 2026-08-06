@@ -80,6 +80,27 @@ for col in new_columns:
         raise Exception(f"Column Missing : {col}")
 
 print("Signal Columns Found")
+# ======================================
+# TEMP TEST SIGNAL
+# ======================================
+
+output = []
+
+for row in df.itertuples():
+
+    output.append([
+        "TEST",
+        "YES",
+        "BUY",
+        100
+    ])
+
+sheet.update(
+    range_name="K2:N201",
+    values=output
+)
+
+print("Signal Columns Updated")
     if col not in df.columns:
         raise Exception(f"Column Missing : {col}")
 
