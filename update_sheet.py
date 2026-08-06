@@ -59,7 +59,11 @@ def fetch_bhavcopy_for_date(date_obj):
 # Today's Bhavcopy Dictionary
 # =========================
 
-today_data = {}
+def fetch_bhavcopy_for_date(date_obj):
+
+    date_str = date_obj.strftime("%Y%m%d")
+
+    url = f"https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{date_str}_F_0000.csv.zip"
 
 for row in data_to_insert:
     symbol = str(row[0]).strip()
@@ -219,7 +223,13 @@ for i in range(7):
 if data_to_insert:
 
     try:
+today_data = {}
 
+for row in data_to_insert:
+    symbol = str(row[0]).strip()
+    close = row[2]
+
+    today_data[symbol] = close
         worksheet.batch_clear(['A2:C1000'])
 
         worksheet.update(
