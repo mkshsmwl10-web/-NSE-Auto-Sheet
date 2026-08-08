@@ -1,3 +1,4 @@
+```python
 import os, json, math
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -21,17 +22,25 @@ client = gspread.authorize(creds)
 
 SPREADSHEET_ID = "13Jy8xJB9l6SQ124aEIAF3wFJRvJIUXX6jOH61rFb3zY"
 
+# -------------------------
+# SHEET0
+# -------------------------
+
 sheet = client.open_by_key(
     SPREADSHEET_ID
-).worksheet("sheet2")
+).worksheet("Sheet0")
 
 # -------------------------
 # READ ETF SYMBOLS
+# A3 COLUMN SE START
 # -------------------------
 
 symbols = []
 
-for s in sheet.col_values(1)[1:]:
+all_values = sheet.col_values(1)
+
+# A3 se data read hoga
+for s in all_values[2:]:
 
     s = str(s).strip()
 
@@ -44,13 +53,19 @@ for s in sheet.col_values(1)[1:]:
 
     symbols.append(s)
 
-print("ETF SCRIPT STARTED", len(symbols))
+print("ETF SCRIPT STARTED - SHEET0:", len(symbols))
 
 # -------------------------
 # DOWNLOAD DATA
 # -------------------------
 
-header = [["ETF", "Weekly Close", "20W SMA", "Difference %", "Signal"]]
+header = [[
+    "ETF",
+    "Weekly Close",
+    "20W SMA",
+    "Difference %",
+    "Signal"
+]]
 
 rows = []
 
@@ -107,13 +122,32 @@ for s in symbols:
 
         print("ERROR:", s, e)
 
-        rows.append([s, "", "", "", "ERROR"])
+        rows.append([
+            s,
+            "",
+            "",
+            "",
+            "ERROR"
+        ])
 
 # -------------------------
-# UPDATE SHEET
+# UPDATE SHEET0
+# J3 SE RESULT START
 # -------------------------
 
-sheet.update(values=header, range_name="R1")
-sheet.update(values=rows, range_name="R2")
+# Header J3:N3
+sheet.update(
+    values=header,
+    range_name="J3:N3"
+)
 
-print("ETF WEEKLY SIP SHEET UPDATED")
+# Data J4:N...
+if rows:
+    sheet.update(
+        values=rows,
+        range_name=f"J4:N{3 + len(rows)}"
+    )
+
+print("ETF WEEKLY SIP - SHEET0 UPDATED")
+print("ETF COUNT:", len(rows))
+```
