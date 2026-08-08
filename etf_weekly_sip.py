@@ -1,4 +1,3 @@
-```python
 import os, json, math
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
@@ -150,4 +149,4 @@ if rows:
 
 print("ETF WEEKLY SIP - SHEET0 UPDATED")
 print("ETF COUNT:", len(rows))
-```
+
