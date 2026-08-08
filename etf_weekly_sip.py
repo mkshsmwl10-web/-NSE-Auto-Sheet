@@ -1,11 +1,14 @@
-import os, json, math
+import os
+import json
+import math
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import yfinance as yf
+import pandas as pd
 
-# -------------------------
+# =========================================================
 # GOOGLE LOGIN
-# -------------------------
+# =========================================================
 
 creds_json = os.environ["GCP_CREDENTIALS"]
 
@@ -25,10 +28,12 @@ sheet = client.open_by_key(
     SPREADSHEET_ID
 ).worksheet("Sheet0")
 
-# -------------------------
+print("GOOGLE SHEET CONNECTED")
+
+# =========================================================
 # READ ETF + STOCK SYMBOLS
 # A3 SE START
-# -------------------------
+# =========================================================
 
 symbols = []
 
@@ -48,77 +53,159 @@ for s in all_values[2:]:
     symbols.append(s)
 
 print("ETF + STOCK SYMBOLS LOADED:", len(symbols))
-# -------------------------
-# DOWNLOAD DATA
-# -------------------------
+
+# =========================================================
+# RESULT ROWS
+# =========================================================
 
 rows = []
 
+# =========================================================
+# PROCESS EACH STOCK / ETF
+# =========================================================
+
 for s in symbols:
 
-    if "#" in s:
-        continue
+    clean_symbol = s.replace("NSE:", "").strip()
+    ticker = clean_symbol + ".NS"
 
-    ticker = s.replace("NSE:", "") + ".NS"
-
-    print("Processing", ticker)
+    print("Processing:", ticker)
 
     try:
 
+        # -------------------------------------------------
+        # DOWNLOAD DAILY DATA
+        # Daily data is converted to Friday weekly data.
+        # This gives a much closer TradingView-style
+        # Weekly Close calculation.
+        # -------------------------------------------------
+
         df = yf.download(
             ticker,
-            period="30wk",
-            interval="1wk",
+            period="8mo",
+            interval="1d",
             progress=False,
             auto_adjust=False
         )
 
         if df.empty:
             rows.append([
-                s, "", "", "", "", "NO DATA"
+                s,
+                "",
+                "",
+                "",
+                "",
+                "NO DATA"
             ])
             continue
 
-        close_series = df["Close"].dropna()
+        # -------------------------------------------------
+        # GET CLOSE COLUMN
+        # -------------------------------------------------
 
-        if len(close_series) < 20:
+        close_data = df["Close"]
+
+        if isinstance(close_data, pd.DataFrame):
+            close_data = close_data.iloc[:, 0]
+
+        close_data = close_data.dropna()
+
+        if len(close_data) < 20:
             rows.append([
-                s, "", "", "", "", "NO DATA"
+                s,
+                "",
+                "",
+                "",
+                "",
+                "NO DATA"
             ])
             continue
 
-        close = float(close_series.iloc[-1])
+        # -------------------------------------------------
+        # CONVERT DAILY CLOSE TO FRIDAY WEEKLY CLOSE
+        # -------------------------------------------------
 
-        sma20 = float(
-            close_series.tail(20).mean()
+        weekly_close = close_data.resample("W-FRI").last().dropna()
+
+        if len(weekly_close) < 20:
+            rows.append([
+                s,
+                "",
+                "",
+                "",
+                "",
+                "NO DATA"
+            ])
+            continue
+
+        # -------------------------------------------------
+        # CURRENT WEEKLY CLOSE
+        # -------------------------------------------------
+
+        weekly_close_value = float(
+            weekly_close.iloc[-1]
         )
 
-        if math.isnan(close) or math.isnan(sma20):
+        # -------------------------------------------------
+        # 20 WEEK SMA
+        # -------------------------------------------------
+
+        sma20_series = weekly_close.rolling(
+            window=20,
+            min_periods=20
+        ).mean()
+
+        sma20_value = float(
+            sma20_series.iloc[-1]
+        )
+
+        # -------------------------------------------------
+        # SAFETY CHECK
+        # -------------------------------------------------
+
+        if (
+            math.isnan(weekly_close_value)
+            or math.isnan(sma20_value)
+            or sma20_value == 0
+        ):
             rows.append([
-                s, "", "", "", "", "NO DATA"
+                s,
+                "",
+                "",
+                "",
+                "",
+                "NO DATA"
             ])
             continue
 
-        # Difference %
-        diff = round(
-            (close - sma20) / sma20 * 100,
-            2
-        )
+        # -------------------------------------------------
+        # DIFFERENCE %
+        # -------------------------------------------------
 
-        # -------------------------
+        difference = (
+            (weekly_close_value - sma20_value)
+            / sma20_value
+        ) * 100
+
+        difference = round(difference, 2)
+
+        # -------------------------------------------------
         # ACTION
-        # -------------------------
+        #
+        # BELOW 20W SMA = SIP
+        # ABOVE 20W SMA = WAIT
+        # -------------------------------------------------
 
-        if diff < 0:
+        if difference < 0:
             action = "SIP"
         else:
             action = "WAIT"
 
         rows.append([
             s,
-            round(close, 2),
-            round(sma20, 2),
-            diff,
+            round(weekly_close_value, 2),
+            round(sma20_value, 2),
+            difference,
             "",
             action
         ])
@@ -136,42 +223,58 @@ for s in symbols:
             "ERROR"
         ])
 
-# -------------------------
+# =========================================================
 # RANK ONLY NEGATIVE DIFFERENCE
+#
 # MOST NEGATIVE = RANK 1
-# -------------------------
+# =========================================================
 
 negative_rows = []
 
-for i, row in enumerate(rows):
+for index, row in enumerate(rows):
 
-    if isinstance(row[3], (int, float)) and row[3] < 0:
+    difference = row[3]
+
+    if (
+        isinstance(difference, (int, float))
+        and difference < 0
+    ):
         negative_rows.append(
-            (i, row[3])
+            (index, difference)
         )
 
-# Most negative first
+# ---------------------------------------------------------
+# Example:
+#
+# -25% = Rank 1
+# -18% = Rank 2
+# -12% = Rank 3
+# -5%  = Rank 4
+# +2%  = No Rank
+# ---------------------------------------------------------
+
 negative_rows.sort(
     key=lambda x: x[1]
 )
 
-# -------------------------
+# =========================================================
 # ASSIGN RANK
-# -------------------------
+# =========================================================
 
-for rank, (index, diff) in enumerate(
+for rank, (index, difference) in enumerate(
     negative_rows,
     start=1
 ):
 
     rows[index][4] = rank
 
-# -------------------------
-# HEADER
-# -------------------------
+# =========================================================
+# MAIN HEADER
+# J3:O3
+# =========================================================
 
 header = [[
-    "ETF",
+    "ETF / STOCK",
     "Weekly Close",
     "20W SMA",
     "Difference %",
@@ -179,20 +282,22 @@ header = [[
     "Action"
 ]]
 
-# -------------------------
-# UPDATE SHEET0
-# J3:O3
-# -------------------------
-
 sheet.update(
     values=header,
     range_name="J3:O3"
 )
 
-# -------------------------
-# UPDATE DATA
-# J4:O...
-# -------------------------
+# =========================================================
+# CLEAR OLD MAIN DATA
+# =========================================================
+
+sheet.batch_clear([
+    "J4:O1000"
+])
+
+# =========================================================
+# WRITE MAIN DATA
+# =========================================================
 
 if rows:
 
@@ -201,39 +306,45 @@ if rows:
         range_name=f"J4:O{3 + len(rows)}"
     )
 
-print("ETF WEEKLY SIP - SHEET0 UPDATED")
-print("ETF COUNT:", len(rows))
-print("RANK = NEGATIVE DIFFERENCE ONLY")
-print("MOST NEGATIVE = RANK 1")
-print("ACTION = NEGATIVE DIFFERENCE -> SIP")
-print("ACTION = POSITIVE DIFFERENCE -> WAIT")
-# -------------------------
-# SIP ETF LIST - P3
-# RANK WISE
-# -------------------------
+# =========================================================
+# SIP LIST
+# P3:R3
+# =========================================================
 
 sip_list = []
 
 for row in rows:
 
+    rank = row[4]
+    action = row[5]
+
     if (
-        isinstance(row[4], int)
-        and row[4] > 0
-        and row[5] == "SIP"
+        isinstance(rank, int)
+        and rank > 0
+        and action == "SIP"
     ):
+
         sip_list.append([
-            row[4],   # Rank
-            row[0],   # ETF
-            row[3]    # Difference %
+            rank,
+            row[0],
+            row[3]
         ])
 
-# Rank 1, 2, 3, 4... order
-sip_list.sort(key=lambda x: x[0])
+# =========================================================
+# SORT SIP LIST BY RANK
+# =========================================================
 
-# Header P3:R3
+sip_list.sort(
+    key=lambda x: x[0]
+)
+
+# =========================================================
+# SIP HEADER
+# =========================================================
+
 sip_header = [[
     "Rank",
-    "ETF",
+    "ETF / STOCK",
     "Difference %"
 ]]
 
@@ -242,12 +353,18 @@ sheet.update(
     range_name="P3:R3"
 )
 
-# Clear old SIP list area
+# =========================================================
+# CLEAR OLD SIP LIST
+# =========================================================
+
 sheet.batch_clear([
-    "P4:R500"
+    "P4:R1000"
 ])
 
-# Write current SIP list
+# =========================================================
+# WRITE SIP LIST
+# =========================================================
+
 if sip_list:
 
     sheet.update(
@@ -255,4 +372,17 @@ if sip_list:
         range_name=f"P4:R{3 + len(sip_list)}"
     )
 
-print("SIP ETF RANK LIST UPDATED - P3")
+# =========================================================
+# FINAL STATUS
+# =========================================================
+
+print("----------------------------------------")
+print("ETF + STOCK WEEKLY SIP UPDATED")
+print("TOTAL SYMBOLS:", len(rows))
+print("NEGATIVE / SIP SYMBOLS:", len(sip_list))
+print("RANK 1 = MOST NEGATIVE DIFFERENCE")
+print("NEGATIVE DIFFERENCE = SIP")
+print("POSITIVE DIFFERENCE = WAIT")
+print("MAIN DATA = J:O")
+print("SIP RANK LIST = P:R")
+print("----------------------------------------")
