@@ -208,3 +208,52 @@ print("RANK = NEGATIVE DIFFERENCE ONLY")
 print("MOST NEGATIVE = RANK 1")
 print("ACTION = NEGATIVE DIFFERENCE -> SIP")
 print("ACTION = POSITIVE DIFFERENCE -> WAIT")
+# -------------------------
+# SIP ETF LIST - P3
+# RANK WISE
+# -------------------------
+
+sip_list = []
+
+for row in rows:
+
+    if (
+        isinstance(row[4], int)
+        and row[4] > 0
+        and row[5] == "SIP"
+    ):
+        sip_list.append([
+            row[4],   # Rank
+            row[0],   # ETF
+            row[3]    # Difference %
+        ])
+
+# Rank 1, 2, 3, 4... order
+sip_list.sort(key=lambda x: x[0])
+
+# Header P3:R3
+sip_header = [[
+    "Rank",
+    "ETF",
+    "Difference %"
+]]
+
+sheet.update(
+    values=sip_header,
+    range_name="P3:R3"
+)
+
+# Clear old SIP list area
+sheet.batch_clear([
+    "P4:R500"
+])
+
+# Write current SIP list
+if sip_list:
+
+    sheet.update(
+        values=sip_list,
+        range_name=f"P4:R{3 + len(sip_list)}"
+    )
+
+print("SIP ETF RANK LIST UPDATED - P3")
