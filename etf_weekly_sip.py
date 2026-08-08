@@ -107,11 +107,10 @@ for s in symbols:
         )
 
         # -------------------------
-        # SIP ACTION
-        # WEEKLY CLOSE BELOW 20W SMA
+        # ACTION
         # -------------------------
 
-        if close < sma20:
+        if diff < 0:
             action = "SIP"
         else:
             action = "WAIT"
@@ -139,22 +138,22 @@ for s in symbols:
         ])
 
 # -------------------------
-# RANK BY DIFFERENCE %
-# HIGHER DIFFERENCE = RANK 1
+# RANK ONLY NEGATIVE DIFFERENCE
+# MOST NEGATIVE = RANK 1
 # -------------------------
 
-valid_rows = []
+negative_rows = []
 
 for i, row in enumerate(rows):
 
-    if isinstance(row[3], (int, float)):
-        valid_rows.append(
+    if isinstance(row[3], (int, float)) and row[3] < 0:
+        negative_rows.append(
             (i, row[3])
         )
 
-valid_rows.sort(
-    key=lambda x: x[1],
-    reverse=True
+# Most negative first
+negative_rows.sort(
+    key=lambda x: x[1]
 )
 
 # -------------------------
@@ -162,7 +161,7 @@ valid_rows.sort(
 # -------------------------
 
 for rank, (index, diff) in enumerate(
-    valid_rows,
+    negative_rows,
     start=1
 ):
 
@@ -205,6 +204,7 @@ if rows:
 
 print("ETF WEEKLY SIP - SHEET0 UPDATED")
 print("ETF COUNT:", len(rows))
-print("RANK = HIGHER DIFFERENCE % FIRST")
-print("ACTION = WEEKLY CLOSE BELOW 20W SMA -> SIP")
-print("ACTION = WEEKLY CLOSE ABOVE 20W SMA -> WAIT")
+print("RANK = NEGATIVE DIFFERENCE ONLY")
+print("MOST NEGATIVE = RANK 1")
+print("ACTION = NEGATIVE DIFFERENCE -> SIP")
+print("ACTION = POSITIVE DIFFERENCE -> WAIT")
