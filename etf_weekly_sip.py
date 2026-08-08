@@ -3,10 +3,6 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import yfinance as yf
 
-# -------------------------
-# GOOGLE LOGIN
-# -------------------------
-
 creds_json = os.environ["GCP_CREDENTIALS"]
 
 creds = ServiceAccountCredentials.from_json_keyfile_dict(
@@ -21,24 +17,19 @@ client = gspread.authorize(creds)
 
 SPREADSHEET_ID = "13Jy8xJB9l6SQ124aEIAF3wFJRvJIUXX6jOH61rFb3zY"
 
-# -------------------------
-# SHEET0
-# -------------------------
-
 sheet = client.open_by_key(
     SPREADSHEET_ID
 ).worksheet("Sheet0")
 
 # -------------------------
 # READ ETF SYMBOLS
-# A3 COLUMN SE START
+# A3 SE START
 # -------------------------
 
 symbols = []
 
 all_values = sheet.col_values(1)
 
-# A3 se data read hoga
 for s in all_values[2:]:
 
     s = str(s).strip()
@@ -58,19 +49,10 @@ print("ETF SCRIPT STARTED - SHEET0:", len(symbols))
 # DOWNLOAD DATA
 # -------------------------
 
-header = [[
-    "ETF",
-    "Weekly Close",
-    "20W SMA",
-    "Difference %",
-    "Signal"
-]]
-
 rows = []
 
 for s in symbols:
 
-    # Skip bad symbols
     if "#" in s:
         continue
 
@@ -89,32 +71,34 @@ for s in symbols:
         )
 
         if df.empty:
-            rows.append([s, "", "", "", "NO DATA"])
+            rows.append([s, "", "", "", "", "NO DATA"])
             continue
 
         close_series = df["Close"].dropna()
 
         if len(close_series) < 20:
-            rows.append([s, "", "", "", "NO DATA"])
+            rows.append([s, "", "", "", "", "NO DATA"])
             continue
 
         close = float(close_series.iloc[-1])
         sma20 = float(close_series.tail(20).mean())
 
         if math.isnan(close) or math.isnan(sma20):
-            rows.append([s, "", "", "", "NO DATA"])
+            rows.append([s, "", "", "", "", "NO DATA"])
             continue
 
-        diff = round((close - sma20) / sma20 * 100, 2)
-
-        signal = "BUY" if close < sma20 else "WAIT"
+        diff = round(
+            (close - sma20) / sma20 * 100,
+            2
+        )
 
         rows.append([
             s,
             round(close, 2),
             round(sma20, 2),
             diff,
-            signal
+            "",
+            ""
         ])
 
     except Exception as e:
@@ -126,27 +110,78 @@ for s in symbols:
             "",
             "",
             "",
+            "",
             "ERROR"
         ])
 
 # -------------------------
-# UPDATE SHEET0
-# J3 SE RESULT START
+# RANK BY DIFFERENCE %
+# HIGHER DIFFERENCE = RANK 1
 # -------------------------
 
-# Header J3:N3
-sheet.update(
-    values=header,
-    range_name="J3:N3"
+valid_rows = []
+
+for i, row in enumerate(rows):
+
+    if isinstance(row[3], (int, float)):
+        valid_rows.append((i, row[3]))
+
+valid_rows.sort(
+    key=lambda x: x[1],
+    reverse=True
 )
 
-# Data J4:N...
+# -------------------------
+# ASSIGN RANK + ACTION
+# TOP 5 = SIP
+# -------------------------
+
+for rank, (index, diff) in enumerate(valid_rows, start=1):
+
+    rows[index][4] = rank
+
+    if rank <= 5:
+        rows[index][5] = "SIP"
+    else:
+        rows[index][5] = "WAIT"
+
+# -------------------------
+# HEADER
+# -------------------------
+
+header = [[
+    "ETF",
+    "Weekly Close",
+    "20W SMA",
+    "Difference %",
+    "Rank",
+    "Action"
+]]
+
+# -------------------------
+# UPDATE SHEET0
+# J3:O3
+# -------------------------
+
+sheet.update(
+    values=header,
+    range_name="J3:O3"
+)
+
+# -------------------------
+# UPDATE DATA
+# J4:O...
+# -------------------------
+
 if rows:
+
     sheet.update(
         values=rows,
-        range_name=f"J4:N{3 + len(rows)}"
+        range_name=f"J4:O{3 + len(rows)}"
     )
 
 print("ETF WEEKLY SIP - SHEET0 UPDATED")
 print("ETF COUNT:", len(rows))
+print("TOP 5 ETF = SIP")
+print("REST = WAIT")
 
