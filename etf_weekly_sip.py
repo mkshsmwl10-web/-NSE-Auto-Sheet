@@ -26,7 +26,7 @@ sheet = client.open_by_key(
 ).worksheet("Sheet0")
 
 # -------------------------
-# READ ETF SYMBOLS
+# READ ETF + STOCK SYMBOLS
 # A3 SE START
 # -------------------------
 
@@ -47,8 +47,7 @@ for s in all_values[2:]:
 
     symbols.append(s)
 
-print("ETF SCRIPT STARTED - SHEET0:", len(symbols))
-
+print("ETF + STOCK SYMBOLS LOADED:", len(symbols))
 # -------------------------
 # DOWNLOAD DATA
 # -------------------------
