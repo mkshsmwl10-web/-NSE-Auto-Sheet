@@ -691,6 +691,233 @@ for _, row in top200.iterrows():
         signal
 
     ])
+    # =========================================================
+# FINAL LIST
+# HIGH TURNOVER + RED CANDLE + STRONG GAP UP + GAIN HOLD
+# =========================================================
+
+FINAL_SHEET_NAME = "Final List"
+
+# ---------------------------------------------------------
+# CREATE / GET FINAL LIST SHEET
+# ---------------------------------------------------------
+
+try:
+    sheet_final = client.open_by_key(
+        SPREADSHEET_ID
+    ).worksheet(FINAL_SHEET_NAME)
+
+except gspread.WorksheetNotFound:
+
+    sheet_final = client.open_by_key(
+        SPREADSHEET_ID
+    ).add_worksheet(
+        title=FINAL_SHEET_NAME,
+        rows=500,
+        cols=15
+    )
+
+# ---------------------------------------------------------
+# FINAL LIST HEADER
+# ---------------------------------------------------------
+
+final_headers = [
+
+    "Rank",
+    "NSE Code",
+    "Turnover",
+    "Previous Open",
+    "Previous High",
+    "Previous Low",
+    "Previous Close",
+    "Previous Candle",
+    "Today Open",
+    "Gap Up %",
+    "CMP",
+    "Current Gain %",
+    "Gap Maintained?",
+    "Signal"
+
+]
+
+# ---------------------------------------------------------
+# FILTER STRONG STOCKS
+# ---------------------------------------------------------
+
+strong_stocks = []
+
+for row in output_rows:
+
+    if len(row) < 14:
+        continue
+
+    symbol = row[0]
+    turnover = row[1]
+
+    previous_open = row[3]
+    previous_high = row[4]
+    previous_low = row[5]
+    previous_close = row[6]
+
+    previous_candle = row[7]
+
+    today_open = row[8]
+    gap_up_pct = row[9]
+
+    cmp_price = row[10]
+    current_gain_pct = row[11]
+
+    gap_maintained = row[12]
+    signal = row[13]
+
+    # -----------------------------------------------------
+    # FINAL FILTER
+    # -----------------------------------------------------
+
+    if (
+
+        previous_candle == "RED 🔴"
+
+        and isinstance(gap_up_pct, (int, float))
+        and gap_up_pct >= 0.50
+
+        and isinstance(cmp_price, (int, float))
+        and isinstance(today_open, (int, float))
+        and cmp_price >= today_open
+
+    ):
+
+        strong_stocks.append([
+
+            symbol,
+            turnover,
+
+            previous_open,
+            previous_high,
+            previous_low,
+            previous_close,
+
+            previous_candle,
+
+            today_open,
+            gap_up_pct,
+
+            cmp_price,
+            current_gain_pct,
+
+            gap_maintained,
+            "🔥 STRONG GAP UP"
+
+        ])
+
+
+# =========================================================
+# SORT BY TURNOVER
+# =========================================================
+
+strong_stocks.sort(
+    key=lambda x: x[1],
+    reverse=True
+)
+
+
+# =========================================================
+# ADD RANK
+# =========================================================
+
+final_output = []
+
+for rank, row in enumerate(
+    strong_stocks,
+    start=1
+):
+
+    final_output.append([
+        rank
+    ] + row)
+
+
+# =========================================================
+# CLEAR OLD FINAL LIST
+# =========================================================
+
+sheet_final.batch_clear(
+    ["A1:N500"]
+)
+
+
+# =========================================================
+# WRITE HEADER
+# =========================================================
+
+sheet_final.update(
+    range_name="A1:N1",
+    values=[final_headers]
+)
+
+
+# =========================================================
+# WRITE FINAL LIST
+# =========================================================
+
+if final_output:
+
+    sheet_final.update(
+        range_name="A2",
+        values=final_output
+    )
+
+
+# =========================================================
+# FORMAT FINAL LIST
+# =========================================================
+
+try:
+
+    sheet_final.format(
+        "A1:N1",
+        {
+            "textFormat": {
+                "bold": True
+            },
+            "horizontalAlignment": "CENTER"
+        }
+    )
+
+    sheet_final.freeze(
+        rows=1
+    )
+
+except Exception as e:
+
+    print(
+        f"Final List Formatting Warning : {e}"
+    )
+
+
+print(
+    "========================================"
+)
+
+print(
+    "FINAL LIST UPDATED"
+)
+
+print(
+    f"Strong Stocks : {len(final_output)}"
+)
+
+print(
+    "Logic : "
+    "High Turnover + "
+    "Red Previous Candle + "
+    "Gap Up >= 0.50% + "
+    "CMP >= Today Open"
+)
+
+print(
+    "========================================"
+)
 
 
 # =========================================================
