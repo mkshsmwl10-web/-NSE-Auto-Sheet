@@ -1,5 +1,6 @@
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+
 import pandas as pd
 import requests
 import zipfile
@@ -9,9 +10,10 @@ import os
 
 from datetime import datetime, timedelta
 
-# ======================================
+
+# =========================================================
 # GOOGLE LOGIN
-# ======================================
+# =========================================================
 
 creds_json = os.environ.get("GCP_CREDENTIALS")
 
@@ -32,9 +34,10 @@ creds = ServiceAccountCredentials.from_json_keyfile_dict(
 
 client = gspread.authorize(creds)
 
-# ======================================
+
+# =========================================================
 # GOOGLE SHEET
-# ======================================
+# =========================================================
 
 SPREADSHEET_ID = "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E"
 
@@ -42,20 +45,10 @@ sheet_nifty = client.open_by_key(
     SPREADSHEET_ID
 ).worksheet("NIFTY200")
 
-sheet_fixed = client.open_by_key(
-    SPREADSHEET_ID
-).worksheet("NIFTY200_FIXED")
 
-sheet_history = client.open_by_key(
-    SPREADSHEET_ID
-).worksheet("MACD_HISTORY")
-
-sheet_macd200 = client.open_by_key(
-    SPREADSHEET_ID
-).worksheet("MACD200")
-# ======================================
+# =========================================================
 # BHAVCOPY DOWNLOAD
-# ======================================
+# =========================================================
 
 def fetch_bhavcopy(date_obj):
 
@@ -67,12 +60,19 @@ def fetch_bhavcopy(date_obj):
     )
 
     headers = {
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 "
+            "(KHTML, like Gecko) "
+            "Chrome/151.0 Safari/537.36"
+        ),
+        "Accept": "*/*",
+        "Referer": "https://www.nseindia.com/"
     }
 
     try:
 
-        print(f"Downloading {date_str}")
+        print(f"Downloading Bhavcopy : {date_str}")
 
         response = requests.get(
             url,
@@ -81,6 +81,10 @@ def fetch_bhavcopy(date_obj):
         )
 
         if response.status_code != 200:
+            print(
+                f"Bhavcopy not found : "
+                f"{date_obj.strftime('%d-%b-%Y')}"
+            )
             return None
 
         with zipfile.ZipFile(
@@ -93,28 +97,102 @@ def fetch_bhavcopy(date_obj):
 
                 df = pd.read_csv(f)
 
+        # -------------------------------------------------
+        # CLEAN COLUMN NAMES
+        # -------------------------------------------------
+
         df.columns = [
-            c.strip()
+            str(c).strip()
             for c in df.columns
         ]
+
+        # -------------------------------------------------
+        # SYMBOL COLUMN
+        # -------------------------------------------------
 
         symbol_col = next(
             (
                 c for c in
-                ["TckrSymb", "SYMBOL"]
+                [
+                    "TckrSymb",
+                    "SYMBOL"
+                ]
                 if c in df.columns
             ),
             None
         )
 
-        close_col = next(
+        # -------------------------------------------------
+        # OPEN COLUMN
+        # -------------------------------------------------
+
+        open_col = next(
             (
                 c for c in
-                ["ClsPric", "CLOSE"]
+                [
+                    "OpnPric",
+                    "OPEN",
+                    "Open"
+                ]
                 if c in df.columns
             ),
             None
         )
+
+        # -------------------------------------------------
+        # HIGH COLUMN
+        # -------------------------------------------------
+
+        high_col = next(
+            (
+                c for c in
+                [
+                    "HghPric",
+                    "HIGH",
+                    "High"
+                ]
+                if c in df.columns
+            ),
+            None
+        )
+
+        # -------------------------------------------------
+        # LOW COLUMN
+        # -------------------------------------------------
+
+        low_col = next(
+            (
+                c for c in
+                [
+                    "LwPric",
+                    "LOW",
+                    "Low"
+                ]
+                if c in df.columns
+            ),
+            None
+        )
+
+        # -------------------------------------------------
+        # CLOSE COLUMN
+        # -------------------------------------------------
+
+        close_col = next(
+            (
+                c for c in
+                [
+                    "ClsPric",
+                    "CLOSE",
+                    "Close"
+                ]
+                if c in df.columns
+            ),
+            None
+        )
+
+        # -------------------------------------------------
+        # TURNOVER COLUMN
+        # -------------------------------------------------
 
         turnover_col = next(
             (
@@ -130,23 +208,53 @@ def fetch_bhavcopy(date_obj):
             None
         )
 
+        # -------------------------------------------------
+        # SERIES COLUMN
+        # -------------------------------------------------
+
         series_col = next(
             (
                 c for c in
-                ["SctySrs", "SERIES"]
+                [
+                    "SctySrs",
+                    "SERIES"
+                ]
                 if c in df.columns
             ),
             None
         )
 
+        # -------------------------------------------------
+        # VALIDATION
+        # -------------------------------------------------
+
         if symbol_col is None:
+            print("Symbol column not found")
+            return None
+
+        if open_col is None:
+            print("Open column not found")
+            return None
+
+        if high_col is None:
+            print("High column not found")
+            return None
+
+        if low_col is None:
+            print("Low column not found")
             return None
 
         if close_col is None:
+            print("Close column not found")
             return None
 
         if turnover_col is None:
+            print("Turnover column not found")
             return None
+
+        # -------------------------------------------------
+        # ONLY EQUITY
+        # -------------------------------------------------
 
         if series_col:
 
@@ -154,33 +262,65 @@ def fetch_bhavcopy(date_obj):
                 df[series_col]
                 .astype(str)
                 .str.strip()
+                .str.upper()
                 == "EQ"
             ]
 
-        df[turnover_col] = pd.to_numeric(
-            df[turnover_col],
-            errors="coerce"
-        )
+        # -------------------------------------------------
+        # NUMERIC DATA
+        # -------------------------------------------------
+
+        for col in [
+            open_col,
+            high_col,
+            low_col,
+            close_col,
+            turnover_col
+        ]:
+
+            df[col] = pd.to_numeric(
+                df[col],
+                errors="coerce"
+            )
 
         df = df.dropna(
-            subset=[turnover_col]
+            subset=[
+                open_col,
+                high_col,
+                low_col,
+                close_col,
+                turnover_col
+            ]
         )
 
-        return df
+        return {
+            "df": df,
+            "symbol_col": symbol_col,
+            "open_col": open_col,
+            "high_col": high_col,
+            "low_col": low_col,
+            "close_col": close_col,
+            "turnover_col": turnover_col
+        }
 
     except Exception as e:
 
-        print(e)
+        print(
+            f"Bhavcopy Error : {e}"
+        )
 
         return None
-      # ======================================
-# MAIN PROGRAM
-# ======================================
+
+
+# =========================================================
+# FIND LATEST TRADING DAY
+# =========================================================
 
 today = datetime.now()
 
-bhavcopy = None
-data_date = ""
+today_data = None
+today_date_obj = None
+today_date_text = ""
 
 for i in range(7):
 
@@ -189,406 +329,488 @@ for i in range(7):
     if check_date.weekday() >= 5:
         continue
 
-    bhavcopy = fetch_bhavcopy(check_date)
+    result = fetch_bhavcopy(check_date)
 
-    if bhavcopy is not None:
+    if result is not None:
 
-        data_date = check_date.strftime("%d-%b-%Y")
+        today_data = result
+        today_date_obj = check_date
+        today_date_text = check_date.strftime(
+            "%d-%b-%Y"
+        )
 
         break
 
-if bhavcopy is None:
 
-    raise Exception("Bhavcopy not found")
+if today_data is None:
 
-# ======================================
-# FILTER TOP 200
-# ======================================
+    raise Exception(
+        "Latest NSE Bhavcopy not found"
+    )
 
-filter_words = "BEES|ETF|GOLD|LIQUID|SILVER|INDEX"
 
-symbol_col = "TckrSymb" if "TckrSymb" in bhavcopy.columns else "SYMBOL"
-close_col = "ClsPric" if "ClsPric" in bhavcopy.columns else "CLOSE"
-turnover_col = (
-    "TtlTrfVal"
-    if "TtlTrfVal" in bhavcopy.columns
-    else "TtlTrdVal"
+# =========================================================
+# TODAY DATA
+# =========================================================
+
+bhavcopy = today_data["df"]
+
+symbol_col = today_data["symbol_col"]
+open_col = today_data["open_col"]
+high_col = today_data["high_col"]
+low_col = today_data["low_col"]
+close_col = today_data["close_col"]
+turnover_col = today_data["turnover_col"]
+
+
+print(
+    f"Latest Trading Day : {today_date_text}"
 )
+
+
+# =========================================================
+# FILTER TOP 200 BY TURNOVER
+# =========================================================
+
+filter_words = (
+    "BEES|ETF|GOLD|LIQUID|SILVER|INDEX"
+)
+
 
 top200 = (
     bhavcopy[
         ~bhavcopy[symbol_col]
         .astype(str)
-        .str.contains(filter_words, case=False, na=False)
+        .str.contains(
+            filter_words,
+            case=False,
+            na=False
+        )
     ]
-    .sort_values(turnover_col, ascending=False)
+    .sort_values(
+        turnover_col,
+        ascending=False
+    )
     .head(200)
+    .copy()
 )
 
-rows = top200[
-    [symbol_col, turnover_col, close_col]
-].values.tolist()
 
-sheet_nifty.batch_clear(["A2:C1000"])
-
-sheet_nifty.update(
-    "A2",
-    rows
+print(
+    f"Top 200 Stocks Found : {len(top200)}"
 )
 
-print("NIFTY200 UPDATED")
-# ======================================
-# MODULE 2
-# INITIALIZE NIFTY200_FIXED
-# ======================================
 
-fixed_data = sheet_fixed.get_all_values()
+# =========================================================
+# FIND PREVIOUS TRADING DAY
+# =========================================================
 
-# Only initialize if sheet is empty
-if len(fixed_data) <= 1:
+previous_data = None
+previous_date_obj = None
 
-    print("Initializing NIFTY200_FIXED...")
+for i in range(1, 8):
 
-    # Clear old data
-    sheet_fixed.batch_clear(["A2:C1000"])
-
-    # Copy today's Top 200
-    sheet_fixed.update(
-        "A2",
-        rows
+    check_date = (
+        today_date_obj
+        - timedelta(days=i)
     )
 
-    print("NIFTY200_FIXED CREATED")
+    if check_date.weekday() >= 5:
+        continue
 
-else:
+    result = fetch_bhavcopy(check_date)
 
-    print("NIFTY200_FIXED already exists")
-    # ======================================
-# MODULE 3 - PART 1
-# CREATE TODAY CLOSE DICTIONARY
-# ======================================
+    if result is not None:
 
-today_close = {}
+        previous_data = result
+        previous_date_obj = check_date
 
-for _, row in bhavcopy.iterrows():
+        break
 
-    symbol = str(row[symbol_col]).strip()
 
-    close = float(row[close_col])
+if previous_data is None:
 
-    today_close[symbol] = close
+    raise Exception(
+        "Previous Trading Day Bhavcopy not found"
+    )
 
-print(f"Today's Close Dictionary : {len(today_close)} Symbols")
-# ======================================
-# MODULE 3 - PART 2
-# APPEND TODAY DATA TO MACD_HISTORY
-# ======================================
 
-today_db = datetime.now().strftime("%Y-%m-%d")
+previous_df = previous_data["df"]
 
-# Read existing history
-history_data = sheet_history.get_all_values()
+prev_symbol_col = previous_data["symbol_col"]
+prev_open_col = previous_data["open_col"]
+prev_high_col = previous_data["high_col"]
+prev_low_col = previous_data["low_col"]
+prev_close_col = previous_data["close_col"]
 
-# Prevent duplicate append
-already_exists = False
 
-if len(history_data) > 1:
+print(
+    "Previous Trading Day : "
+    f"{previous_date_obj.strftime('%d-%b-%Y')}"
+)
 
-    for row in history_data[1:]:
 
-        if len(row) >= 2 and row[0] == today_db:
+# =========================================================
+# PREVIOUS DAY DICTIONARY
+# =========================================================
 
-            already_exists = True
-            break
+previous_lookup = {}
 
-if already_exists:
+for _, row in previous_df.iterrows():
 
-    print(f"{today_db} already exists in MACD_HISTORY")
+    symbol = str(
+        row[prev_symbol_col]
+    ).strip()
 
-else:
+    previous_lookup[symbol] = {
 
-    fixed_data = sheet_fixed.get_all_values()
+        "open": float(
+            row[prev_open_col]
+        ),
 
-    history_rows = []
+        "high": float(
+            row[prev_high_col]
+        ),
 
-    for row in fixed_data[1:]:
+        "low": float(
+            row[prev_low_col]
+        ),
 
-        if len(row) == 0:
-            continue
-
-        symbol = row[0].strip()
-
-        if symbol in today_close:
-
-            history_rows.append([
-                today_db,
-                symbol,
-                today_close[symbol]
-            ])
-
-    if history_rows:
-
-        sheet_history.append_rows(
-            history_rows,
-            value_input_option="RAW"
+        "close": float(
+            row[prev_close_col]
         )
+    }
 
-        print(f"Added {len(history_rows)} rows to MACD_HISTORY")
-        # =====================================================
-# MODULE 4 - PART 1
-# READ MACD_HISTORY
-# =====================================================
 
-history_data = sheet_history.get_all_values()
+# =========================================================
+# CREATE FINAL NIFTY200 OUTPUT
+# =========================================================
 
-if len(history_data) <= 1:
-    raise Exception("MACD_HISTORY Empty")
+output_rows = []
 
-history_df = pd.DataFrame(
-    history_data[1:],
-    columns=history_data[0]
+
+for _, row in top200.iterrows():
+
+    symbol = str(
+        row[symbol_col]
+    ).strip()
+
+    turnover = float(
+        row[turnover_col]
+    )
+
+    today_open = float(
+        row[open_col]
+    )
+
+    today_close = float(
+        row[close_col]
+    )
+
+    # -----------------------------------------------------
+    # PREVIOUS DAY DATA
+    # -----------------------------------------------------
+
+    previous = previous_lookup.get(
+        symbol
+    )
+
+    if previous is None:
+
+        output_rows.append([
+            symbol,
+            turnover,
+            today_close,
+            "",
+            "",
+            "",
+            "",
+            "NA",
+            today_open,
+            "",
+            today_close,
+            "",
+            "NA",
+            "—"
+        ])
+
+        continue
+
+
+    previous_open = previous["open"]
+    previous_high = previous["high"]
+    previous_low = previous["low"]
+    previous_close = previous["close"]
+
+
+    # -----------------------------------------------------
+    # PREVIOUS CANDLE
+    # -----------------------------------------------------
+
+    if previous_close < previous_open:
+
+        previous_candle = "RED 🔴"
+
+    elif previous_close > previous_open:
+
+        previous_candle = "GREEN 🟢"
+
+    else:
+
+        previous_candle = "DOJI"
+
+
+    # -----------------------------------------------------
+    # GAP UP %
+    # -----------------------------------------------------
+
+    if previous_close != 0:
+
+        gap_up_pct = (
+            (today_open - previous_close)
+            / previous_close
+        ) * 100
+
+    else:
+
+        gap_up_pct = 0
+
+
+    # -----------------------------------------------------
+    # CMP
+    # -----------------------------------------------------
+
+    # EOD Bhavcopy mein latest available price
+    # Close Price hi hai
+
+    cmp_price = today_close
+
+
+    # -----------------------------------------------------
+    # CURRENT GAIN %
+    # -----------------------------------------------------
+
+    if previous_close != 0:
+
+        current_gain_pct = (
+            (cmp_price - previous_close)
+            / previous_close
+        ) * 100
+
+    else:
+
+        current_gain_pct = 0
+
+
+    # -----------------------------------------------------
+    # GAP MAINTAINED
+    # -----------------------------------------------------
+
+    if cmp_price >= today_open:
+
+        gap_maintained = "YES ✅"
+
+    elif cmp_price > previous_close:
+
+        gap_maintained = "PARTIAL 🟡"
+
+    else:
+
+        gap_maintained = "NO 🔴"
+
+
+    # -----------------------------------------------------
+    # SIGNAL
+    # -----------------------------------------------------
+
+    if (
+        previous_close < previous_open
+        and gap_up_pct >= 0.50
+        and cmp_price >= today_open
+    ):
+
+        signal = "🔥 STRONG GAP UP"
+
+
+    elif (
+        previous_close < previous_open
+        and gap_up_pct > 0
+        and cmp_price > previous_close
+    ):
+
+        signal = "🟢 GAP HOLD"
+
+
+    elif (
+        previous_close < previous_open
+        and gap_up_pct > 0
+        and cmp_price <= previous_close
+    ):
+
+        signal = "🔴 GAP FAILED"
+
+
+    else:
+
+        signal = "—"
+
+
+    # -----------------------------------------------------
+    # FINAL ROW
+    # -----------------------------------------------------
+
+    output_rows.append([
+
+        symbol,
+        turnover,
+        today_close,
+
+        previous_open,
+        previous_high,
+        previous_low,
+        previous_close,
+
+        previous_candle,
+
+        today_open,
+
+        round(
+            gap_up_pct,
+            2
+        ),
+
+        cmp_price,
+
+        round(
+            current_gain_pct,
+            2
+        ),
+
+        gap_maintained,
+
+        signal
+
+    ])
+
+
+# =========================================================
+# GOOGLE SHEET HEADER
+# =========================================================
+
+headers = [
+
+    "NSE Code",
+    "Turnover",
+    "Close Price",
+
+    "Previous Open",
+    "Previous High",
+    "Previous Low",
+    "Previous Close",
+
+    "Previous Candle",
+
+    "Today Open",
+    "Gap Up %",
+
+    "CMP",
+    "Current Gain %",
+
+    "Gap Maintained?",
+    "Signal"
+
+]
+
+
+# =========================================================
+# CLEAR OLD NIFTY200 DATA
+# =========================================================
+
+sheet_nifty.batch_clear(
+    ["A1:N1000"]
 )
 
-history_df["Date"] = pd.to_datetime(
-    history_df["Date"]
+
+# =========================================================
+# WRITE HEADER
+# =========================================================
+
+sheet_nifty.update(
+    "A1",
+    [headers],
+    value_input_option="RAW"
 )
 
-history_df["Close"] = pd.to_numeric(
-    history_df["Close"],
-    errors="coerce"
-)
 
-history_df = history_df.dropna(
-    subset=["Close"]
-)
+# =========================================================
+# WRITE DATA
+# =========================================================
 
-history_df = history_df.sort_values(
-    ["Symbol", "Date"]
+if output_rows:
+
+    sheet_nifty.update(
+        "A2",
+        output_rows,
+        value_input_option="RAW"
+    )
+
+
+# =========================================================
+# FORMATTING
+# =========================================================
+
+try:
+
+    sheet_nifty.format(
+        "A1:N1",
+        {
+            "textFormat": {
+                "bold": True
+            },
+            "horizontalAlignment": "CENTER"
+        }
+    )
+
+    sheet_nifty.freeze(
+        rows=1
+    )
+
+except Exception as e:
+
+    print(
+        f"Formatting Warning : {e}"
+    )
+
+
+# =========================================================
+# FINAL MESSAGE
+# =========================================================
+
+print(
+    "========================================"
 )
 
 print(
-    f"MACD_HISTORY Loaded : {len(history_df)} Rows"
-)
-# =====================================================
-# MODULE 4 - PART 2
-# MACD FUNCTIONS
-# =====================================================
-
-def calculate_macd(df):
-
-    df = df.copy()
-
-    df["EMA12"] = df["Close"].ewm(
-        span=12,
-        adjust=False
-    ).mean()
-
-    df["EMA26"] = df["Close"].ewm(
-        span=26,
-        adjust=False
-    ).mean()
-
-    df["MACD"] = df["EMA12"] - df["EMA26"]
-
-    df["SIGNAL"] = df["MACD"].ewm(
-        span=9,
-        adjust=False
-    ).mean()
-
-    df["HIST"] = df["MACD"] - df["SIGNAL"]
-
-    return df
-
-
-def hist_arrow(current_hist, previous_hist):
-
-    if pd.isna(current_hist):
-        return "NA"
-
-    arrow = "↑" if current_hist >= previous_hist else "↓"
-
-    return f"{current_hist:+.2f}{arrow}"
-
-
-print("MODULE 4 PART 2 LOADED")
-# =====================================================
-# MODULE 4 - PART 3A
-# DAILY MACD
-# =====================================================
-
-symbols = sheet_macd200.col_values(1)[1:]
-
-macd200_output = []
-
-for symbol in symbols:
-
-    df = history_df[
-        history_df["Symbol"] == symbol
-    ].copy()
-
-    if len(df) < 35:
-
-        macd200_output.append([
-            "NA","NA","NA",
-            "NA","NA","NA",
-            "NA","NA","NA"
-        ])
-
-        continue
-
-    daily = calculate_macd(df)
-
-    hist = daily["HIST"].tolist()
-
-    D0 = hist_arrow(
-        hist[-1],
-        hist[-2]
-    )
-
-    D1 = hist_arrow(
-        hist[-2],
-        hist[-3]
-    )
-
-    D2 = hist_arrow(
-        hist[-3],
-        hist[-4]
-    )
-
-    # Weekly / Monthly next Part
-    W0 = W1 = W2 = "NA"
-    M0 = M1 = M2 = "NA"
-
-    macd200_output.append([
-
-        M0,
-        M1,
-        M2,
-
-        W0,
-        W1,
-        W2,
-
-        D0,
-        D1,
-        D2
-
-    ])
-
-print("MODULE 4 PART 3A LOADED")
-# =====================================================
-# MODULE 4 - PART 3B
-# WEEKLY + MONTHLY MACD
-# =====================================================
-
-macd200_output = []
-
-for symbol in symbols:
-
-    df = history_df[
-        history_df["Symbol"] == symbol
-    ].copy()
-
-    if len(df) < 35:
-
-        macd200_output.append([
-            "NA","NA","NA",
-            "NA","NA","NA",
-            "NA","NA","NA"
-        ])
-        continue
-
-    # ----------------------
-    # DAILY
-    # ----------------------
-
-    daily = calculate_macd(df)
-
-    d_hist = daily["HIST"].tolist()
-
-    D0 = hist_arrow(d_hist[-1], d_hist[-2])
-    D1 = hist_arrow(d_hist[-2], d_hist[-3])
-    D2 = hist_arrow(d_hist[-3], d_hist[-4])
-
-    # ----------------------
-    # WEEKLY
-    # ----------------------
-
-    weekly = (
-        df
-        .set_index("Date")
-        .resample("W-FRI")
-        .last()
-        .dropna()
-        .reset_index()
-    )
-
-    if len(weekly) >= 35:
-
-        weekly = calculate_macd(weekly)
-
-        w_hist = weekly["HIST"].tolist()
-
-        W0 = hist_arrow(w_hist[-1], w_hist[-2])
-        W1 = hist_arrow(w_hist[-2], w_hist[-3])
-        W2 = hist_arrow(w_hist[-3], w_hist[-4])
-
-    else:
-
-        W0 = W1 = W2 = "NA"
-
-    # ----------------------
-    # MONTHLY
-    # ----------------------
-
-    monthly = (
-        df
-        .set_index("Date")
-        .resample("ME")
-        .last()
-        .dropna()
-        .reset_index()
-    )
-
-    if len(monthly) >= 35:
-
-        monthly = calculate_macd(monthly)
-
-        m_hist = monthly["HIST"].tolist()
-
-        M0 = hist_arrow(m_hist[-1], m_hist[-2])
-        M1 = hist_arrow(m_hist[-2], m_hist[-3])
-        M2 = hist_arrow(m_hist[-3], m_hist[-4])
-
-    else:
-
-        M0 = M1 = M2 = "NA"
-
-    macd200_output.append([
-        M0, M1, M2,
-        W0, W1, W2,
-        D0, D1, D2
-    ])
-
-print("MODULE 4 PART 3B LOADED")
-# =====================================================
-# MODULE 4 - PART 3C
-# UPDATE MACD200 SHEET
-# =====================================================
-
-if len(macd200_output) != 200:
-
-    print(f"WARNING: Only {len(macd200_output)} Symbols Processed")
-
-sheet_macd200.update(
-    range_name="B2:J201",
-    values=macd200_output
+    "NIFTY200 GAP-UP SCREENER UPDATED"
 )
 
-print("MACD200 UPDATED SUCCESSFULLY")
+print(
+    f"Trading Date : {today_date_text}"
+)
 
-print("ALL MODULES COMPLETED")
+print(
+    "Previous Date : "
+    f"{previous_date_obj.strftime('%d-%b-%Y')}"
+)
 
-print("MODULE 1 SUCCESS")
+print(
+    f"Stocks : {len(output_rows)}"
+)
 
-print("Google Connected")
+print(
+    "MACD MODULE : REMOVED"
+)
+
+print(
+    "========================================"
+)
