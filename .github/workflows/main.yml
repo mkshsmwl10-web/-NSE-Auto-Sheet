@@ -27,5 +27,4 @@ jobs:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
         run: |
           python update_sheet.py
-          python signal_engine.py
           python etf_weekly_sip.py
