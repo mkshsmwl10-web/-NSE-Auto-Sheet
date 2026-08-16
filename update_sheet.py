@@ -1,27 +1,25 @@
 # =========================================================
-# NIFTY 200 BB REVERSAL SCREENER V8.2
+# NIFTY 200 STRICT BB REVERSAL SCREENER
 # =========================================================
 #
-# V8.2 PHILOSOPHY
-# ---------------------------------------------------------
-# PRIMARY SETUP:
-#     💎 LOWER BB REVERSAL
+# FINAL LIST = BB REVERSAL ONLY
 #
-# IMPORTANT:
-#     MACD / RSI / WEEKLY MACD ARE NOT COMPULSORY.
+# LOGIC
+# ---------------------------------------------------------
+# 1. TOP 200 BY TURNOVER
+# 2. PREVIOUS PRICE ACTION FALL
+# 3. SETUP CANDLE TOUCHES / BREAKS LOWER BB
+# 4. SETUP CANDLE GOES BELOW LOWER BB
+# 5. SETUP CANDLE CLOSES BACK ABOVE LOWER BB
+# 6. MEANINGFUL LOWER WICK
+# 7. TODAY CLOSE BREAKS SETUP HIGH
+# 8. TODAY LOW PROTECTS SETUP LOW
+# 9. TURNOVER TOP 50
 #
 # FINAL LIST:
-#     ALL GENUINE BB REVERSAL CANDIDATES
-#     RANKED BY STRENGTH SCORE
+# 💎 STRONG BB REVERSAL
 #
-# PRIORITY:
-#     1. LOWER BB REVERSAL
-#     2. DAILY MACD BEND
-#     3. PRICE CONFIRMATION
-#     4. RSI RECOVERY
-#     5. WEEKLY MACD BEND
-#     6. TURNOVER
-#
+# MACD : REMOVED
 # =========================================================
 
 
@@ -29,10 +27,10 @@ import os
 import json
 import io
 import zipfile
-import time
 import requests
 import gspread
 import pandas as pd
+import time
 
 from datetime import datetime, timedelta
 from oauth2client.service_account import (
@@ -49,6 +47,7 @@ SPREADSHEET_ID = (
 )
 
 NIFTY_SHEET = "NIFTY200"
+
 FINAL_SHEET = "Final List"
 
 
@@ -57,23 +56,8 @@ FINAL_SHEET = "Final List"
 # =========================================================
 
 BB_LENGTH = 20
+
 BB_MULTIPLIER = 1.5
-
-
-# =========================================================
-# RSI
-# =========================================================
-
-RSI_LENGTH = 14
-
-
-# =========================================================
-# MACD
-# =========================================================
-
-MACD_FAST = 12
-MACD_SLOW = 26
-MACD_SIGNAL = 9
 
 
 # =========================================================
@@ -84,23 +68,10 @@ HIGH_TURNOVER_RANK = 50
 
 
 # =========================================================
-# HISTORY
+# HISTORICAL DAYS
 # =========================================================
 
-HISTORY_TRADING_DAYS = 60
-
-
-# =========================================================
-# MINIMUM BB SCORE
-# =========================================================
-#
-# BB reversal itself must be genuine.
-#
-# Score 35+ = BB reversal candidate
-#
-# =========================================================
-
-MIN_BB_SCORE = 35
+HISTORY_TRADING_DAYS = 220
 
 
 # =========================================================
@@ -112,6 +83,7 @@ creds_json = os.environ.get(
 )
 
 if not creds_json:
+
     raise Exception(
         "GCP_CREDENTIALS Secret Missing"
     )
@@ -123,8 +95,11 @@ creds_dict = json.loads(
 
 
 scope = [
+
     "https://spreadsheets.google.com/feeds",
+
     "https://www.googleapis.com/auth/drive"
+
 ]
 
 
@@ -143,14 +118,47 @@ client = gspread.authorize(
 
 
 # =========================================================
+# GOOGLE SHEETS SAFE RETRY
+# =========================================================
+def _is_retryable_google_error(exc):
+    text = str(exc)
+    return any(code in text for code in ("429", "500", "502", "503", "504"))
+
+
+def safe_google_call(func, *args, retries=6, **kwargs):
+    last_error = None
+    for attempt in range(retries):
+        try:
+            return func(*args, **kwargs)
+        except gspread.exceptions.APIError as exc:
+            last_error = exc
+            if not _is_retryable_google_error(exc) or attempt == retries - 1:
+                raise
+            wait = min(30, 2 ** attempt)
+            print(f"Google Sheets API retry {attempt + 1}/{retries} after {wait}s : {exc}")
+            time.sleep(wait)
+    raise last_error
+
+
+def safe_batch_clear(sheet, ranges):
+    return safe_google_call(sheet.batch_clear, ranges)
+
+
+def safe_update(sheet, *args, **kwargs):
+    return safe_google_call(sheet.update, *args, **kwargs)
+
+
+def safe_format(sheet, *args, **kwargs):
+    return safe_google_call(sheet.format, *args, **kwargs)
+
+
+# =========================================================
 # GOOGLE SHEET
 # =========================================================
 
-spreadsheet = (
-    client
-    .open_by_key(
-        SPREADSHEET_ID
-    )
+spreadsheet = safe_google_call(
+    client.open_by_key,
+    SPREADSHEET_ID
 )
 
 
@@ -173,8 +181,8 @@ except gspread.WorksheetNotFound:
         spreadsheet
         .add_worksheet(
             title=NIFTY_SHEET,
-            rows=1000,
-            cols=50
+            rows=500,
+            cols=30
         )
     )
 
@@ -198,21 +206,24 @@ except gspread.WorksheetNotFound:
         spreadsheet
         .add_worksheet(
             title=FINAL_SHEET,
-            rows=1000,
+            rows=500,
             cols=30
         )
     )
 
 
 # =========================================================
-# NSE BHAVCOPY
+# NSE BHAVCOPY DOWNLOAD
 # =========================================================
 
 def fetch_bhavcopy(date_obj):
 
-    date_str = date_obj.strftime(
-        "%Y%m%d"
+    date_str = (
+        date_obj.strftime(
+            "%Y%m%d"
+        )
     )
+
 
     url = (
         "https://nsearchives.nseindia.com/"
@@ -221,20 +232,24 @@ def fetch_bhavcopy(date_obj):
         f"{date_str}_F_0000.csv.zip"
     )
 
+
     headers = {
 
         "User-Agent":
             "Mozilla/5.0 "
             "(Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 "
+            "(KHTML, like Gecko) "
             "Chrome/151.0 Safari/537.36",
 
-        "Accept": "*/*",
+        "Accept":
+            "*/*",
 
         "Referer":
             "https://www.nseindia.com/"
 
     }
+
 
     try:
 
@@ -243,11 +258,17 @@ def fetch_bhavcopy(date_obj):
             f"{date_str}"
         )
 
+
         response = requests.get(
+
             url,
+
             headers=headers,
+
             timeout=30
+
         )
+
 
         if response.status_code != 200:
 
@@ -258,90 +279,242 @@ def fetch_bhavcopy(date_obj):
 
             return None
 
+
         with zipfile.ZipFile(
+
             io.BytesIO(
                 response.content
             )
+
         ) as z:
 
-            csv_file = z.namelist()[0]
+            csv_file = (
+                z.namelist()[0]
+            )
+
 
             with z.open(
                 csv_file
             ) as f:
 
-                df = pd.read_csv(f)
+                df = pd.read_csv(
+                    f
+                )
 
 
         df.columns = [
+
             str(c).strip()
+
             for c in df.columns
+
         ]
 
 
         # =================================================
-        # COLUMN FINDER
+        # SYMBOL
         # =================================================
 
-        def find_col(names):
+        symbol_col = next(
 
-            for c in names:
+            (
 
-                if c in df.columns:
-                    return c
+                c
 
-            return None
+                for c in [
+
+                    "TckrSymb",
+                    "SYMBOL"
+
+                ]
+
+                if c in df.columns
+
+            ),
+
+            None
+
+        )
 
 
-        symbol_col = find_col([
-            "TckrSymb",
-            "SYMBOL"
-        ])
+        # =================================================
+        # OPEN
+        # =================================================
 
-        open_col = find_col([
-            "OpnPric",
-            "OPEN",
-            "Open"
-        ])
+        open_col = next(
 
-        high_col = find_col([
-            "HghPric",
-            "HIGH",
-            "High"
-        ])
+            (
 
-        low_col = find_col([
-            "LwPric",
-            "LOW",
-            "Low"
-        ])
+                c
 
-        close_col = find_col([
-            "ClsPric",
-            "CLOSE",
-            "Close"
-        ])
+                for c in [
 
-        turnover_col = find_col([
-            "TtlTrfVal",
-            "TtlTrdVal",
-            "TURNOVER",
-            "TURNOVER_LACS"
-        ])
+                    "OpnPric",
+                    "OPEN",
+                    "Open"
 
-        series_col = find_col([
-            "SctySrs",
-            "SERIES"
-        ])
+                ]
 
+                if c in df.columns
+
+            ),
+
+            None
+
+        )
+
+
+        # =================================================
+        # HIGH
+        # =================================================
+
+        high_col = next(
+
+            (
+
+                c
+
+                for c in [
+
+                    "HghPric",
+                    "HIGH",
+                    "High"
+
+                ]
+
+                if c in df.columns
+
+            ),
+
+            None
+
+        )
+
+
+        # =================================================
+        # LOW
+        # =================================================
+
+        low_col = next(
+
+            (
+
+                c
+
+                for c in [
+
+                    "LwPric",
+                    "LOW",
+                    "Low"
+
+                ]
+
+                if c in df.columns
+
+            ),
+
+            None
+
+        )
+
+
+        # =================================================
+        # CLOSE
+        # =================================================
+
+        close_col = next(
+
+            (
+
+                c
+
+                for c in [
+
+                    "ClsPric",
+                    "CLOSE",
+                    "Close"
+
+                ]
+
+                if c in df.columns
+
+            ),
+
+            None
+
+        )
+
+
+        # =================================================
+        # TURNOVER
+        # =================================================
+
+        turnover_col = next(
+
+            (
+
+                c
+
+                for c in [
+
+                    "TtlTrfVal",
+                    "TtlTrdVal",
+                    "TURNOVER",
+                    "TURNOVER_LACS"
+
+                ]
+
+                if c in df.columns
+
+            ),
+
+            None
+
+        )
+
+
+        # =================================================
+        # SERIES
+        # =================================================
+
+        series_col = next(
+
+            (
+
+                c
+
+                for c in [
+
+                    "SctySrs",
+                    "SERIES"
+
+                ]
+
+                if c in df.columns
+
+            ),
+
+            None
+
+        )
+
+
+        # =================================================
+        # VALIDATION
+        # =================================================
 
         required = {
 
             "Symbol": symbol_col,
+
             "Open": open_col,
+
             "High": high_col,
+
             "Low": low_col,
+
             "Close": close_col,
+
             "Turnover": turnover_col
 
         }
@@ -365,16 +538,18 @@ def fetch_bhavcopy(date_obj):
         if series_col:
 
             df = df[
+
                 df[series_col]
                 .astype(str)
                 .str.strip()
                 .str.upper()
                 == "EQ"
+
             ]
 
 
         # =================================================
-        # NUMERIC
+        # NUMERIC DATA
         # =================================================
 
         for col in [
@@ -388,19 +563,26 @@ def fetch_bhavcopy(date_obj):
         ]:
 
             df[col] = pd.to_numeric(
+
                 df[col],
+
                 errors="coerce"
+
             )
 
 
         df = df.dropna(
+
             subset=[
+
                 open_col,
                 high_col,
                 low_col,
                 close_col,
                 turnover_col
+
             ]
+
         )
 
 
@@ -445,26 +627,34 @@ def fetch_bhavcopy(date_obj):
 now = datetime.now()
 
 latest_data = None
+
 latest_date = None
 
 
 for i in range(7):
 
     check_date = (
-        now -
-        timedelta(days=i)
+
+        now
+        - timedelta(days=i)
+
     )
 
+
     if check_date.weekday() >= 5:
+
         continue
+
 
     result = fetch_bhavcopy(
         check_date
     )
 
+
     if result is not None:
 
         latest_data = result
+
         latest_date = check_date
 
         break
@@ -477,14 +667,34 @@ if latest_data is None:
     )
 
 
-bhavcopy = latest_data["df"]
+bhavcopy = (
+    latest_data["df"]
+)
 
-symbol_col = latest_data["symbol_col"]
-open_col = latest_data["open_col"]
-high_col = latest_data["high_col"]
-low_col = latest_data["low_col"]
-close_col = latest_data["close_col"]
-turnover_col = latest_data["turnover_col"]
+
+symbol_col = (
+    latest_data["symbol_col"]
+)
+
+open_col = (
+    latest_data["open_col"]
+)
+
+high_col = (
+    latest_data["high_col"]
+)
+
+low_col = (
+    latest_data["low_col"]
+)
+
+close_col = (
+    latest_data["close_col"]
+)
+
+turnover_col = (
+    latest_data["turnover_col"]
+)
 
 
 print(
@@ -505,6 +715,7 @@ exclude_words = (
 top200 = (
 
     bhavcopy[
+
         ~bhavcopy[symbol_col]
         .astype(str)
         .str.contains(
@@ -512,11 +723,15 @@ top200 = (
             case=False,
             na=False
         )
+
     ]
 
     .sort_values(
+
         turnover_col,
+
         ascending=False
+
     )
 
     .head(200)
@@ -540,13 +755,19 @@ turnover_rank = {}
 
 
 for rank, (_, row) in enumerate(
+
     top200.iterrows(),
+
     start=1
+
 ):
 
     symbol = str(
+
         row[symbol_col]
+
     ).strip()
+
 
     turnover_rank[
         symbol
@@ -558,26 +779,34 @@ for rank, (_, row) in enumerate(
 # =========================================================
 
 previous_data = None
+
 previous_date = None
 
 
 for i in range(1, 7):
 
     check_date = (
-        latest_date -
-        timedelta(days=i)
+
+        latest_date
+        - timedelta(days=i)
+
     )
 
+
     if check_date.weekday() >= 5:
+
         continue
+
 
     result = fetch_bhavcopy(
         check_date
     )
 
+
     if result is not None:
 
         previous_data = result
+
         previous_date = check_date
 
         break
@@ -591,13 +820,30 @@ if previous_data is None:
     )
 
 
-previous_df = previous_data["df"]
+previous_df = (
+    previous_data["df"]
+)
 
-prev_symbol_col = previous_data["symbol_col"]
-prev_open_col = previous_data["open_col"]
-prev_high_col = previous_data["high_col"]
-prev_low_col = previous_data["low_col"]
-prev_close_col = previous_data["close_col"]
+
+prev_symbol_col = (
+    previous_data["symbol_col"]
+)
+
+prev_open_col = (
+    previous_data["open_col"]
+)
+
+prev_high_col = (
+    previous_data["high_col"]
+)
+
+prev_low_col = (
+    previous_data["low_col"]
+)
+
+prev_close_col = (
+    previous_data["close_col"]
+)
 
 
 print(
@@ -607,7 +853,7 @@ print(
 
 
 # =========================================================
-# PREVIOUS LOOKUP
+# PREVIOUS DAY LOOKUP
 # =========================================================
 
 previous_lookup = {}
@@ -616,24 +862,35 @@ previous_lookup = {}
 for _, row in previous_df.iterrows():
 
     symbol = str(
+
         row[prev_symbol_col]
+
     ).strip()
+
 
     previous_lookup[
         symbol
     ] = {
 
         "open":
-            float(row[prev_open_col]),
+            float(
+                row[prev_open_col]
+            ),
 
         "high":
-            float(row[prev_high_col]),
+            float(
+                row[prev_high_col]
+            ),
 
         "low":
-            float(row[prev_low_col]),
+            float(
+                row[prev_low_col]
+            ),
 
         "close":
-            float(row[prev_close_col])
+            float(
+                row[prev_close_col]
+            )
 
     }
 
@@ -644,12 +901,17 @@ for _, row in previous_df.iterrows():
 
 history_data = {}
 
+
 history_dates_found = 0
 
+
 check_date = (
-    latest_date -
-    timedelta(days=1)
+
+    latest_date
+    - timedelta(days=1)
+
 )
+
 
 days_checked = 0
 
@@ -661,7 +923,7 @@ while (
 
     and
 
-    days_checked < 90
+    days_checked < 320
 
 ):
 
@@ -671,22 +933,45 @@ while (
             check_date
         )
 
+
         if result is not None:
 
-            hist_df = result["df"]
+            hist_df = (
+                result["df"]
+            )
 
-            h_symbol = result["symbol_col"]
-            h_open = result["open_col"]
-            h_high = result["high_col"]
-            h_low = result["low_col"]
-            h_close = result["close_col"]
+
+            hist_symbol_col = (
+                result["symbol_col"]
+            )
+
+            hist_open_col = (
+                result["open_col"]
+            )
+
+            hist_high_col = (
+                result["high_col"]
+            )
+
+            hist_low_col = (
+                result["low_col"]
+            )
+
+            hist_close_col = (
+                result["close_col"]
+            )
 
 
             for _, row in hist_df.iterrows():
 
                 symbol = str(
-                    row[h_symbol]
+
+                    row[
+                        hist_symbol_col
+                    ]
+
                 ).strip()
+
 
                 if symbol not in history_data:
 
@@ -704,22 +989,30 @@ while (
 
                     "open":
                         float(
-                            row[h_open]
+                            row[
+                                hist_open_col
+                            ]
                         ),
 
                     "high":
                         float(
-                            row[h_high]
+                            row[
+                                hist_high_col
+                            ]
                         ),
 
                     "low":
                         float(
-                            row[h_low]
+                            row[
+                                hist_low_col
+                            ]
                         ),
 
                     "close":
                         float(
-                            row[h_close]
+                            row[
+                                hist_close_col
+                            ]
                         )
 
                 })
@@ -728,7 +1021,10 @@ while (
             history_dates_found += 1
 
 
-    check_date -= timedelta(days=1)
+    check_date -= timedelta(
+        days=1
+    )
+
 
     days_checked += 1
 
@@ -740,73 +1036,7 @@ print(
 
 
 # =========================================================
-# RSI
-# =========================================================
-
-def rsi_from_closes(
-    closes,
-    length=14
-):
-
-    if len(closes) < length + 1:
-        return None
-
-    s = pd.Series(
-        closes,
-        dtype=float
-    )
-
-    delta = s.diff()
-
-    gain = delta.clip(
-        lower=0
-    )
-
-    loss = -delta.clip(
-        upper=0
-    )
-
-    avg_gain = (
-        gain
-        .rolling(length)
-        .mean()
-        .iloc[-1]
-    )
-
-    avg_loss = (
-        loss
-        .rolling(length)
-        .mean()
-        .iloc[-1]
-    )
-
-    if (
-        pd.isna(avg_gain)
-        or
-        pd.isna(avg_loss)
-    ):
-
-        return None
-
-    if avg_loss == 0:
-        return 100.0
-
-    rs = (
-        avg_gain /
-        avg_loss
-    )
-
-    return float(
-        100 -
-        (
-            100 /
-            (1 + rs)
-        )
-    )
-
-
-# =========================================================
-# BB
+# BOLLINGER BAND
 # =========================================================
 
 def calculate_bb(
@@ -817,69 +1047,59 @@ def calculate_bb(
 
     if len(candles) < length:
 
-        return (
-            None,
-            None,
-            None
-        )
+        return None, None, None
 
-    closes = pd.Series(
-        [
-            float(x["close"])
-            for x in candles[-length:]
-        ],
-        dtype=float
+
+    closes = [
+
+        x["close"]
+
+        for x in candles[-length:]
+
+    ]
+
+
+    series = pd.Series(
+        closes
     )
+
 
     middle = float(
-        closes.mean()
+        series.mean()
     )
 
+
     std = float(
-        closes.std(
+        series.std(
             ddof=0
         )
     )
 
+
     upper = (
-        middle +
-        multiplier * std
+
+        middle
+        + multiplier * std
+
     )
+
 
     lower = (
-        middle -
-        multiplier * std
+
+        middle
+        - multiplier * std
+
     )
+
 
     return (
+
         upper,
+
         middle,
+
         lower
-    )
 
-
-def get_bb_for_index(
-    candles,
-    index
-):
-
-    if index < BB_LENGTH - 1:
-
-        return (
-            None,
-            None,
-            None
-        )
-
-    return calculate_bb(
-        candles[
-            index -
-            BB_LENGTH +
-            1:
-            index + 1
-        ],
-        BB_LENGTH,
-        BB_MULTIPLIER
     )
 
 
@@ -888,591 +1108,152 @@ def get_bb_for_index(
 # =========================================================
 
 def candle_structure(
+
     open_price,
     high_price,
     low_price,
     close_price
+
 ):
 
     candle_range = (
-        high_price -
-        low_price
+
+        high_price
+        - low_price
+
     )
+
 
     if candle_range <= 0:
 
         return {
 
-            "body_ratio": 0.0,
+            "body_ratio": 0,
 
-            "close_position": 0.0,
+            "close_position": 0,
 
-            "lower_wick_ratio": 0.0,
+            "lower_wick_ratio": 0,
 
-            "upper_wick_ratio": 0.0
+            "upper_wick_ratio": 0
 
         }
 
 
     body = abs(
-        close_price -
-        open_price
+
+        close_price
+        - open_price
+
     )
 
+
     lower_wick = (
+
         min(
             open_price,
             close_price
         )
-        -
-        low_price
+        - low_price
+
     )
 
+
     upper_wick = (
-        high_price -
-        max(
+
+        high_price
+        - max(
             open_price,
             close_price
         )
+
     )
 
 
     return {
 
         "body_ratio":
-            body /
-            candle_range,
+
+            body / candle_range,
 
         "close_position":
+
             (
-                close_price -
-                low_price
+                close_price
+                - low_price
             )
-            /
-            candle_range,
+            / candle_range,
 
         "lower_wick_ratio":
-            lower_wick /
-            candle_range,
+
+            lower_wick
+            / candle_range,
 
         "upper_wick_ratio":
-            upper_wick /
-            candle_range
+
+            upper_wick
+            / candle_range
 
     }
 
 
 # =========================================================
-# BULLISH ENGULFING
+# OUTPUT
 # =========================================================
 
-def bullish_engulfing(
-    prev_candle,
-    curr_candle
-):
-
-    if (
-        prev_candle is None
-        or
-        curr_candle is None
-    ):
-
-        return False
-
-
-    if (
-        prev_candle["close"]
-        >=
-        prev_candle["open"]
-    ):
-
-        return False
-
-
-    if (
-        curr_candle["close"]
-        <=
-        curr_candle["open"]
-    ):
-
-        return False
-
-
-    return (
-
-        curr_candle["open"]
-        <=
-        prev_candle["close"]
-
-        and
-
-        curr_candle["close"]
-        >=
-        prev_candle["open"]
-
-    )
-
-
-# =========================================================
-# MACD
-# =========================================================
-
-def macd_values(
-    closes,
-    fast=12,
-    slow=26,
-    signal=9
-):
-
-    if len(closes) < (
-        slow +
-        signal +
-        5
-    ):
-
-        return (
-            None,
-            None,
-            None
-        )
-
-
-    s = pd.Series(
-        closes,
-        dtype=float
-    )
-
-    fast_ema = (
-        s.ewm(
-            span=fast,
-            adjust=False
-        ).mean()
-    )
-
-    slow_ema = (
-        s.ewm(
-            span=slow,
-            adjust=False
-        ).mean()
-    )
-
-    macd_line = (
-        fast_ema -
-        slow_ema
-    )
-
-    signal_line = (
-        macd_line
-        .ewm(
-            span=signal,
-            adjust=False
-        )
-        .mean()
-    )
-
-    hist = (
-        macd_line -
-        signal_line
-    )
-
-    return (
-        macd_line,
-        signal_line,
-        hist
-    )
-
-
-# =========================================================
-# DAILY MACD REVERSAL
-# =========================================================
-
-def detect_daily_macd_reversal(
-    closes
-):
-
-    macd_line, signal_line, hist = (
-        macd_values(
-            closes,
-            MACD_FAST,
-            MACD_SLOW,
-            MACD_SIGNAL
-        )
-    )
-
-
-    if (
-        macd_line is None
-        or
-        len(macd_line) < 4
-    ):
-
-        return {
-
-            "bend": False,
-
-            "strong": False,
-
-            "cross": False,
-
-            "positive_turn": False,
-
-            "line": None,
-
-            "signal": None,
-
-            "hist": None,
-
-            "hist_slope": 0.0
-
-        }
-
-
-    m3, m2, m1, m0 = [
-
-        float(x)
-
-        for x in
-        macd_line.iloc[-4:]
-
-    ]
-
-
-    s1 = float(
-        signal_line.iloc[-2]
-    )
-
-    s0 = float(
-        signal_line.iloc[-1]
-    )
-
-
-    h1 = float(
-        hist.iloc[-2]
-    )
-
-    h0 = float(
-        hist.iloc[-1]
-    )
-
-
-    prior_fall = (
-        m3 > m2
-    )
-
-    rising_sequence = (
-        m2 < m1 < m0
-    )
-
-    below_zero = (
-        m0 < 0
-    )
-
-
-    bend = (
-        prior_fall
-        and
-        rising_sequence
-        and
-        below_zero
-    )
-
-
-    strong = (
-        m2 < m1 < m0
-        and
-        m0 < 0
-        and
-        (
-            m0 - m1
-        )
-        >
-        (
-            m1 - m2
-        ) * 0.50
-    )
-
-
-    cross = (
-        macd_line.iloc[-2]
-        <=
-        signal_line.iloc[-2]
-
-        and
-
-        m0 > s0
-
-        and
-
-        m0 < 0
-    )
-
-
-    positive_turn = (
-        bend
-        or
-        strong
-    )
-
-
-    return {
-
-        "bend": bend,
-
-        "strong": strong,
-
-        "cross": cross,
-
-        "positive_turn":
-            positive_turn,
-
-        "line": m0,
-
-        "signal": s0,
-
-        "hist": h0,
-
-        "hist_slope":
-            h0 - h1
-
-    }
-
-
-# =========================================================
-# WEEKLY MACD
-# =========================================================
-
-def detect_weekly_macd_reversal(
-    candles
-):
-
-    if not candles:
-
-        return {
-
-            "bend": False,
-
-            "downtrend": False,
-
-            "line": None,
-
-            "signal": None
-
-        }
-
-
-    df = pd.DataFrame(
-        candles
-    )
-
-
-    if (
-        df.empty
-        or
-        "date" not in df.columns
-    ):
-
-        return {
-
-            "bend": False,
-
-            "downtrend": False,
-
-            "line": None,
-
-            "signal": None
-
-        }
-
-
-    df["date"] = pd.to_datetime(
-        df["date"]
-    )
-
-    df = df.sort_values(
-        "date"
-    )
-
-
-    df["week"] = (
-        df["date"]
-        .dt
-        .to_period("W-FRI")
-    )
-
-
-    weekly = (
-        df
-        .groupby(
-            "week",
-            sort=True
-        )["close"]
-        .last()
-    )
-
-
-    minimum = (
-        MACD_SLOW +
-        MACD_SIGNAL +
-        5
-    )
-
-
-    if len(weekly) < minimum:
-
-        return {
-
-            "bend": False,
-
-            "downtrend": False,
-
-            "line": None,
-
-            "signal": None
-
-        }
-
-
-    fast_ema = (
-        weekly
-        .ewm(
-            span=MACD_FAST,
-            adjust=False
-        )
-        .mean()
-    )
-
-
-    slow_ema = (
-        weekly
-        .ewm(
-            span=MACD_SLOW,
-            adjust=False
-        )
-        .mean()
-    )
-
-
-    macd_line = (
-        fast_ema -
-        slow_ema
-    )
-
-
-    signal_line = (
-        macd_line
-        .ewm(
-            span=MACD_SIGNAL,
-            adjust=False
-        )
-        .mean()
-    )
-
-
-    m4, m3, m2, m1, m0 = [
-
-        float(x)
-
-        for x in
-        macd_line.iloc[-5:]
-
-    ]
-
-
-    s0 = float(
-        signal_line.iloc[-1]
-    )
-
-
-    downtrend = (
-
-        m4 > m3 > m2 > m1
-
-        and
-
-        m1 < 0
-
-        and
-
-        m0 < 0
-
-    )
-
-
-    bend = (
-
-        downtrend
-
-        and
-
-        m0 > m1
-
-    )
-
-
-    return {
-
-        "bend": bend,
-
-        "downtrend": downtrend,
-
-        "line": m0,
-
-        "signal": s0
-
-    }
+output_rows = []
 
 
 # =========================================================
 # PROCESS TOP 200
 # =========================================================
 
-output_rows = []
-
-
 for _, row in top200.iterrows():
 
     symbol = str(
+
         row[symbol_col]
+
     ).strip()
 
 
-    try:
+    turnover = float(
+        row[turnover_col]
+    )
 
-        turnover = float(
-            row[turnover_col]
-        )
 
-        today_open = float(
-            row[open_col]
-        )
+    today_open = float(
+        row[open_col]
+    )
 
-        today_high = float(
-            row[high_col]
-        )
 
-        today_low = float(
-            row[low_col]
-        )
+    today_high = float(
+        row[high_col]
+    )
 
-        today_close = float(
-            row[close_col]
-        )
 
-    except (
-        TypeError,
-        ValueError
-    ):
+    today_low = float(
+        row[low_col]
+    )
 
-        continue
 
+    today_close = float(
+        row[close_col]
+    )
+
+
+    # =====================================================
+    # PREVIOUS DAY
+    # =====================================================
 
     previous = (
-        previous_lookup
-        .get(symbol)
+        previous_lookup.get(
+            symbol
+        )
     )
 
 
     if previous is None:
+
         continue
 
 
@@ -1494,85 +1275,108 @@ for _, row in top200.iterrows():
 
 
     # =====================================================
-    # BASIC PRICE DATA
+    # PREVIOUS CANDLE TYPE
     # =====================================================
 
-    previous_candle = (
+    if previous_close < previous_open:
 
-        "RED 🔴"
-        if previous_close < previous_open
+        previous_candle = (
+            "RED 🔴"
+        )
 
-        else
+    elif previous_close > previous_open:
 
-        "GREEN 🟢"
-        if previous_close > previous_open
+        previous_candle = (
+            "GREEN 🟢"
+        )
 
-        else
+    else:
 
-        "DOJI"
+        previous_candle = (
+            "DOJI"
+        )
 
-    )
 
+    # =====================================================
+    # GAP
+    # =====================================================
 
     if previous_close != 0:
 
         gap_up_pct = (
 
             (
-                today_open -
-                previous_close
+                today_open
+                - previous_close
             )
-            /
-            previous_close
-            *
-            100
-
-        )
-
-        current_gain_pct = (
-
-            (
-                today_close -
-                previous_close
-            )
-            /
-            previous_close
-            *
-            100
+            / previous_close
+            * 100
 
         )
 
     else:
 
-        gap_up_pct = 0.0
-        current_gain_pct = 0.0
+        gap_up_pct = 0
 
 
-    gap_maintained = (
+    # =====================================================
+    # CURRENT GAIN
+    # =====================================================
 
-        "YES ✅"
-        if today_close >= today_open
+    if previous_close != 0:
 
-        else
+        current_gain_pct = (
 
-        "PARTIAL 🟡"
-        if today_close > previous_close
+            (
+                today_close
+                - previous_close
+            )
+            / previous_close
+            * 100
 
-        else
+        )
 
-        "NO 🔴"
+    else:
 
-    )
+        current_gain_pct = 0
+
+
+    # =====================================================
+    # GAP MAINTAINED
+    # =====================================================
+
+    if today_close >= today_open:
+
+        gap_maintained = (
+            "YES ✅"
+        )
+
+    elif today_close > previous_close:
+
+        gap_maintained = (
+            "PARTIAL 🟡"
+        )
+
+    else:
+
+        gap_maintained = (
+            "NO 🔴"
+        )
 
 
     # =====================================================
     # HISTORY
     # =====================================================
 
+    hist = history_data.get(
+        symbol,
+        []
+    )
+
+
     hist = sorted(
 
-        history_data
-        .get(symbol, []),
+        hist,
 
         key=lambda x:
             x["date"]
@@ -1580,1177 +1384,992 @@ for _, row in top200.iterrows():
     )
 
 
-    if len(hist) < 60:
-        continue
-
-
-    all_candles = (
-        hist +
-        [{
-            "date":
-                latest_date,
-
-            "open":
-                today_open,
-
-            "high":
-                today_high,
-
-            "low":
-                today_low,
-
-            "close":
-                today_close
-        }]
-    )
-
-
-    closes = [
-        x["close"]
-        for x in all_candles
-    ]
-
-
-    # =====================================================
-    # MACD
-    # =====================================================
-
-    daily = (
-        detect_daily_macd_reversal(
-            closes
-        )
-    )
-
-
-    weekly = (
-        detect_weekly_macd_reversal(
-            all_candles
-        )
-    )
-
-
     # =====================================================
     # SETUP CANDLE
+    #
+    # hist[-1] = previous trading day
     # =====================================================
 
-    setup = hist[-1]
+    if len(hist) >= 3:
 
-    setup_index = (
-        len(hist) - 1
+        c1 = hist[-3]
+
+        c2 = hist[-2]
+
+        setup = hist[-1]
+
+    else:
+
+        c1 = None
+
+        c2 = None
+
+        setup = None
+
+
+    # =====================================================
+    # SETUP BB
+    # =====================================================
+
+    setup_lower_bb = None
+
+
+    if len(hist) >= BB_LENGTH:
+
+        _, _, setup_lower_bb = (
+
+            calculate_bb(
+
+                hist,
+
+                BB_LENGTH,
+
+                BB_MULTIPLIER
+
+            )
+
+        )
+
+
+    # =====================================================
+    # SETUP VALUES
+    # =====================================================
+
+    if setup is not None:
+
+        setup_open = (
+            setup["open"]
+        )
+
+        setup_high = (
+            setup["high"]
+        )
+
+        setup_low = (
+            setup["low"]
+        )
+
+        setup_close = (
+            setup["close"]
+        )
+
+    else:
+
+        setup_open = None
+
+        setup_high = None
+
+        setup_low = None
+
+        setup_close = None
+
+
+    # =====================================================
+    
+# =========================================================
+# MULTI-REVERSAL SCORING ENGINE
+# =========================================================
+#
+# FINAL LIST IS NOT LIMITED TO ONE PERFECT BB SETUP.
+#
+# SETUP 1 : LOWER BB REVERSAL
+# SETUP 2 : BULLISH ENGULFING + BB/EXHAUSTION
+# SETUP 3 : OVERSOLD + STRONG CANDLE / GAP-UP
+#
+# TURNOVER IS A SCORE FACTOR, NOT A HARD FILTER.
+# FINAL LIST = TOP POTENTIAL REVERSALS, MAX 10
+# =========================================================
+
+
+def rsi_from_closes(closes, length=14):
+
+    if len(closes) < length + 1:
+        return None
+
+    s = pd.Series(closes, dtype=float)
+
+    delta = s.diff()
+
+    gain = delta.clip(lower=0)
+
+    loss = -delta.clip(upper=0)
+
+    avg_gain = gain.rolling(
+        length
+    ).mean()
+
+    avg_loss = loss.rolling(
+        length
+    ).mean()
+
+    ag = avg_gain.iloc[-1]
+    al = avg_loss.iloc[-1]
+
+    if pd.isna(ag) or pd.isna(al):
+        return None
+
+    if al == 0:
+        return 100.0
+
+    rs = ag / al
+
+    return float(
+        100 - (100 / (1 + rs))
     )
 
 
-    _, _, setup_lower_bb = (
-        get_bb_for_index(
+def candle_structure(
+    open_price,
+    high_price,
+    low_price,
+    close_price
+):
+
+    candle_range = high_price - low_price
+
+    if candle_range <= 0:
+        return {
+            "body_ratio": 0,
+            "close_position": 0,
+            "lower_wick_ratio": 0,
+            "upper_wick_ratio": 0
+        }
+
+    body = abs(
+        close_price - open_price
+    )
+
+    lower_wick = (
+        min(open_price, close_price)
+        - low_price
+    )
+
+    upper_wick = (
+        high_price
+        - max(open_price, close_price)
+    )
+
+    return {
+        "body_ratio":
+            body / candle_range,
+
+        "close_position":
+            (close_price - low_price)
+            / candle_range,
+
+        "lower_wick_ratio":
+            lower_wick / candle_range,
+
+        "upper_wick_ratio":
+            upper_wick / candle_range
+    }
+
+
+def bullish_engulfing(prev_candle, curr_candle):
+
+    if prev_candle is None or curr_candle is None:
+        return False
+
+    prev_open = prev_candle["open"]
+    prev_close = prev_candle["close"]
+
+    curr_open = curr_candle["open"]
+    curr_close = curr_candle["close"]
+
+    # Previous candle must be bearish.
+    if prev_close >= prev_open:
+        return False
+
+    # Current candle must be bullish.
+    if curr_close <= curr_open:
+        return False
+
+    # Real body engulfs previous real body.
+    return (
+        curr_open <= prev_close
+        and
+        curr_close >= prev_open
+    )
+
+
+def get_bb_for_index(candles, index):
+
+    if index < BB_LENGTH - 1:
+        return None, None, None
+
+    window = candles[
+        index - BB_LENGTH + 1:
+        index + 1
+    ]
+
+    return calculate_bb(
+        window,
+        BB_LENGTH,
+        BB_MULTIPLIER
+    )
+
+
+# =========================================================
+# DAILY MACD HISTOGRAM — FRESH BEND BELOW ZERO → UP
+# =========================================================
+def macd_histogram_from_closes(closes, fast=12, slow=26, signal=9):
+    if len(closes) < slow + signal:
+        return []
+    series = pd.Series(closes, dtype=float)
+    macd_line = series.ewm(span=fast, adjust=False).mean() - series.ewm(span=slow, adjust=False).mean()
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    return (macd_line - signal_line).tolist()
+
+
+def detect_macd_bend(closes, fast=12, slow=26, signal=9):
+    """Daily MACD early reversal + positive turn."""
+    min_bars = slow + signal + 5
+    if len(closes) < min_bars:
+        return False, False, False, False, None, None, None, None
+
+    series = pd.Series(closes, dtype=float)
+    macd_line = series.ewm(span=fast, adjust=False).mean() - series.ewm(span=slow, adjust=False).mean()
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    hist = macd_line - signal_line
+
+    m3, m2, m1, m0 = [float(x) for x in macd_line.iloc[-4:]]
+    h1, h0 = float(hist.iloc[-2]), float(hist.iloc[-1])
+    s0 = float(signal_line.iloc[-1])
+
+    bend_up = m2 < m3 and m1 <= m2 and m0 > m1 and m0 < 0
+    strong_recovery = m2 < m3 and m1 > m2 and m0 > m1 and m0 < 0
+    macd_cross_up = macd_line.iloc[-2] <= signal_line.iloc[-2] and macd_line.iloc[-1] > signal_line.iloc[-1]
+
+    # Main V8 trigger: histogram turns positive now.
+    daily_macd_positive_turn = h1 <= 0 and h0 > 0
+    # If already above zero, a fresh rising histogram + bullish MACD cross is also valid.
+    daily_macd_bullish = daily_macd_positive_turn or (h0 > 0 and h0 > h1 and macd_line.iloc[-1] > signal_line.iloc[-1])
+
+    return bend_up, strong_recovery, macd_cross_up, daily_macd_positive_turn, m0, s0, h0, float(h0 - h1)
+
+
+def detect_weekly_macd_reversal(candles, fast=12, slow=26, signal=9):
+    """Weekly MACD must be in a downtrend and start bending upward below zero."""
+    if not candles:
+        return False, False, None, None
+
+    df = pd.DataFrame(candles)
+    if df.empty or "date" not in df.columns:
+        return False, False, None, None
+
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date")
+    df["week"] = df["date"].dt.to_period("W-FRI")
+    weekly = df.groupby("week", sort=True)["close"].last()
+
+    if len(weekly) < slow + signal + 3:
+        return False, False, None, None
+
+    macd_line = weekly.ewm(span=fast, adjust=False).mean() - weekly.ewm(span=slow, adjust=False).mean()
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+
+    m3, m2, m1, m0 = [float(x) for x in macd_line.iloc[-4:]]
+    s0 = float(signal_line.iloc[-1])
+
+    # Macro regime: MACD was falling for at least two weeks, then bends up.
+    downtrend = m3 > m2 > m1 and m1 < 0
+    bend_up = downtrend and m0 > m1 and m0 < 0
+    return bend_up, downtrend, m0, s0
+
+
+# =========================================================
+# OUTPUT
+# =========================================================
+
+output_rows = []
+
+
+# =========================================================
+# PROCESS TOP 200
+# =========================================================
+
+for _, row in top200.iterrows():
+
+    symbol = str(
+        row[symbol_col]
+    ).strip()
+
+    turnover = float(
+        row[turnover_col]
+    )
+
+    today_open = float(
+        row[open_col]
+    )
+
+    today_high = float(
+        row[high_col]
+    )
+
+    today_low = float(
+        row[low_col]
+    )
+
+    today_close = float(
+        row[close_col]
+    )
+
+    previous = previous_lookup.get(symbol)
+
+    if previous is None:
+        continue
+
+    previous_open = previous["open"]
+    previous_high = previous["high"]
+    previous_low = previous["low"]
+    previous_close = previous["close"]
+
+    if previous_close < previous_open:
+        previous_candle = "RED 🔴"
+    elif previous_close > previous_open:
+        previous_candle = "GREEN 🟢"
+    else:
+        previous_candle = "DOJI"
+
+    if previous_close != 0:
+        gap_up_pct = (
+            (today_open - previous_close)
+            / previous_close
+            * 100
+        )
+        current_gain_pct = (
+            (today_close - previous_close)
+            / previous_close
+            * 100
+        )
+    else:
+        gap_up_pct = 0
+        current_gain_pct = 0
+
+    if today_close >= today_open:
+        gap_maintained = "YES ✅"
+    elif today_close > previous_close:
+        gap_maintained = "PARTIAL 🟡"
+    else:
+        gap_maintained = "NO 🔴"
+
+    hist = sorted(
+        history_data.get(symbol, []),
+        key=lambda x: x["date"]
+    )
+
+    macd_closes = [x["close"] for x in hist] + [today_close]
+    (
+        macd_bend_up,
+        macd_strong_recovery,
+        macd_cross_up,
+        daily_macd_positive_turn,
+        macd_line_now,
+        macd_signal_now,
+        macd_hist_now,
+        macd_hist_slope
+    ) = detect_macd_bend(macd_closes)
+
+    weekly_candles = hist + [{
+        "date": latest_date,
+        "close": today_close
+    }]
+    (
+        weekly_macd_bend,
+        weekly_macd_downtrend,
+        weekly_macd_now,
+        weekly_signal_now
+    ) = detect_weekly_macd_reversal(weekly_candles)
+
+    # The last historical candle is the previous trading day.
+    setup = hist[-1] if len(hist) >= 1 else None
+    prev_setup = hist[-2] if len(hist) >= 2 else None
+    prev2_setup = hist[-3] if len(hist) >= 3 else None
+
+    setup_lower_bb = None
+    setup_rsi = None
+    previous_rsi = None
+    rsi_recovery = False
+    rsi_deep_oversold = False
+
+    if setup is not None:
+
+        setup_index = len(hist) - 1
+
+        _, _, setup_lower_bb = get_bb_for_index(
             hist,
             setup_index
         )
-    )
 
+        closes_to_setup = [
+            x["close"]
+            for x in hist[:setup_index + 1]
+        ]
 
-    # =====================================================
-    # RSI
-    # =====================================================
-
-    setup_closes = [
-        x["close"]
-        for x in
-        hist[:setup_index + 1]
-    ]
-
-
-    setup_rsi = (
-        rsi_from_closes(
-            setup_closes,
-            RSI_LENGTH
-        )
-    )
-
-
-    previous_rsi = (
-
-        rsi_from_closes(
-            setup_closes[:-1],
-            RSI_LENGTH
+        setup_rsi = rsi_from_closes(
+            closes_to_setup,
+            14
         )
 
-        if
-        len(setup_closes)
-        >=
-        RSI_LENGTH + 2
+        # RSI of the candle immediately before the setup candle.
+        if len(closes_to_setup) >= 16:
+            previous_rsi = rsi_from_closes(
+                closes_to_setup[:-1],
+                14
+            )
 
-        else
-        None
-
-    )
-
-
-    current_rsi = (
-        rsi_from_closes(
-            closes,
-            RSI_LENGTH
+        rsi_deep_oversold = (
+            setup_rsi is not None
+            and
+            setup_rsi <= 30
         )
-    )
 
+        # Fresh RSI recovery: RSI is still relatively low,
+        # but has started turning upward.
+        rsi_recovery = (
+            previous_rsi is not None
+            and
+            setup_rsi is not None
+            and
+            setup_rsi > previous_rsi
+            and
+            setup_rsi <= 45
+        )
 
-    rsi_recovery = (
-
-        previous_rsi is not None
-
-        and
-
-        setup_rsi is not None
-
-        and
-
-        setup_rsi >
-        previous_rsi
-
-        and
-
-        setup_rsi <= 50
-
-    )
-
-
+    current_rsi = rsi_from_closes(macd_closes, 14)
     current_rsi_recovery = (
-
-        setup_rsi is not None
-
-        and
-
-        current_rsi is not None
-
-        and
-
-        current_rsi >
-        setup_rsi
-
-        and
-
+        setup_rsi is not None and
+        current_rsi is not None and
+        current_rsi > setup_rsi and
         current_rsi <= 55
-
     )
 
+    # -----------------------------------------------------
+    # PRICE FALL / EXHAUSTION
+    # -----------------------------------------------------
 
-    oversold = (
+    falling_closes = False
+    lower_low = False
 
-        setup_rsi is not None
-
+    if (
+        prev2_setup is not None
         and
-
-        setup_rsi <= 35
-
-    )
-
-
-    deep_oversold = (
-
-        setup_rsi is not None
-
+        prev_setup is not None
         and
-
-        setup_rsi <= 30
-
-    )
-
-
-    # =====================================================
-    # LOWER BB ENGINE
-    # =====================================================
-
-    recent_bb_touch = False
-
-    recent_bb_rejection = False
-
-    best_lower_bb = (
-        setup_lower_bb
-    )
-
-    bb_rejection_index = None
-
-
-    recent_start = max(
-        0,
-        len(hist) - 4
-    )
-
-
-    for idx in range(
-        recent_start,
-        len(hist)
+        setup is not None
     ):
 
-        _, _, bb_low = (
-            get_bb_for_index(
-                hist,
-                idx
-            )
+        falling_closes = (
+            prev2_setup["close"]
+            > prev_setup["close"]
+            > setup["close"]
         )
 
-
-        if bb_low is None:
-            continue
-
-
-        bar = hist[idx]
-
-
-        if bar["low"] <= bb_low:
-
-            recent_bb_touch = True
-
-
-            cs = candle_structure(
-
-                bar["open"],
-                bar["high"],
-                bar["low"],
-                bar["close"]
-
-            )
-
-
-            rejection = (
-
-                cs[
-                    "lower_wick_ratio"
-                ] >= 0.20
-
-                and
-
-                cs[
-                    "close_position"
-                ] >= 0.50
-
-                and
-
-                bar["close"]
-                >=
-                bb_low
-
-            )
-
-
-            if rejection:
-
-                recent_bb_rejection = True
-
-                bb_rejection_index = idx
-
-                best_lower_bb = bb_low
-
-
-    # =====================================================
-    # SETUP CANDLE BB REJECTION
-    # =====================================================
-
-    setup_cs = candle_structure(
-
-        setup["open"],
-        setup["high"],
-        setup["low"],
-        setup["close"]
-
-    )
-
-
-    setup_bb_touch = (
-
-        setup_lower_bb is not None
-
-        and
-
-        setup["low"]
-        <=
-        setup_lower_bb
-
-    )
-
-
-    setup_bb_break = (
-
-        setup_lower_bb is not None
-
-        and
-
-        setup["low"]
-        <
-        setup_lower_bb
-
-    )
-
-
-    setup_bb_close_back = (
-
-        setup_lower_bb is not None
-
-        and
-
-        setup["close"]
-        >=
-        setup_lower_bb
-
-    )
-
-
-    meaningful_wick = (
-
-        setup_cs[
-            "lower_wick_ratio"
-        ] >= 0.20
-
-    )
-
-
-    strong_wick = (
-
-        setup_cs[
-            "lower_wick_ratio"
-        ] >= 0.30
-
-    )
-
-
-    setup_bb_rejection = (
-
-        setup_bb_touch
-
-        and
-
-        setup_bb_close_back
-
-        and
-
-        meaningful_wick
-
-    )
-
-
-    # =====================================================
-    # PREVIOUS RED + LOWER BB
-    # =====================================================
-
-    prev_idx = (
-        len(hist) - 2
-    )
-
-
-    previous_red_lower_bb = False
-
-    gapup_after_red_bb = False
-
-
-    if prev_idx >= 0:
-
-        _, _, prev_bb_low = (
-            get_bb_for_index(
-                hist,
-                prev_idx
-            )
+        lower_low = (
+            setup["low"]
+            < prev_setup["low"]
         )
 
-
-        prev_bar = hist[prev_idx]
-
-
-        previous_red_lower_bb = (
-
-            prev_bb_low is not None
-
-            and
-
-            prev_bar["close"]
-            <
-            prev_bar["open"]
-
-            and
-
-            prev_bar["low"]
-            <=
-            prev_bb_low
-
-        )
-
-
-        gapup_after_red_bb = (
-
-            previous_red_lower_bb
-
-            and
-
-            today_open >
-            prev_bar["close"]
-
-            and
-
-            today_close >
-            today_open
-
-        )
-
-
-    # =====================================================
-    # CORE BB PATTERN
-    # =====================================================
-
-    bb_core = (
-
-        recent_bb_touch
-
+    selling_exhaustion = (
+        falling_closes
         and
-
-        recent_bb_rejection
-
+        lower_low
     )
 
+    # -----------------------------------------------------
+    # LOWER BB
+    # -----------------------------------------------------
 
-    bb_pattern = (
+    bb_touch = False
+    bb_break = False
+    close_back_above_bb = False
 
-        bb_core
+    if setup_lower_bb is not None and setup is not None:
 
-        or
+        bb_touch = (
+            setup["low"]
+            <= setup_lower_bb
+        )
 
-        setup_bb_rejection
+        bb_break = (
+            setup["low"]
+            < setup_lower_bb
+        )
 
-        or
+        close_back_above_bb = (
+            setup["close"]
+            > setup_lower_bb
+        )
 
-        gapup_after_red_bb
+    # -----------------------------------------------------
+    # LOWER WICK REJECTION
+    # -----------------------------------------------------
 
+    bb_rejection = False
+
+    if setup is not None:
+
+        setup_candle = candle_structure(
+            setup["open"],
+            setup["high"],
+            setup["low"],
+            setup["close"]
+        )
+
+        bb_rejection = (
+            setup_candle["lower_wick_ratio"] >= 0.20
+            and
+            setup_candle["close_position"] >= 0.50
+        )
+
+    # -----------------------------------------------------
+    # BULLISH ENGULFING
+    # -----------------------------------------------------
+
+    engulfing = bullish_engulfing(
+        prev_setup,
+        setup
     )
 
+    # -----------------------------------------------------
+    # OVERSOLD
+    # -----------------------------------------------------
 
-    # =====================================================
-    # TODAY PRICE CONFIRMATION
-    # =====================================================
+    oversold = (
+        setup_rsi is not None
+        and
+        setup_rsi <= 35
+    )
 
-    today_cs = candle_structure(
+    deep_oversold = (
+        setup_rsi is not None
+        and
+        setup_rsi <= 30
+    )
 
+    # -----------------------------------------------------
+    # TODAY STRONG CANDLE
+    # -----------------------------------------------------
+
+    today_candle = candle_structure(
         today_open,
         today_high,
         today_low,
         today_close
-
     )
 
+    today_green = (
+        today_close > today_open
+    )
 
     strong_green = (
-
-        today_close >
-        today_open
-
+        today_green
         and
-
-        today_cs[
-            "body_ratio"
-        ] >= 0.45
-
+        today_candle["body_ratio"] >= 0.45
         and
-
-        today_cs[
-            "close_position"
-        ] >= 0.65
-
+        today_candle["close_position"] >= 0.65
     )
 
-
-    high_break = (
-
-        today_close >
-        setup["high"]
-
-    )
-
-
-    low_protected = (
-
-        today_low >=
-        setup["low"]
-
-    )
-
+    # -----------------------------------------------------
+    # GAP-UP
+    # -----------------------------------------------------
 
     gap_up = (
         gap_up_pct >= 0.50
     )
 
-
     strong_gap_up = (
         gap_up_pct >= 1.00
     )
 
+    # Previous red candle at/through lower BB, followed by a gap-up bullish candle.
+    previous_red_lower_bb = False
+    gapup_after_red_bb = False
+    if prev_setup is not None:
+        prev_idx = len(hist) - 2
+        _, _, prev_bb_low = get_bb_for_index(hist, prev_idx)
+        previous_red_lower_bb = (
+            prev_bb_low is not None and
+            prev_setup["close"] < prev_setup["open"] and
+            prev_setup["low"] <= prev_bb_low
+        )
+        gapup_after_red_bb = (
+            previous_red_lower_bb and
+            setup is not None and
+            setup["open"] > prev_setup["close"] and
+            setup["close"] > setup["open"]
+        )
 
-    engulfing = (
-        bullish_engulfing(
-            setup,
-            all_candles[-1]
+    # -----------------------------------------------------
+    # TODAY CONFIRMATION
+    # -----------------------------------------------------
+
+    high_break = False
+    low_protected = False
+
+    if setup is not None:
+
+        high_break = (
+            today_close > setup["high"]
+        )
+
+        low_protected = (
+            today_low >= setup["low"]
+        )
+
+    # -----------------------------------------------------
+    # RECENT BB TOUCH
+    #
+    # Gives the scanner some flexibility. A stock does not
+    # have to touch BB on exactly one candle if the touch
+    # happened in the recent 3-candle reversal area.
+    # -----------------------------------------------------
+
+    recent_bb_touch = False
+    recent_bb_rejection = False
+
+    recent_rsi = setup_rsi
+
+    recent_bb_low = setup_lower_bb
+
+    recent_bars = hist[-3:] if len(hist) >= 3 else hist
+
+    for idx_offset, bar in enumerate(recent_bars):
+
+        absolute_index = (
+            len(hist)
+            - len(recent_bars)
+            + idx_offset
+        )
+
+        _, _, bb_low = get_bb_for_index(
+            hist,
+            absolute_index
+        )
+
+        if bb_low is None:
+            continue
+
+        if bar["low"] <= bb_low:
+
+            recent_bb_touch = True
+
+            cs = candle_structure(
+                bar["open"],
+                bar["high"],
+                bar["low"],
+                bar["close"]
+            )
+
+            if (
+                cs["lower_wick_ratio"] >= 0.20
+                and
+                cs["close_position"] >= 0.50
+            ):
+                recent_bb_rejection = True
+
+    # -----------------------------------------------------
+    # REVERSAL SETUPS
+    # -----------------------------------------------------
+
+    bb_reversal = (
+        recent_bb_touch
+        and
+        (
+            recent_bb_rejection
+            or
+            strong_green
+            or
+            engulfing
         )
     )
 
+    engulfing_reversal = (
+        engulfing
+        and
+        (
+            recent_bb_touch
+            or
+            selling_exhaustion
+        )
+    )
 
-    # =====================================================
-    # CONFIRMATIONS
-    # =====================================================
+    oversold_reversal = (
+        (
+            oversold
+            or
+            rsi_recovery
+        )
+        and
+        (
+            strong_green
+            or
+            engulfing
+            or
+            gap_up
+            or
+            high_break
+        )
+    )
 
-    confirmations_count = sum([
+    # -----------------------------------------------------
+    # CONFIRMATION QUALITY
+    # -----------------------------------------------------
 
-        strong_green,
+    confirmation = (
+        high_break
+        or
+        strong_green
+        or
+        strong_gap_up
+    )
 
-        high_break,
+    # -----------------------------------------------------
+    # TURNOVER SCORE
+    # -----------------------------------------------------
 
-        low_protected,
+    rank = turnover_rank.get(
+        symbol,
+        999
+    )
 
-        gap_maintained == "YES ✅",
+    if rank <= 25:
+        turnover_score = 10
+    elif rank <= 50:
+        turnover_score = 8
+    elif rank <= 100:
+        turnover_score = 5
+    elif rank <= 150:
+        turnover_score = 3
+    else:
+        turnover_score = 1
 
-        engulfing,
-
-        current_rsi_recovery,
-
-        daily["positive_turn"],
-
-        weekly["bend"]
-
-    ])
-
-
-    # =====================================================
-    # V8.2 SCORE
-    # =====================================================
+    # ---------------------------------------------------------
+    # SCORE
+    # ---------------------------------------------------------
+    # PURPOSE:
+    # Find stocks that are not merely "near the BB", but are
+    # actually showing a reversal + confirmation + momentum.
     #
-    # MAX = 100
-    #
-    # BB = 50
-    # DAILY MACD = 15
-    # PRICE = 15
-    # RSI = 10
-    # WEEKLY = 7
-    # TURNOVER = 3
-    #
-    # =====================================================
+    # The score is deliberately biased toward PRICE ACTION.
+    # Turnover is supportive, not the main reason for a high score.
+    # ---------------------------------------------------------
 
     score = 0
 
-
-    # -----------------------------------------------------
-    # BB = 50
-    # -----------------------------------------------------
-
-    if bb_core:
-        score += 30
-
-    elif setup_bb_rejection:
-        score += 27
-
-    elif gapup_after_red_bb:
-        score += 25
-
-
+    # 1) BB / exhaustion
     if recent_bb_touch:
-        score += 5
-
-
-    if recent_bb_rejection:
-        score += 6
-
-
-    if meaningful_wick:
-        score += 4
-
-
-    if strong_wick:
-        score += 2
-
-
-    if previous_red_lower_bb:
-        score += 3
-
-
-    # -----------------------------------------------------
-    # DAILY MACD = 15
-    # -----------------------------------------------------
-
-    if daily["bend"]:
         score += 10
 
-    elif daily["strong"]:
+    if recent_bb_rejection:
+        score += 10
+
+    if selling_exhaustion:
         score += 8
 
-
-    if daily["cross"]:
-        score += 3
-
-
-    if daily.get(
-        "hist_slope",
-        0
-    ) > 0:
-
-        score += 2
-
-
-    # -----------------------------------------------------
-    # PRICE = 15
-    # -----------------------------------------------------
-
-    if strong_green:
-        score += 4
-
-
-    if high_break:
-        score += 4
-
-
-    if low_protected:
-        score += 3
-
-
-    if gap_maintained == "YES ✅":
-        score += 2
-
-
+    # 2) Reversal trigger
     if engulfing:
-        score += 2
-
-
-    # -----------------------------------------------------
-    # RSI = 10
-    # -----------------------------------------------------
-
-    if rsi_recovery:
-        score += 4
-
-
-    if current_rsi_recovery:
-        score += 3
-
+        score += 15
 
     if oversold:
-        score += 2
+        score += 10
 
+    if rsi_recovery:
+        score += 10
 
-    if deep_oversold:
-        score += 1
-
-
-    # -----------------------------------------------------
-    # WEEKLY = 7
-    # -----------------------------------------------------
-
-    if weekly["downtrend"]:
-        score += 3
-
-
-    if weekly["bend"]:
+    if macd_bend_up:
+        score += 8
+    if macd_strong_recovery:
+        score += 4
+    if macd_cross_up:
         score += 4
 
+    if deep_oversold:
+        score += 5
 
-    # -----------------------------------------------------
-    # TURNOVER = 3
-    # -----------------------------------------------------
+    # 3) Real price confirmation — highest importance
+    if strong_green:
+        score += 12
 
-    turnover_rank_value = (
-        turnover_rank.get(
-            symbol,
-            999
-        )
-    )
+    if high_break:
+        score += 12
 
+    if low_protected:
+        score += 8
 
-    if turnover_rank_value <= 25:
+    # 4) Gap confirmation
+    if gap_up:
+        score += 4
+
+    if strong_gap_up:
+        score += 5
+
+    if gap_maintained == "YES ✅":
+        score += 5
+
+    # 5) Turnover — supportive only
+    score += turnover_score
+
+    # 6) Independent setup agreement
+    setup_count = sum([
+        bb_reversal,
+        engulfing_reversal,
+        oversold_reversal
+    ])
+
+    if setup_count >= 2:
+        score += 5
+
+    if setup_count >= 3:
+        score += 5
+
+    # ---------------------------------------------------------
+    # IMPORTANT:
+    # A stock with negative current gain must not become a
+    # "strong reversal" only because several historical signals
+    # are present.
+    # ---------------------------------------------------------
+
+    if current_gain_pct < 0:
+        score = min(score, 59)
+
+    # Positive momentum bonus
+    if current_gain_pct >= 2.0:
         score += 3
 
-    elif turnover_rank_value <= 100:
-        score += 2
+    if current_gain_pct >= 4.0:
+        score += 3
 
-    else:
-        score += 1
+    if score > 100:
+        score = 100
 
-
-    score = min(
-        100,
-        score
-    )
-
-
-    # =====================================================
-    # V8.2 QUALIFICATION
-    # =====================================================
-    #
-    # ONLY BB REVERSAL IS REQUIRED.
-    #
-    # NO MACD HARD FILTER
-    # NO RSI HARD FILTER
-    # NO WEEKLY HARD FILTER
-    #
-    # =====================================================
-
-    qualified = (
-
-        bb_pattern
-
-        and
-
-        score >= MIN_BB_SCORE
-
-    )
-
-
-    # =====================================================
-    # PRIMARY SETUP
-    # =====================================================
-
-    primary_setup = "—"
-
-
-    if bb_core:
-
-        primary_setup = (
-            "💎 STRONG BB REVERSAL"
-        )
-
-    elif setup_bb_rejection:
-
-        primary_setup = (
-            "💎 BB REJECTION"
-        )
-
-    elif gapup_after_red_bb:
-
-        primary_setup = (
-            "💎 RED + LOWER BB → GAP-UP"
-        )
-
-
-    # =====================================================
-    # SETUP TEXT
-    # =====================================================
+    # ---------------------------------------------------------
+    # SETUP TYPE
+    # ---------------------------------------------------------
 
     setup_names = []
 
+    if bb_reversal:
+        setup_names.append("💎 BB REVERSAL")
 
-    if bb_core:
-        setup_names.append(
-            "💎 BB REVERSAL"
-        )
+    if engulfing_reversal:
+        setup_names.append("🔥 ENGULFING")
 
-    elif setup_bb_rejection:
-        setup_names.append(
-            "💎 BB REJECTION"
-        )
+    if oversold_reversal:
+        if rsi_recovery:
+            setup_names.append("🚀 RSI RECOVERY")
+        else:
+            setup_names.append("🚀 OVERSOLD")
 
+    if macd_bend_up:
+        setup_names.append("🔄 MACD BEND UP")
+    elif macd_cross_up:
+        setup_names.append("🔥 MACD CROSS UP")
 
-    if previous_red_lower_bb:
-        setup_names.append(
-            "RED + LOWER BB"
-        )
+    if len(setup_names) == 0:
+        setup_type = "—"
+    else:
+        setup_type = " + ".join(setup_names)
 
-
-    if gapup_after_red_bb:
-        setup_names.append(
-            "GAP-UP"
-        )
-
-
-    if oversold:
-        setup_names.append(
-            "🚀 OVERSOLD"
-        )
-
-
-    if rsi_recovery:
-        setup_names.append(
-            "RSI RECOVERY"
-        )
-
-
-    if current_rsi_recovery:
-        setup_names.append(
-            "CURRENT RSI ↑"
-        )
-
-
-    if daily["positive_turn"]:
-        setup_names.append(
-            "🔄 DAILY MACD BEND ↑"
-        )
-
-
-    if daily["cross"]:
-        setup_names.append(
-            "MACD CROSS"
-        )
-
-
-    if weekly["bend"]:
-        setup_names.append(
-            "📉 WEEKLY MACD BEND ↑"
-        )
-
-
-    if strong_green:
-        setup_names.append(
-            "GREEN"
-        )
-
-
-    if high_break:
-        setup_names.append(
-            "HIGH BREAK"
-        )
-
-
-    if low_protected:
-        setup_names.append(
-            "LOW HOLD"
-        )
-
-
-    if gap_maintained == "YES ✅":
-        setup_names.append(
-            "GAP HOLD"
-        )
-
-
-    if engulfing:
-        setup_names.append(
-            "ENGULFING"
-        )
-
-
-    full_setup = (
-
-        " + ".join(
-            setup_names
-        )
-
-        if setup_names
-
-        else
-
-        "—"
-
-    )
-
-
-    # =====================================================
+    # ---------------------------------------------------------
     # SIGNAL
-    # =====================================================
+    # ---------------------------------------------------------
 
-    if score >= 80:
+    if score >= 85:
+        final_signal = "💎 A+ POTENTIAL"
 
-        signal = (
-            "🎯 TOP SWING"
-        )
+    elif score >= 75:
+        final_signal = "🔥 STRONG SWING"
 
     elif score >= 65:
-
-        signal = (
-            "🔥 STRONG SWING"
-        )
-
-    elif score >= 50:
-
-        signal = (
-            "🟢 SWING WATCH"
-        )
+        final_signal = "👀 WATCH"
 
     else:
+        final_signal = "—"
 
-        signal = (
-            "👀 BB WATCH"
-        )
-
-
-    # =====================================================
-    # DAILY MACD TEXT
-    # =====================================================
-
-    if daily["bend"]:
-
-        daily_macd_text = (
-            "🔥 BEND ↑"
-        )
-
-    elif daily["strong"]:
-
-        daily_macd_text = (
-            "🟢 TURN ↑"
-        )
-
-    elif daily["cross"]:
-
-        daily_macd_text = (
-            "⚡ CROSS ↑"
-        )
-
-    else:
-
-        daily_macd_text = (
-            "—"
-        )
-
-
-    # =====================================================
-    # WEEKLY MACD TEXT
-    # =====================================================
-
-    if weekly["bend"]:
-
-        weekly_macd_text = (
-            "🔥 BEND ↑"
-        )
-
-    elif weekly["downtrend"]:
-
-        weekly_macd_text = (
-            "📉 DOWN"
-        )
-
-    else:
-
-        weekly_macd_text = (
-            "—"
-        )
-
-
-    # =====================================================
-    # CONFIRMATION TEXT
-    # =====================================================
-
-    confirmation_list = []
-
-
-    if daily["positive_turn"]:
-        confirmation_list.append(
-            "DAILY MACD"
-        )
-
-
-    if rsi_recovery:
-        confirmation_list.append(
-            "RSI"
-        )
-
-
-    if strong_green:
-        confirmation_list.append(
-            "GREEN"
-        )
-
-
-    if high_break:
-        confirmation_list.append(
-            "HIGH BREAK"
-        )
-
-
-    if low_protected:
-        confirmation_list.append(
-            "LOW HOLD"
-        )
-
-
-    if engulfing:
-        confirmation_list.append(
-            "ENGULFING"
-        )
-
-
-    if weekly["bend"]:
-        confirmation_list.append(
-            "WEEKLY MACD"
-        )
-
-
-    if gapup_after_red_bb:
-        confirmation_list.append(
-            "GAP-UP"
-        )
-
-
-    confirmation_text = (
-
-        " + ".join(
-            confirmation_list
-        )
-
-        if confirmation_list
-
-        else
-
-        "BB ONLY"
-
-    )
-
-
-    # =====================================================
+    # ---------------------------------------------------------
     # OUTPUT
-    # =====================================================
+    # ---------------------------------------------------------
 
     output_rows.append([
 
         symbol,
-
         turnover,
 
         previous_open,
-
         previous_high,
-
         previous_low,
-
         previous_close,
-
         previous_candle,
 
         today_open,
-
-        round(
-            gap_up_pct,
-            2
-        ),
+        round(gap_up_pct, 2),
 
         today_close,
-
-        round(
-            current_gain_pct,
-            2
-        ),
+        round(current_gain_pct, 2),
 
         gap_maintained,
 
-        round(
-            best_lower_bb,
-            2
-        )
-        if best_lower_bb is not None
-        else "",
+        (
+            round(setup_lower_bb, 2)
+            if setup_lower_bb is not None
+            else ""
+        ),
 
-        round(
-            setup_rsi,
-            2
-        )
-        if setup_rsi is not None
-        else "",
+        (
+            round(setup_rsi, 2)
+            if setup_rsi is not None
+            else ""
+        ),
 
-        round(
-            previous_rsi,
-            2
-        )
-        if previous_rsi is not None
-        else "",
+        (
+            round(previous_rsi, 2)
+            if previous_rsi is not None
+            else ""
+        ),
 
-        "YES 🔄"
-        if rsi_recovery
-        else "NO",
+        "YES 🔄" if rsi_recovery else "NO",
 
-        "YES ✅"
-        if recent_bb_touch
-        else "NO",
+        "YES ✅" if recent_bb_touch else "NO",
 
-        "YES 🔥"
-        if recent_bb_rejection
-        else "NO",
+        "YES 🔥" if recent_bb_rejection else "NO",
 
-        "YES 🔥"
-        if engulfing
-        else "NO",
+        "YES 🔥" if engulfing else "NO",
 
-        "YES 🔥"
-        if oversold
-        else "NO",
+        "YES 🔥" if oversold else "NO",
 
-        "YES 🚀"
-        if strong_green
-        else "NO",
+        "YES 🚀" if strong_green else "NO",
 
-        "YES 🚀"
-        if high_break
-        else "NO",
+        "YES 🚀" if high_break else "NO",
 
-        "YES ✅"
-        if low_protected
-        else "NO",
+        "YES ✅" if low_protected else "NO",
 
-        primary_setup,
+        setup_type,
 
-        full_setup,
-
-        turnover_rank_value,
-
+        rank,
         score,
 
-        signal,
+        final_signal,
 
-        daily_macd_text,
-
-        "YES 🚀"
-        if daily["strong"]
-        else "NO",
-
-        "YES 🔥"
-        if daily["cross"]
-        else "NO",
-
-        round(
-            daily["line"],
-            6
-        )
-        if daily["line"] is not None
-        else "",
-
-        round(
-            daily["signal"],
-            6
-        )
-        if daily["signal"] is not None
-        else "",
-
-        round(
-            daily["hist"],
-            6
-        )
-        if daily["hist"] is not None
-        else "",
-
-        weekly_macd_text,
-
-        "YES 📉"
-        if weekly["downtrend"]
-        else "NO",
-
-        "YES 🟢"
-        if daily["positive_turn"]
-        else "NO",
-
-        round(
-            current_rsi,
-            2
-        )
-        if current_rsi is not None
-        else "",
-
-        "YES 💎"
-        if previous_red_lower_bb
-        else "NO",
-
-        "YES 🚀"
-        if gapup_after_red_bb
-        else "NO",
-
-        "YES 🔄"
-        if current_rsi_recovery
-        else "NO",
-
-        "YES ✅"
-        if qualified
-        else "NO"
-
+        # Internal V7 fields; not shown in Final List.
+        "YES 🔄" if macd_bend_up else "NO",
+        "YES 🚀" if macd_strong_recovery else "NO",
+        "YES 🔥" if macd_cross_up else "NO",
+        (round(macd_line_now, 6) if macd_line_now is not None else ""),
+        (round(macd_signal_now, 6) if macd_signal_now is not None else ""),
+        (round(macd_hist_now, 6) if macd_hist_now is not None else ""),
+        "YES 🔄" if weekly_macd_bend else "NO",
+        "YES 📉" if weekly_macd_downtrend else "NO",
+        "YES 🟢" if daily_macd_positive_turn else "NO",
+        (round(current_rsi, 2) if current_rsi is not None else ""),
+        "YES 💎" if previous_red_lower_bb else "NO",
+        "YES 🚀" if gapup_after_red_bb else "NO",
+        "YES 🔄" if current_rsi_recovery else "NO"
     ])
 
 
 # =========================================================
-# NIFTY200 HEADERS
+# NIFTY200 HEADER
 # =========================================================
 
 nifty_headers = [
@@ -2762,7 +2381,6 @@ nifty_headers = [
     "Previous High",
     "Previous Low",
     "Previous Close",
-
     "Previous Candle",
 
     "Today Open",
@@ -2772,891 +2390,427 @@ nifty_headers = [
     "Gap Maintained?",
 
     "Lower BB (20,1.5)",
-
     "RSI 14",
     "Previous RSI 14",
     "RSI Recovery?",
 
     "BB Touch?",
     "BB Rejection?",
-
     "Bullish Engulfing?",
     "Oversold?",
-
     "Strong Green?",
     "High Break?",
     "Low Protected?",
 
-    "Primary Setup",
-    "Full Setup",
+    "Setup Type",
 
     "Turnover Rank",
     "Strength Score",
     "Signal",
-
-    "Daily MACD",
-    "Daily MACD Strong",
+    "Daily MACD Bend",
+    "Daily MACD Strong Recovery",
     "Daily MACD Cross",
     "Daily MACD Line",
     "Daily MACD Signal",
     "Daily MACD Hist",
-
-    "Weekly MACD",
+    "Weekly MACD Bend",
     "Weekly MACD Downtrend",
-
     "Daily MACD Positive Turn",
-
     "Current RSI",
-
     "Prev Red + Lower BB",
     "Gap-Up After BB",
-    "Current RSI Recovery",
-
-    "V8.2 Qualified"
-
+    "Current RSI Recovery"
 ]
 
 
 # =========================================================
-# GOOGLE RETRY
+# WRITE NIFTY200
 # =========================================================
 
-def retry_google_call(
-    func,
-    label,
-    attempts=5
-):
+safe_batch_clear(sheet_nifty, ["A1:AN1000"])
 
-    last_error = None
-
-    for attempt in range(
-        1,
-        attempts + 1
-    ):
-
-        try:
-
-            return func()
-
-        except Exception as exc:
-
-            last_error = exc
-
-            print(
-                f"Google Sheets retry "
-                f"{attempt}/{attempts} "
-                f"after {label}: "
-                f"{exc}"
-            )
-
-            if attempt < attempts:
-
-                time.sleep(
-                    min(
-                        2 ** attempt,
-                        12
-                    )
-                )
-
-
-    raise last_error
-
-
-# =========================================================
-# UPDATE NIFTY200
-# =========================================================
-
-retry_google_call(
-
-    lambda:
-        sheet_nifty.batch_clear(
-            ["A1:AZ1000"]
-        ),
-
-    "NIFTY200 clear"
-
+sheet_nifty.update(
+    range_name="A1:AN1",
+    values=[nifty_headers],
+    value_input_option="RAW"
 )
-
-
-retry_google_call(
-
-    lambda:
-        sheet_nifty.update(
-            "A1:AP1",
-            [nifty_headers],
-            value_input_option="RAW"
-        ),
-
-    "NIFTY200 headers"
-
-)
-
 
 if output_rows:
 
-    retry_google_call(
-
-        lambda:
-            sheet_nifty.update(
-                "A2",
-                output_rows,
-                value_input_option="RAW"
-            ),
-
-        "NIFTY200 data"
-
+    sheet_nifty.update(
+        range_name="A2",
+        values=output_rows,
+        value_input_option="RAW"
     )
 
 
 # =========================================================
-# FINAL LIST
+# V8 FINAL LIST — MACRO DOWN + DAILY TURN + BB REVERSAL
 # =========================================================
-#
-# V8.2:
-#
-# BB reversal is enough.
-#
-# MACD / RSI / WEEKLY MACD
-# only increase score.
-#
-# NO MAXIMUM 3.
-#
+# Core philosophy:
+# 1. WEEKLY MACD = downtrend, but starting to bend up below zero.
+# 2. DAILY MACD = turns positive / bullish above signal.
+# 3. LOWER BB REVERSAL = primary trigger and highest weight.
+# 4. RSI must recover from oversold/weak zone.
+# 5. Strong bullish candle, high break, protected low, gap-up pattern
+#    and turnover are confirmations — not substitutes for the core.
+# 6. Maximum 3 stocks. Only #1 can be TOP SWING.
 # =========================================================
 
-qualified_rows = []
+SCORE_INDEX = 25
+TURNOVER_RANK_INDEX = 24
+GAIN_INDEX = 10
 
+final_candidates = []
 
 for row in output_rows:
-
-    if len(row) < 42:
+    if len(row) < 38:
+        continue
+    try:
+        base_score = float(row[SCORE_INDEX])
+        gain = float(row[GAIN_INDEX])
+        turnover_rank_value = float(row[TURNOVER_RANK_INDEX])
+    except (TypeError, ValueError):
         continue
 
+    rsi_recovery = str(row[15]).startswith("YES")
+    bb_touch = str(row[16]).startswith("YES")
+    bb_rejection = str(row[17]).startswith("YES")
+    engulfing = str(row[18]).startswith("YES")
+    oversold = str(row[19]).startswith("YES")
+    strong_green = str(row[20]).startswith("YES")
+    high_break = str(row[21]).startswith("YES")
+    low_protected = str(row[22]).startswith("YES")
+    gap_hold = str(row[11]).startswith("YES")
 
-    qualified = (
-        str(row[41])
-        .startswith("YES")
-    )
-
-
-    if not qualified:
-        continue
-
+    macd_bend_up = str(row[27]).startswith("YES")
+    macd_strong_recovery = str(row[28]).startswith("YES")
+    macd_cross_up = str(row[29]).startswith("YES")
+    daily_macd_positive_turn = str(row[35]).startswith("YES")
+    weekly_macd_bend = str(row[33]).startswith("YES")
+    weekly_macd_downtrend = str(row[34]).startswith("YES")
+    previous_red_lower_bb = str(row[37]).startswith("YES")
+    gapup_after_red_bb = str(row[38]).startswith("YES") if len(row) > 38 else False
+    current_rsi_recovery = str(row[39]).startswith("YES") if len(row) > 39 else False
 
     try:
+        gap_pct = float(row[8])
+    except (TypeError, ValueError):
+        gap_pct = 0.0
 
-        score = float(
-            row[26]
-        )
+    # ---------------- V8 FINAL ROUTES ----------------
+    # FINAL LIST = every stock that passes at least ONE valid
+    # reversal route.  No all-conditions AND filter.
+    # Daily MACD + Lower BB remain the highest-priority signals.
 
-        gain = float(
-            row[10]
-        )
-
-        turnover_rank_value = float(
-            row[25]
-        )
-
-    except (
-        TypeError,
-        ValueError
-    ):
-
+    if gain <= 0 or gain > 8:
         continue
 
+    bb_core = bb_touch and bb_rejection
 
-    # Confirmation count
+    # Daily MACD reversal: early bend below zero is intentionally
+    # accepted before a full positive crossover.
+    daily_macd_reversal = (
+        macd_bend_up
+        or macd_strong_recovery
+        or daily_macd_positive_turn
+        or macd_cross_up
+    )
 
-    confirmation_count = 0
+    weekly_macd_reversal = (
+        weekly_macd_downtrend and weekly_macd_bend
+    )
 
+    bb_route = (
+        bb_core
+        or previous_red_lower_bb
+        or gapup_after_red_bb
+        or (recent_bb_touch and (strong_green or engulfing))
+    )
 
-    for idx in [
+    macd_route = daily_macd_reversal
 
-        15, 17, 18, 19,
-        20, 21, 22, 37,
-        38, 39
+    rsi_route = (
+        oversold
+        or rsi_recovery
+        or current_rsi_recovery
+    )
 
-    ]:
+    gap_route = (
+        previous_red_lower_bb
+        and gapup_after_red_bb
+    )
 
-        if str(
-            row[idx]
-        ).startswith("YES"):
+    price_route = (
+        strong_green
+        and (high_break or low_protected or gap_hold)
+    )
 
-            confirmation_count += 1
+    engulf_route = (
+        engulfing
+        and (recent_bb_touch or oversold or selling_exhaustion)
+    )
 
+    # Weekly MACD is a regime/quality filter, not a mandatory gate.
+    # This prevents the Final List from becoming empty while still
+    # rewarding the desired weekly downtrend -> bend setup.
+    any_valid_route = (
+        bb_route
+        or macd_route
+        or rsi_route
+        or gap_route
+        or price_route
+        or engulf_route
+    )
 
-    qualified_rows.append({
+    if not any_valid_route:
+        continue
 
+    confirmations = sum([
+        bb_core,
+        daily_macd_reversal,
+        weekly_macd_reversal,
+        oversold,
+        rsi_recovery or current_rsi_recovery,
+        strong_green,
+        high_break,
+        low_protected,
+        gapup_after_red_bb,
+        engulfing
+    ])
+
+    # ---------------- V8 SCORE ----------------
+    # 100-point scale. BB + Daily MACD dominate.
+    score = 0
+
+    # A. LOWER BB REVERSAL — PRIMARY
+    if bb_core:
+        score += 28
+    elif recent_bb_touch:
+        score += 15
+
+    if bb_rejection:
+        score += 10
+    if previous_red_lower_bb:
+        score += 7
+    if gapup_after_red_bb:
+        score += 7
+
+    # B. DAILY MACD REVERSAL — PRIMARY
+    if macd_bend_up:
+        score += 15
+    if macd_strong_recovery:
+        score += 5
+    if daily_macd_positive_turn:
+        score += 8
+    if macd_cross_up:
+        score += 4
+
+    # C. WEEKLY MACD — REGIME CONFIRMATION
+    if weekly_macd_downtrend:
+        score += 5
+    if weekly_macd_bend:
+        score += 7
+
+    # D. RSI RECOVERY
+    if oversold:
+        score += 5
+    if rsi_recovery:
+        score += 6
+    if current_rsi_recovery:
+        score += 4
+    if deep_oversold:
+        score += 2
+
+    # E. PRICE CONFIRMATION
+    if strong_green:
+        score += 5
+    if high_break:
+        score += 5
+    if low_protected:
+        score += 4
+    if gap_maintained == "YES ✅":
+        score += 3
+    if engulfing:
+        score += 3
+
+    # F. TURNOVER — SUPPORTIVE ONLY
+    if turnover_rank_value <= 25:
+        score += 4
+    elif turnover_rank_value <= 50:
+        score += 3
+    elif turnover_rank_value <= 100:
+        score += 2
+    else:
+        score += 1
+
+    # Fresh move bonus: leave room for the intended swing.
+    if 0.5 <= gain <= 3:
+        score += 4
+    elif 3 < gain <= 5:
+        score += 2
+
+    score = min(100, score)
+
+    if score >= 82:
+        signal = "🎯 TOP SWING"
+    elif score >= 72:
+        signal = "🔥 STRONG SWING"
+    else:
+        signal = "👀 WATCH"
+
+    final_candidates.append({
         "row": row,
-
         "score": score,
-
         "gain": gain,
-
-        "turnover_rank":
-            turnover_rank_value,
-
-        "confirmations":
-            confirmation_count
-
+        "turnover_rank": turnover_rank_value,
+        "confirmations": confirmations,
+        "signal": signal
     })
 
 
-# =========================================================
-# FINAL SORT
-# =========================================================
-
-def final_sort_key(
-    item
-):
-
-    return (
-
-        item["score"],
-
-        item["confirmations"],
-
-        -item[
-            "turnover_rank"
-        ]
-
-    )
+def freshness_distance(gain):
+    return abs(gain - 2.5)
 
 
-qualified_rows.sort(
-    key=final_sort_key,
+final_candidates.sort(
+    key=lambda x: (
+        x["score"],
+        x["confirmations"],
+        -freshness_distance(x["gain"]),
+        -x["turnover_rank"]
+    ),
     reverse=True
 )
+# Keep ALL qualified stocks; ranking decides priority.
 
-
-# =========================================================
-# FINAL SIGNAL
-# =========================================================
-
-for rank, item in enumerate(
-
-    qualified_rows,
-
-    start=1
-
-):
-
-    score = item["score"]
-
-
-    if rank == 1:
-
-        item["signal"] = (
-            "🎯 TOP SWING"
-        )
-
-    elif score >= 75:
-
-        item["signal"] = (
-            "🔥 STRONG SWING"
-        )
-
-    elif score >= 60:
-
-        item["signal"] = (
-            "🟢 SWING WATCH"
-        )
-
+# Only rank #1 can be TOP SWING.
+for rank, item in enumerate(final_candidates, start=1):
+    if rank == 1 and item["score"] >= 82 and item["confirmations"] >= 3:
+        item["signal"] = "🎯 TOP SWING"
+    elif item["score"] >= 72:
+        item["signal"] = "🔥 STRONG SWING"
     else:
-
-        item["signal"] = (
-            "👀 BB WATCH"
-        )
-
+        item["signal"] = "👀 WATCH"
 
 # =========================================================
-# FINAL HEADERS
+# COMPACT CLEAN FINAL LIST V8
 # =========================================================
-
 final_headers = [
-
-    "Rank",
-
-    "NSE Code",
-
-    "CMP",
-
-    "Gain %",
-
-    "Lower BB",
-
-    "RSI",
-
-    "Daily MACD",
-
-    "Weekly MACD",
-
-    "Confirmation",
-
-    "Primary Setup",
-
-    "Full Setup",
-
-    "Score",
-
-    "Signal"
-
+    "Rank", "NSE Code", "CMP", "Gain %", "Lower BB", "RSI",
+    "Daily MACD", "Weekly MACD", "Confirmation", "Setup", "Score", "Signal", "Chart"
 ]
 
-
-# =========================================================
-# FINAL OUTPUT
-# =========================================================
-
 final_output = []
-
-
-for rank, item in enumerate(
-
-    qualified_rows,
-
-    start=1
-
-):
-
+for rank, item in enumerate(final_candidates, start=1):
     row = item["row"]
-
-
-    # -----------------------------------------------------
-    # CONFIRMATIONS
-    # -----------------------------------------------------
-
     confirmations = []
+    if str(row[17]).startswith("YES"): confirmations.append("BB REJ")
+    if str(row[19]).startswith("YES"): confirmations.append("OVERSOLD")
+    if str(row[20]).startswith("YES"): confirmations.append("GREEN")
+    if str(row[21]).startswith("YES"): confirmations.append("HIGH BREAK")
+    if str(row[22]).startswith("YES"): confirmations.append("LOW HOLD")
+    if str(row[11]).startswith("YES"): confirmations.append("GAP HOLD")
+    if str(row[37]).startswith("YES"): confirmations.append("RED+LOWER BB")
+    if str(row[38]).startswith("YES"): confirmations.append("GAP-UP")
 
-
-    if str(
-        row[17]
-    ).startswith("YES"):
-
-        confirmations.append(
-            "BB REJ"
-        )
-
-
-    if str(
-        row[19]
-    ).startswith("YES"):
-
-        confirmations.append(
-            "OVERSOLD"
-        )
-
-
-    if str(
-        row[20]
-    ).startswith("YES"):
-
-        confirmations.append(
-            "GREEN"
-        )
-
-
-    if str(
-        row[21]
-    ).startswith("YES"):
-
-        confirmations.append(
-            "HIGH BREAK"
-        )
-
-
-    if str(
-        row[22]
-    ).startswith("YES"):
-
-        confirmations.append(
-            "LOW HOLD"
-        )
-
-
-    if str(
-        row[11]
-    ).startswith("YES"):
-
-        confirmations.append(
-            "GAP HOLD"
-        )
-
-
-    if str(
-        row[37]
-    ).startswith("YES"):
-
-        confirmations.append(
-            "RED+LOWER BB"
-        )
-
-
-    if str(
-        row[38]
-    ).startswith("YES"):
-
-        confirmations.append(
-            "GAP-UP"
-        )
-
-
-    if str(
-        row[39]
-    ).startswith("YES"):
-
-        confirmations.append(
-            "RSI ↑"
-        )
-
-
-    confirmation_text = (
-
-        " + ".join(
-            confirmations
-        )
-
-        if confirmations
-
-        else
-
-        "BB ONLY"
-
-    )
-
-
-    # -----------------------------------------------------
-    # FINAL MACD TEXT
-    # -----------------------------------------------------
-
-    daily_macd_text = row[28]
-
-    weekly_macd_text = row[34]
-
-
-    # -----------------------------------------------------
-    # FINAL ROW
-    # -----------------------------------------------------
-
+    macd_text = "MACD+" if str(row[35]).startswith("YES") else ("BEND ↑" if str(row[27]).startswith("YES") else "—")
+    weekly_text = "BEND ↑" if str(row[33]).startswith("YES") else ("DOWN 📉" if str(row[34]).startswith("YES") else "—")
     final_output.append([
-
         rank,
-
         row[0],
-
         row[9],
-
         row[10],
-
         row[12],
-
-        row[39]
-        if row[39] != ""
-        else row[13],
-
-        daily_macd_text,
-
-        weekly_macd_text,
-
-        confirmation_text,
-
+        row[36] if len(row) > 36 else row[13],
+        macd_text,
+        weekly_text,
+        " + ".join(confirmations),
         row[23],
-
-        row[24],
-
         item["score"],
-
-        item["signal"]
-
+        item["signal"],
+        f'=HYPERLINK("https://www.tradingview.com/chart/?symbol=NSE%3A{row[0]}","📈 CHART")'
     ])
 
-
-# =========================================================
-# CLEAR FINAL LIST
-# =========================================================
-
-retry_google_call(
-
-    lambda:
-        sheet_final.batch_clear(
-            ["A1:AZ1000"]
-        ),
-
-    "Final List clear"
-
-)
-
-
-# =========================================================
-# FINAL HEADER
-# =========================================================
-
-retry_google_call(
-
-    lambda:
-        sheet_final.update(
-            "A1:M1",
-            [final_headers],
-            value_input_option="RAW"
-        ),
-
-    "Final List headers"
-
-)
-
-
-# =========================================================
-# FINAL DATA
-# =========================================================
-
+safe_batch_clear(sheet_final, ["A1:AZ1000"])
+safe_update(sheet_final, "A1:M1", [final_headers], value_input_option="RAW")
 if final_output:
-
-    retry_google_call(
-
-        lambda:
-            sheet_final.update(
-                "A2",
-                final_output,
-                value_input_option="RAW"
-            ),
-
-        "Final List data"
-
-    )
-
+    safe_update(sheet_final, "A2", final_output, value_input_option="USER_ENTERED")
 
 # =========================================================
-# FORMATTING
+# CLEAN V8 FORMATTING
 # =========================================================
-
 try:
-
-    # Header
-
-    sheet_final.format(
-
-        "A1:M1",
-
-        {
-
-            "backgroundColor": {
-
-                "red": 0.05,
-                "green": 0.12,
-                "blue": 0.20
-
-            },
-
-            "textFormat": {
-
-                "bold": True,
-
-                "fontSize": 9,
-
-                "foregroundColor": {
-
-                    "red": 1,
-                    "green": 1,
-                    "blue": 1
-
-                }
-
-            },
-
-            "horizontalAlignment":
-                "CENTER",
-
-            "verticalAlignment":
-                "MIDDLE",
-
-            "wrapStrategy":
-                "WRAP"
-
-        }
-
-    )
-
-
+    safe_format(sheet_final, "A1:M1", {
+        "backgroundColor": {"red": 0.05, "green": 0.12, "blue": 0.20},
+        "textFormat": {"bold": True, "fontSize": 9, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+        "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP"
+    })
     if final_output:
-
-        last_row = (
-            len(final_output) + 1
-        )
-
-
-        sheet_final.format(
-
-            f"A2:M{last_row}",
-
-            {
-
-                "textFormat": {
-
-                    "fontSize": 8
-
-                },
-
-                "horizontalAlignment":
-                    "CENTER",
-
-                "verticalAlignment":
-                    "MIDDLE",
-
-                "wrapStrategy":
-                    "WRAP"
-
-            }
-
-        )
-
-
-        # NSE Code
-
-        sheet_final.format(
-
-            f"B2:B{last_row}",
-
-            {
-
-                "textFormat": {
-
-                    "bold": True,
-
-                    "fontSize": 9
-
-                },
-
-                "horizontalAlignment":
-                    "LEFT"
-
-            }
-
-        )
-
-
-        # Setup columns
-
-        sheet_final.format(
-
-            f"I2:K{last_row}",
-
-            {
-
-                "textFormat": {
-
-                    "bold": True,
-
-                    "fontSize": 8
-
-                },
-
-                "wrapStrategy":
-                    "WRAP"
-
-            }
-
-        )
-
-
-        # Score + Signal
-
-        sheet_final.format(
-
-            f"L2:M{last_row}",
-
-            {
-
-                "textFormat": {
-
-                    "bold": True,
-
-                    "fontSize": 9
-
-                },
-
-                "wrapStrategy":
-                    "WRAP"
-
-            }
-
-        )
-
-
-        # Rank 1
-
-        sheet_final.format(
-
-            "A2:M2",
-
-            {
-
-                "backgroundColor": {
-
-                    "red": 0.90,
-                    "green": 0.97,
-                    "blue": 0.90
-
-                },
-
-                "textFormat": {
-
-                    "bold": True,
-
-                    "fontSize": 9
-
-                }
-
-            }
-
-        )
-
-
-    sheet_final.freeze(
-        rows=1
-    )
-
-
-except Exception as exc:
-
-    print(
-        "Final List Formatting Warning : "
-        f"{exc}"
-    )
-
+        last_row = len(final_output) + 1
+        safe_format(sheet_final, f"A2:M{last_row}", {
+            "textFormat": {"fontSize": 8},
+            "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP"
+        })
+        safe_format(sheet_final, f"B2:B{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "horizontalAlignment": "LEFT"})
+        safe_format(sheet_final, f"I2:J{last_row}", {"textFormat": {"bold": True, "fontSize": 8}, "wrapStrategy": "WRAP"})
+        safe_format(sheet_final, f"K2:L{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "wrapStrategy": "WRAP"})
+        safe_format(sheet_final, f"M2:M{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "horizontalAlignment": "CENTER"})
+        safe_format(sheet_final, "A2:M2", {
+            "backgroundColor": {"red": 0.90, "green": 0.97, "blue": 0.90},
+            "textFormat": {"bold": True, "fontSize": 9}
+        })
+    widths = {"A:A": 38, "B:B": 100, "C:C": 75, "D:D": 55, "E:E": 75, "F:F": 50,
+              "G:G": 70, "H:H": 70, "I:I": 180, "J:J": 180, "K:K": 50, "L:L": 105, "M:M": 90}
+    for col_range, width in widths.items():
+        try:
+            safe_format(sheet_final, col_range, {"padding": {"top": 2, "bottom": 2, "left": 2, "right": 2}})
+        except Exception:
+            pass
+    sheet_final.freeze(rows=1)
+except Exception as e:
+    print(f"Final List Formatting Warning : {e}")
 
 # =========================================================
-# SUMMARY
+# V7 SUMMARY
 # =========================================================
 
-print(
-    "========================================"
-)
+print("----------------------------------------")
+print("FINAL LIST V8 : ANY VALID REVERSAL ROUTE | BB + DAILY MACD PRIORITY")
+print(f"Qualified Stocks : {len(final_output)}")
 
-print(
-    "NIFTY 200 BB REVERSAL SCREENER V8.2"
-)
-
-print(
-    "========================================"
-)
-
-print(
-    "Trading Date : "
-    f"{latest_date.strftime('%d-%b-%Y')}"
-)
-
-print(
-    "Previous Date : "
-    f"{previous_date.strftime('%d-%b-%Y')}"
-)
-
-print(
-    "Stocks Scanned : "
-    f"{len(output_rows)}"
-)
-
-print(
-    "BB Candidates : "
-    f"{len(final_output)}"
-)
-
-print(
-    "----------------------------------------"
-)
-
-print(
-    "TOP 200 BY TURNOVER : YES"
-)
-
-print(
-    "BOLLINGER : 20, 1.5"
-)
-
-print(
-    "LOWER BB : PRIMARY TRIGGER"
-)
-
-print(
-    "MACD : CONFIRMATION ONLY"
-)
-
-print(
-    "WEEKLY MACD : REGIME ONLY"
-)
-
-print(
-    "RSI : CONFIRMATION ONLY"
-)
-
-print(
-    "PRICE ACTION : CONFIRMATION"
-)
-
-print(
-    "TURNOVER : SUPPORTING FACTOR"
-)
-
-print(
-    "FINAL LIST : ALL BB REVERSAL CANDIDATES"
-)
-
-print(
-    "MAXIMUM FINAL CANDIDATES : NO LIMIT"
-)
-
-print(
-    "========================================"
-)
-
-
-for rank, item in enumerate(
-
-    qualified_rows,
-
-    start=1
-
-):
-
+for rank, item in enumerate(final_candidates, start=1):
     row = item["row"]
-
     print(
-
         rank,
-
         "|",
-
         row[0],
-
-        "| Score:",
-
+        "| Swing Score:",
         item["score"],
-
         "| Gain:",
-
         item["gain"],
-
-        "| Daily:",
-
-        row[28],
-
-        "| Weekly:",
-
-        row[34],
-
+        "| Turnover Rank:",
+        item["turnover_rank"],
+        "| Confirmations:",
+        item["confirmations"],
         "| Signal:",
-
         item["signal"]
-
     )
 
+print("========================================")
+print("NIFTY200 V8 SWING SCREENER UPDATED")
+print(f"Trading Date : {latest_date.strftime('%d-%b-%Y')}")
+print(f"Previous Date : {previous_date.strftime('%d-%b-%Y')}")
+print(f"Stocks Scanned : {len(output_rows)}")
+print(f"Final Candidates : {len(final_output)}")
+print("----------------------------------------")
+print("TOP 200 BY TURNOVER : YES")
+print("BOLLINGER : 20, 1.5")
+print("RSI : 14")
+print("SETUPS : BB REVERSAL / ENGULFING / OVERSOLD + RSI RECOVERY")
+print("V8 : WEEKLY MACD DOWN-TREND + BEND + DAILY MACD POSITIVE TURN + LOWER BB REVERSAL")
+print("V8 : ALL QUALIFIED STOCKS — NO TOP-3 LIMIT")
+print("V8 : RANK #1 IS TOP SWING WHEN SCORE >= 85")
+print("MACD : DAILY BEND/POSITIVE TURN + WEEKLY DOWN/BEND | LOWER BB HIGHEST PRIORITY")
+print("========================================")
 
-print(
-    "========================================"
-)
-
-print(
-    "NIFTY200 V8.2 UPDATED"
-)
-
-print(
-    "========================================"
-)
