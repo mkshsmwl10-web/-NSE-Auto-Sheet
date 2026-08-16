@@ -1995,70 +1995,98 @@ for _, row in top200.iterrows():
 
     # -----------------------------------------------------
     # SCORE
-    # -----------------------------------------------------
-    #
-    # Maximum is normalized to 100.
-    # Multiple setups can stack together.
-    # -----------------------------------------------------
+# ---------------------------------------------------------
+# PURPOSE:
+# Find stocks that are not merely "near the BB", but are
+# actually showing a reversal + confirmation + momentum.
+#
+# The score is deliberately biased toward PRICE ACTION.
+# Turnover is supportive, not the main reason for a high score.
+# ---------------------------------------------------------
 
-    score = 0
+score = 0
 
-    if recent_bb_touch:
-        score += 15
+# 1) BB / exhaustion
+if recent_bb_touch:
+    score += 10
 
-    if recent_bb_rejection:
-        score += 10
+if recent_bb_rejection:
+    score += 10
 
-    if selling_exhaustion:
-        score += 10
+if selling_exhaustion:
+    score += 8
 
-    if engulfing:
-        score += 15
+# 2) Reversal trigger
+if engulfing:
+    score += 15
 
-    if strong_green:
-        score += 10
+if oversold:
+    score += 10
 
-    if oversold:
-        score += 10
+if rsi_recovery:
+    score += 10
 
-    if rsi_recovery:
-        score += 10
+if deep_oversold:
+    score += 5
 
-    if deep_oversold:
-        score += 5
+# 3) Real price confirmation — highest importance
+if strong_green:
+    score += 12
 
-    if gap_up:
-        score += 5
+if high_break:
+    score += 12
 
-    if strong_gap_up:
-        score += 5
+if low_protected:
+    score += 8
 
-    if high_break:
-        score += 10
+# 4) Gap confirmation
+if gap_up:
+    score += 4
 
-    if low_protected:
-        score += 5
+if strong_gap_up:
+    score += 5
 
-    score += turnover_score
+if gap_maintained == "YES ✅":
+    score += 5
 
-    # Bonus when multiple independent reversal signals agree.
-    setup_count = sum([
-        bb_reversal,
-        engulfing_reversal,
-        oversold_reversal
-    ])
+# 5) Turnover — supportive only
+score += turnover_score
 
-    if setup_count >= 2:
-        score += 10
+# 6) Independent setup agreement
+setup_count = sum([
+    bb_reversal,
+    engulfing_reversal,
+    oversold_reversal
+])
 
-    if setup_count >= 3:
-        score += 5
+if setup_count >= 2:
+    score += 5
 
-    if score > 100:
-        score = 100
+if setup_count >= 3:
+    score += 5
 
-    # -----------------------------------------------------
-    # SETUP TYPE
+# ---------------------------------------------------------
+# IMPORTANT:
+# A stock with negative current gain must not become a
+# "strong reversal" only because several historical signals
+# are present.
+# ---------------------------------------------------------
+
+if current_gain_pct < 0:
+    score = min(score, 59)
+
+# Positive momentum bonus
+if current_gain_pct >= 2.0:
+    score += 3
+
+if current_gain_pct >= 4.0:
+    score += 3
+
+if score > 100:
+    score = 100
+
+# ---------------------------------------------------------
+# SETUP TYPE
     # -----------------------------------------------------
 
     setup_names = []
@@ -2082,22 +2110,22 @@ for _, row in top200.iterrows():
 
     # -----------------------------------------------------
     # SIGNAL
-    # -----------------------------------------------------
+# ---------------------------------------------------------
 
-    if score >= 80:
-        final_signal = "💎 A+ POTENTIAL"
+if score >= 85:
+    final_signal = "💎 A+ POTENTIAL"
 
-    elif score >= 70:
-        final_signal = "🔥 STRONG REVERSAL"
+elif score >= 75:
+    final_signal = "🔥 STRONG SWING"
 
-    elif score >= 60:
-        final_signal = "👀 WATCH"
+elif score >= 65:
+    final_signal = "👀 WATCH"
 
-    else:
-        final_signal = "—"
+else:
+    final_signal = "—"
 
-    # -----------------------------------------------------
-    # OUTPUT
+# ---------------------------------------------------------
+# OUTPUT
     # -----------------------------------------------------
 
     output_rows.append([
@@ -2231,19 +2259,29 @@ if output_rows:
 # FINAL LIST
 # =========================================================
 #
-# FINAL LIST:
-#   - accepts multiple reversal setups
-#   - score >= 60
-#   - sorted by Strength Score first
-#   - turnover rank used as tie-breaker
-#   - maximum 10 stocks
+# FINAL LIST V5
 #
-# IMPORTANT:
-# We use named positions from the known NIFTY200 output layout
-# instead of fragile hard-coded score indexes.
+# Goal:
+#   Find a small number of HIGH-QUALITY reversal candidates
+#   from NIFTY 200 rather than filling the list with weak setups.
+#
+# HARD ENTRY-QUALITY GATES:
+#   1. A genuine reversal setup exists
+#   2. Current gain is positive
+#   3. Today's low protects the setup candle low
+#   4. At least one real price confirmation exists:
+#        - High Break
+#        - Strong Green
+#        - Bullish Engulfing
+#        - Gap Up + Gap Hold
+#
+# This deliberately removes cases such as:
+#   HINDUNILVR: negative current gain + no gap hold
+#
+# Final list is compact and decision-focused.
 # =========================================================
 
-# NIFTY200 row layout:
+# Known NIFTY200 row layout
 #  0 Symbol
 #  1 Turnover
 #  2 Previous Open
@@ -2288,151 +2326,169 @@ for row in output_rows:
     except (TypeError, ValueError):
         continue
 
-    if score < 60:
+    try:
+        gain = float(row[GAIN_INDEX])
+    except (TypeError, ValueError):
+        gain = -999
+
+    # Boolean confirmation from the displayed YES/NO fields.
+    bb_touch = str(row[16]).startswith("YES")
+    bb_rejection = str(row[17]).startswith("YES")
+    engulfing = str(row[18]).startswith("YES")
+    oversold = str(row[19]).startswith("YES")
+    strong_green = str(row[20]).startswith("YES")
+    high_break = str(row[21]).startswith("YES")
+    low_protected = str(row[22]).startswith("YES")
+
+    gap_maintained = str(row[11])
+
+    # Core reversal setup.
+    core_reversal = (
+        bb_rejection
+        or engulfing
+        or oversold
+        or str(row[15]).startswith("YES")
+    )
+
+    # Real price-action confirmation.
+    price_confirmation = (
+        high_break
+        or strong_green
+        or engulfing
+        or (
+            str(row[8]).replace("%", "").strip() not in ("", "0", "0.0")
+            and gap_maintained.startswith("YES")
+        )
+    )
+
+    # HARD GATES
+    if not core_reversal:
+        continue
+
+    if gain <= 0:
+        continue
+
+    if not low_protected:
+        continue
+
+    if not price_confirmation:
+        continue
+
+    # Only genuine candidates enter the Final List.
+    if score < 65:
         continue
 
     try:
-        turnover_rank_value = float(
-            row[TURNOVER_RANK_INDEX]
-        )
+        turnover_rank_value = float(row[TURNOVER_RANK_INDEX])
     except (TypeError, ValueError):
         turnover_rank_value = 9999
 
-    try:
-        gain_value = float(row[GAIN_INDEX])
-    except (TypeError, ValueError):
-        gain_value = -9999
-
+    # Prefer stocks with stronger current momentum, then score,
+    # then turnover rank.
     final_candidates.append({
         "row": row,
         "score": score,
-        "turnover_rank": turnover_rank_value,
-        "gain": gain_value
+        "gain": gain,
+        "turnover_rank": turnover_rank_value
     })
 
 
 # =========================================================
-# SORT
+# SORT — MOMENTUM FIRST, QUALITY SECOND
 # =========================================================
 
 final_candidates.sort(
     key=lambda item: (
         item["score"],
-        -item["turnover_rank"],
-        item["gain"]
+        item["gain"],
+        -item["turnover_rank"]
     ),
     reverse=True
 )
 
-
-# =========================================================
-# TOP 10
-# =========================================================
-
+# Maximum 10, but fewer is perfectly acceptable.
 final_candidates = final_candidates[:10]
 
 
 # =========================================================
-# FINAL OUTPUT
+# COMPACT FINAL LIST
 # =========================================================
+#
+# Only columns needed for a quick trading decision are shown.
+# The detailed NIFTY200 sheet still contains all diagnostics.
+# =========================================================
+
+final_headers = [
+    "Rank",
+    "NSE Code",
+    "Turnover",
+    "Prev Candle",
+    "Today Open",
+    "Gap %",
+    "CMP",
+    "Gain %",
+    "Lower BB",
+    "RSI",
+    "Confirmation",
+    "Setup",
+    "Score",
+    "Signal"
+]
 
 final_output = []
 
-for rank, item in enumerate(
-    final_candidates,
-    start=1
-):
+for rank, item in enumerate(final_candidates, start=1):
 
     row = item["row"]
 
+    # Compact confirmation summary.
+    confirmations = []
+
+    if str(row[17]).startswith("YES"):
+        confirmations.append("BB REJ")
+
+    if str(row[18]).startswith("YES"):
+        confirmations.append("ENGULF")
+
+    if str(row[19]).startswith("YES"):
+        confirmations.append("OVERSOLD")
+
+    if str(row[20]).startswith("YES"):
+        confirmations.append("GREEN")
+
+    if str(row[21]).startswith("YES"):
+        confirmations.append("HIGH BREAK")
+
+    if str(row[22]).startswith("YES"):
+        confirmations.append("LOW HOLD")
+
+    if str(row[11]).startswith("YES"):
+        confirmations.append("GAP HOLD")
+
+    confirmation_text = " + ".join(confirmations)
+
+    # Make the #1 qualifying candidate visually distinct.
+    signal = row[26]
+
+    if rank == 1 and item["score"] >= 75:
+        signal = "🎯 TOP SWING"
+
     final_output.append([
-
         rank,
-
-        # Basic
         row[0],
         row[1],
-
-        # Previous candle
-        row[2],
-        row[3],
-        row[4],
-        row[5],
         row[6],
-
-        # Today
         row[7],
         row[8],
         row[9],
         row[10],
-        row[11],
-
-        # BB / RSI
         row[12],
         row[13],
-        row[14],
-        row[15],
-
-        # Reversal confirmation
-        row[16],
-        row[17],
-        row[18],
-        row[19],
-        row[20],
-        row[21],
-        row[22],
-
-        # Setup
+        confirmation_text,
         row[23],
-
-        # Ranking
-        row[24],
         row[25],
-        row[26]
+        signal
     ])
-
-
-# =========================================================
-# FINAL LIST HEADER
-# =========================================================
-
-final_headers = [
-
-    "Rank",
-    "NSE Code",
-    "Turnover",
-
-    "Previous Open",
-    "Previous High",
-    "Previous Low",
-    "Previous Close",
-    "Previous Candle",
-
-    "Today Open",
-    "Gap Up %",
-    "CMP",
-    "Current Gain %",
-    "Gap Maintained?",
-
-    "Lower BB (20,1.5)",
-    "RSI 14",
-    "Previous RSI 14",
-    "RSI Recovery?",
-
-    "BB Touch?",
-    "BB Rejection?",
-    "Bullish Engulfing?",
-    "Oversold?",
-    "Strong Green?",
-    "High Break?",
-    "Low Protected?",
-
-    "Setup Type",
-
-    "Turnover Rank",
-    "Strength Score",
-    "Signal"
-]
 
 
 # =========================================================
@@ -2440,7 +2496,7 @@ final_headers = [
 # =========================================================
 
 sheet_final.batch_clear(
-    ["A1:AB1000"]
+    ["A1:N1000"]
 )
 
 
@@ -2449,7 +2505,7 @@ sheet_final.batch_clear(
 # =========================================================
 
 sheet_final.update(
-    range_name="A1:AB1",
+    range_name="A1:N1",
     values=[final_headers],
     value_input_option="RAW"
 )
@@ -2474,11 +2530,9 @@ if final_output:
 
 try:
 
-    # -----------------------------------------------------
     # Header
-    # -----------------------------------------------------
     sheet_final.format(
-        "A1:AB1",
+        "A1:N1",
         {
             "backgroundColor": {
                 "red": 0.05,
@@ -2500,15 +2554,13 @@ try:
         }
     )
 
-    # -----------------------------------------------------
-    # Body — small font
-    # -----------------------------------------------------
     if final_output:
 
         last_row = len(final_output) + 1
 
+        # Compact body
         sheet_final.format(
-            f"A2:AB{last_row}",
+            f"A2:N{last_row}",
             {
                 "textFormat": {
                     "fontSize": 8
@@ -2519,7 +2571,7 @@ try:
             }
         )
 
-        # Stock names — slightly stronger
+        # Stock names
         sheet_final.format(
             f"B2:B{last_row}",
             {
@@ -2531,122 +2583,94 @@ try:
             }
         )
 
-        # Setup Type — compact but readable
+        # Confirmation and setup
         sheet_final.format(
-            f"Y2:Y{last_row}",
-            {
-                "textFormat": {
-                    "fontSize": 8,
-                    "bold": True
-                },
-                "wrapStrategy": "WRAP"
-            }
-        )
-
-        # Score — highlighted
-        sheet_final.format(
-            f"AA2:AA{last_row}",
-            {
-                "textFormat": {
-                    "bold": True,
-                    "fontSize": 9
-                },
-                "horizontalAlignment": "CENTER"
-            }
-        )
-
-        # Signal — bold
-        sheet_final.format(
-            f"AB2:AB{last_row}",
+            f"K2:L{last_row}",
             {
                 "textFormat": {
                     "bold": True,
                     "fontSize": 8
                 },
-                "horizontalAlignment": "CENTER",
                 "wrapStrategy": "WRAP"
-            }
-        )
-
-    # -----------------------------------------------------
-    # Useful columns only — compact widths
-    # -----------------------------------------------------
-    widths = {
-        "A:A": 42,   # Rank
-        "B:B": 95,   # NSE Code
-        "C:C": 95,   # Turnover
-        "D:G": 72,   # Previous OHLC
-        "H:H": 78,   # Candle
-        "I:I": 72,   # Today Open
-        "J:J": 60,   # Gap
-        "K:K": 72,   # CMP
-        "L:L": 62,   # Gain
-        "M:M": 78,   # Gap Maintained
-        "N:N": 82,   # Lower BB
-        "O:P": 60,   # RSI
-        "Q:Q": 70,   # RSI Recovery
-        "R:X": 68,   # Confirmation flags
-        "Y:Y": 190,  # Setup Type
-        "Z:Z": 62,   # Turnover Rank
-        "AA:AA": 58, # Score
-        "AB:AB": 100 # Signal
-    }
-
-    for col_range, width in widths.items():
-        sheet_final.format(
-            col_range,
-            {
-                "padding": {
-                    "top": 2,
-                    "bottom": 2,
-                    "left": 2,
-                    "right": 2
-                }
-            }
-        )
-
-    # -----------------------------------------------------
-    # Conditional-looking emphasis through number formats
-    # -----------------------------------------------------
-    if final_output:
-
-        last_row = len(final_output) + 1
-
-        # Gain / Gap columns
-        sheet_final.format(
-            f"J2:J{last_row}",
-            {
-                "numberFormat": {
-                    "type": "NUMBER",
-                    "pattern": "0.00"
-                }
-            }
-        )
-
-        sheet_final.format(
-            f"L2:L{last_row}",
-            {
-                "numberFormat": {
-                    "type": "NUMBER",
-                    "pattern": "0.00"
-                }
             }
         )
 
         # Score
         sheet_final.format(
-            f"AA2:AA{last_row}",
+            f"M2:M{last_row}",
             {
-                "numberFormat": {
-                    "type": "NUMBER",
-                    "pattern": "0"
+                "textFormat": {
+                    "bold": True,
+                    "fontSize": 9
                 }
             }
         )
 
-    # -----------------------------------------------------
-    # Freeze header
-    # -----------------------------------------------------
+        # Signal
+        sheet_final.format(
+            f"N2:N{last_row}",
+            {
+                "textFormat": {
+                    "bold": True,
+                    "fontSize": 9
+                },
+                "wrapStrategy": "WRAP"
+            }
+        )
+
+        # Highlight the first candidate.
+        if final_output[0][0] == 1:
+            sheet_final.format(
+                "A2:N2",
+                {
+                    "backgroundColor": {
+                        "red": 0.90,
+                        "green": 0.97,
+                        "blue": 0.90
+                    },
+                    "textFormat": {
+                        "bold": True,
+                        "fontSize": 9
+                    }
+                }
+            )
+
+    # Compact widths
+    widths = {
+        "A:A": 42,
+        "B:B": 95,
+        "C:C": 92,
+        "D:D": 75,
+        "E:E": 75,
+        "F:F": 55,
+        "G:G": 75,
+        "H:H": 60,
+        "I:I": 78,
+        "J:J": 55,
+        "K:K": 180,
+        "L:L": 190,
+        "M:M": 55,
+        "N:N": 105
+    }
+
+    # Use Sheets column dimension formatting through repeated calls.
+    # The compact ranges are intentionally kept narrow.
+    for col_range, width in widths.items():
+        try:
+            sheet_final.format(
+                col_range,
+                {
+                    "padding": {
+                        "top": 2,
+                        "bottom": 2,
+                        "left": 2,
+                        "right": 2
+                    }
+                }
+            )
+        except Exception:
+            pass
+
     sheet_final.freeze(rows=1)
 
 except Exception as e:
@@ -2665,16 +2689,11 @@ print(
 )
 
 print(
-    "FINAL LIST STYLE : COMPACT / CLEAN / TRADING VIEW"
+    "FINAL LIST V5 : STRICT SWING QUALITY FILTER"
 )
 
 print(
-    "FINAL LIST GENERATED"
-)
-
-print(
-    f"Qualified Stocks : "
-    f"{len(final_output)}"
+    f"Qualified Stocks : {len(final_output)}"
 )
 
 for item in final_candidates:
@@ -2685,12 +2704,13 @@ for item in final_candidates:
         row[0],
         "| Score:",
         row[25],
+        "| Gain:",
+        row[10],
         "| Turnover Rank:",
         row[24],
         "| Setup:",
         row[23]
     )
-
 
 # =========================================================
 # FINAL REPORT
@@ -2757,11 +2777,11 @@ print(
 )
 
 print(
-    "SCORE >= 60 : FINAL CANDIDATE"
+    "STRICT FINAL FILTER : POSITIVE GAIN + LOW HOLD + PRICE CONFIRMATION"
 )
 
 print(
-    "MAX FINAL STOCKS : 10"
+    "MAX FINAL STOCKS : 10 (FEWER IS OK)"
 )
 
 print(
