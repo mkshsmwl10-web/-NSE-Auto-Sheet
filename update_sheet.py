@@ -1,14 +1,43 @@
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-
-import pandas as pd
-import requests
-import zipfile
-import io
-import json
 import os
+import json
+import io
+import zipfile
+import requests
+import gspread
+import pandas as pd
 
 from datetime import datetime, timedelta
+from oauth2client.service_account import ServiceAccountCredentials
+
+
+# =========================================================
+# CONFIGURATION
+# =========================================================
+
+SPREADSHEET_ID = "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E"
+
+NIFTY_SHEET = "NIFTY200"
+FINAL_SHEET = "Final List"
+
+# ---------------------------------------------------------
+# BOLLINGER BAND SETTINGS
+# ---------------------------------------------------------
+
+BB_LENGTH = 20
+BB_MULTIPLIER = 1.5
+
+# ---------------------------------------------------------
+# STRONG GAP SETTINGS
+# ---------------------------------------------------------
+
+MIN_GAP_UP = 0.50
+
+# ---------------------------------------------------------
+# TURNOVER SETTINGS
+# ---------------------------------------------------------
+
+# Top 50 turnover stocks are considered HIGH TURNOVER
+HIGH_TURNOVER_RANK = 50
 
 
 # =========================================================
@@ -34,20 +63,47 @@ creds = ServiceAccountCredentials.from_json_keyfile_dict(
 
 client = gspread.authorize(creds)
 
-
-# =========================================================
-# GOOGLE SHEET
-# =========================================================
-
-SPREADSHEET_ID = "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E"
-
-sheet_nifty = client.open_by_key(
+spreadsheet = client.open_by_key(
     SPREADSHEET_ID
-).worksheet("NIFTY200")
+)
 
 
 # =========================================================
-# BHAVCOPY DOWNLOAD
+# GET / CREATE SHEETS
+# =========================================================
+
+try:
+
+    sheet_nifty = spreadsheet.worksheet(
+        NIFTY_SHEET
+    )
+
+except gspread.WorksheetNotFound:
+
+    sheet_nifty = spreadsheet.add_worksheet(
+        title=NIFTY_SHEET,
+        rows=500,
+        cols=20
+    )
+
+
+try:
+
+    sheet_final = spreadsheet.worksheet(
+        FINAL_SHEET
+    )
+
+except gspread.WorksheetNotFound:
+
+    sheet_final = spreadsheet.add_worksheet(
+        title=FINAL_SHEET,
+        rows=500,
+        cols=20
+    )
+
+
+# =========================================================
+# NSE BHAVCOPY
 # =========================================================
 
 def fetch_bhavcopy(date_obj):
@@ -72,7 +128,9 @@ def fetch_bhavcopy(date_obj):
 
     try:
 
-        print(f"Downloading Bhavcopy : {date_str}")
+        print(
+            f"Downloading Bhavcopy : {date_str}"
+        )
 
         response = requests.get(
             url,
@@ -81,10 +139,7 @@ def fetch_bhavcopy(date_obj):
         )
 
         if response.status_code != 200:
-            print(
-                f"Bhavcopy not found : "
-                f"{date_obj.strftime('%d-%b-%Y')}"
-            )
+
             return None
 
         with zipfile.ZipFile(
@@ -107,7 +162,7 @@ def fetch_bhavcopy(date_obj):
         ]
 
         # -------------------------------------------------
-        # SYMBOL COLUMN
+        # SYMBOL
         # -------------------------------------------------
 
         symbol_col = next(
@@ -123,7 +178,7 @@ def fetch_bhavcopy(date_obj):
         )
 
         # -------------------------------------------------
-        # OPEN COLUMN
+        # OPEN
         # -------------------------------------------------
 
         open_col = next(
@@ -140,7 +195,7 @@ def fetch_bhavcopy(date_obj):
         )
 
         # -------------------------------------------------
-        # HIGH COLUMN
+        # HIGH
         # -------------------------------------------------
 
         high_col = next(
@@ -157,7 +212,7 @@ def fetch_bhavcopy(date_obj):
         )
 
         # -------------------------------------------------
-        # LOW COLUMN
+        # LOW
         # -------------------------------------------------
 
         low_col = next(
@@ -174,7 +229,7 @@ def fetch_bhavcopy(date_obj):
         )
 
         # -------------------------------------------------
-        # CLOSE COLUMN
+        # CLOSE
         # -------------------------------------------------
 
         close_col = next(
@@ -191,7 +246,7 @@ def fetch_bhavcopy(date_obj):
         )
 
         # -------------------------------------------------
-        # TURNOVER COLUMN
+        # TURNOVER
         # -------------------------------------------------
 
         turnover_col = next(
@@ -209,7 +264,7 @@ def fetch_bhavcopy(date_obj):
         )
 
         # -------------------------------------------------
-        # SERIES COLUMN
+        # SERIES
         # -------------------------------------------------
 
         series_col = next(
@@ -228,32 +283,28 @@ def fetch_bhavcopy(date_obj):
         # VALIDATION
         # -------------------------------------------------
 
-        if symbol_col is None:
-            print("Symbol column not found")
-            return None
+        required = [
+            symbol_col,
+            open_col,
+            high_col,
+            low_col,
+            close_col,
+            turnover_col
+        ]
 
-        if open_col is None:
-            print("Open column not found")
-            return None
+        if any(
+            x is None
+            for x in required
+        ):
 
-        if high_col is None:
-            print("High column not found")
-            return None
+            print(
+                "Required Bhavcopy column missing"
+            )
 
-        if low_col is None:
-            print("Low column not found")
-            return None
-
-        if close_col is None:
-            print("Close column not found")
-            return None
-
-        if turnover_col is None:
-            print("Turnover column not found")
             return None
 
         # -------------------------------------------------
-        # ONLY EQUITY
+        # EQUITY ONLY
         # -------------------------------------------------
 
         if series_col:
@@ -267,7 +318,7 @@ def fetch_bhavcopy(date_obj):
             ]
 
         # -------------------------------------------------
-        # NUMERIC DATA
+        # NUMERIC
         # -------------------------------------------------
 
         for col in [
@@ -318,53 +369,51 @@ def fetch_bhavcopy(date_obj):
 
 today = datetime.now()
 
-today_data = None
-today_date_obj = None
-today_date_text = ""
+latest_data = None
+latest_date = None
 
 for i in range(7):
 
-    check_date = today - timedelta(days=i)
+    check_date = (
+        today
+        - timedelta(days=i)
+    )
 
     if check_date.weekday() >= 5:
         continue
 
-    result = fetch_bhavcopy(check_date)
+    result = fetch_bhavcopy(
+        check_date
+    )
 
     if result is not None:
 
-        today_data = result
-        today_date_obj = check_date
-        today_date_text = check_date.strftime(
-            "%d-%b-%Y"
-        )
+        latest_data = result
+        latest_date = check_date
 
         break
 
 
-if today_data is None:
+if latest_data is None:
 
     raise Exception(
         "Latest NSE Bhavcopy not found"
     )
 
 
-# =========================================================
-# TODAY DATA
-# =========================================================
+bhavcopy = latest_data["df"]
 
-bhavcopy = today_data["df"]
-
-symbol_col = today_data["symbol_col"]
-open_col = today_data["open_col"]
-high_col = today_data["high_col"]
-low_col = today_data["low_col"]
-close_col = today_data["close_col"]
-turnover_col = today_data["turnover_col"]
+symbol_col = latest_data["symbol_col"]
+open_col = latest_data["open_col"]
+high_col = latest_data["high_col"]
+low_col = latest_data["low_col"]
+close_col = latest_data["close_col"]
+turnover_col = latest_data["turnover_col"]
 
 
 print(
-    f"Latest Trading Day : {today_date_text}"
+    "Latest Trading Day : "
+    f"{latest_date.strftime('%d-%b-%Y')}"
 )
 
 
@@ -402,28 +451,48 @@ print(
 
 
 # =========================================================
+# TURNOVER RANK
+# =========================================================
+
+turnover_rank = {}
+
+for rank, (_, row) in enumerate(
+    top200.iterrows(),
+    start=1
+):
+
+    symbol = str(
+        row[symbol_col]
+    ).strip()
+
+    turnover_rank[symbol] = rank
+
+
+# =========================================================
 # FIND PREVIOUS TRADING DAY
 # =========================================================
 
 previous_data = None
-previous_date_obj = None
+previous_date = None
 
-for i in range(1, 8):
+for i in range(1, 7):
 
     check_date = (
-        today_date_obj
+        latest_date
         - timedelta(days=i)
     )
 
     if check_date.weekday() >= 5:
         continue
 
-    result = fetch_bhavcopy(check_date)
+    result = fetch_bhavcopy(
+        check_date
+    )
 
     if result is not None:
 
         previous_data = result
-        previous_date_obj = check_date
+        previous_date = check_date
 
         break
 
@@ -446,12 +515,12 @@ prev_close_col = previous_data["close_col"]
 
 print(
     "Previous Trading Day : "
-    f"{previous_date_obj.strftime('%d-%b-%Y')}"
+    f"{previous_date.strftime('%d-%b-%Y')}"
 )
 
 
 # =========================================================
-# PREVIOUS DAY DICTIONARY
+# PREVIOUS DAY LOOKUP
 # =========================================================
 
 previous_lookup = {}
@@ -479,11 +548,207 @@ for _, row in previous_df.iterrows():
         "close": float(
             row[prev_close_col]
         )
+
     }
 
 
 # =========================================================
-# CREATE FINAL NIFTY200 OUTPUT
+# HISTORICAL DATA FOR BOLLINGER BAND
+# =========================================================
+
+# We need at least 20 previous closes.
+# Current day is included separately.
+
+history_data = {}
+
+history_dates_found = 0
+
+check_date = (
+    latest_date
+    - timedelta(days=1)
+)
+
+days_checked = 0
+
+while (
+    history_dates_found < 22
+    and days_checked < 45
+):
+
+    if check_date.weekday() < 5:
+
+        result = fetch_bhavcopy(
+            check_date
+        )
+
+        if result is not None:
+
+            df_hist = result["df"]
+
+            hist_symbol_col = result["symbol_col"]
+            hist_open_col = result["open_col"]
+            hist_high_col = result["high_col"]
+            hist_low_col = result["low_col"]
+            hist_close_col = result["close_col"]
+
+            for _, row in df_hist.iterrows():
+
+                symbol = str(
+                    row[hist_symbol_col]
+                ).strip()
+
+                if symbol not in history_data:
+
+                    history_data[symbol] = []
+
+                history_data[symbol].append({
+
+                    "date": check_date,
+
+                    "open": float(
+                        row[hist_open_col]
+                    ),
+
+                    "high": float(
+                        row[hist_high_col]
+                    ),
+
+                    "low": float(
+                        row[hist_low_col]
+                    ),
+
+                    "close": float(
+                        row[hist_close_col]
+                    )
+
+                })
+
+            history_dates_found += 1
+
+    check_date -= timedelta(days=1)
+
+    days_checked += 1
+
+
+print(
+    f"Historical Trading Days Loaded : "
+    f"{history_dates_found}"
+)
+
+
+# =========================================================
+# HELPER FUNCTIONS
+# =========================================================
+
+def safe_float(value):
+
+    try:
+
+        value = float(value)
+
+        if pd.isna(value):
+            return None
+
+        return value
+
+    except:
+
+        return None
+
+
+# =========================================================
+# BOLLINGER BAND
+# =========================================================
+
+def calculate_lower_bb(
+    closes,
+    length=20,
+    multiplier=1.5
+):
+
+    if len(closes) < length:
+
+        return None
+
+    series = pd.Series(
+        closes[-length:]
+    )
+
+    sma = series.mean()
+
+    std = series.std(
+        ddof=0
+    )
+
+    lower_band = (
+        sma
+        - multiplier * std
+    )
+
+    return float(
+        lower_band
+    )
+
+
+# =========================================================
+# STRONG GREEN CANDLE
+# =========================================================
+
+def is_strong_green_candle(
+    open_price,
+    high_price,
+    low_price,
+    close_price
+):
+
+    if any(
+        x is None
+        for x in [
+            open_price,
+            high_price,
+            low_price,
+            close_price
+        ]
+    ):
+
+        return False
+
+    candle_range = (
+        high_price
+        - low_price
+    )
+
+    body = abs(
+        close_price
+        - open_price
+    )
+
+    if candle_range <= 0:
+        return False
+
+    body_ratio = (
+        body
+        / candle_range
+    )
+
+    close_position = (
+        close_price
+        - low_price
+    ) / candle_range
+
+    return (
+
+        close_price > open_price
+
+        and body_ratio >= 0.60
+
+        and close_position >= 0.75
+
+    )
+
+
+# =========================================================
+# BUILD NIFTY200 OUTPUT
 # =========================================================
 
 output_rows = []
@@ -495,44 +760,31 @@ for _, row in top200.iterrows():
         row[symbol_col]
     ).strip()
 
-    turnover = float(
+    turnover = safe_float(
         row[turnover_col]
     )
 
-    today_open = float(
+    today_open = safe_float(
         row[open_col]
     )
 
-    today_close = float(
-        row[close_col]
+    today_high = safe_float(
+        row[high_col]
     )
 
-    # -----------------------------------------------------
-    # PREVIOUS DAY DATA
-    # -----------------------------------------------------
+    today_low = safe_float(
+        row[low_col]
+    )
+
+    today_close = safe_float(
+        row[close_col]
+    )
 
     previous = previous_lookup.get(
         symbol
     )
 
     if previous is None:
-
-        output_rows.append([
-            symbol,
-            turnover,
-            today_close,
-            "",
-            "",
-            "",
-            "",
-            "NA",
-            today_open,
-            "",
-            today_close,
-            "",
-            "NA",
-            "—"
-        ])
 
         continue
 
@@ -543,9 +795,9 @@ for _, row in top200.iterrows():
     previous_close = previous["close"]
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # PREVIOUS CANDLE
-    # -----------------------------------------------------
+    # =====================================================
 
     if previous_close < previous_open:
 
@@ -560,57 +812,53 @@ for _, row in top200.iterrows():
         previous_candle = "DOJI"
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # GAP UP %
-    # -----------------------------------------------------
+    # =====================================================
 
-    if previous_close != 0:
+    gap_up_pct = (
 
-        gap_up_pct = (
-            (today_open - previous_close)
-            / previous_close
-        ) * 100
+        (
+            today_open
+            - previous_close
+        )
+        / previous_close
+        * 100
 
-    else:
+        if previous_close != 0
+        else 0
 
-        gap_up_pct = 0
-
-
-    # -----------------------------------------------------
-    # CMP
-    # -----------------------------------------------------
-
-    # EOD Bhavcopy mein latest available price
-    # Close Price hi hai
-
-    cmp_price = today_close
+    )
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # CURRENT GAIN %
-    # -----------------------------------------------------
+    # =====================================================
 
-    if previous_close != 0:
+    current_gain_pct = (
 
-        current_gain_pct = (
-            (cmp_price - previous_close)
-            / previous_close
-        ) * 100
+        (
+            today_close
+            - previous_close
+        )
+        / previous_close
+        * 100
 
-    else:
+        if previous_close != 0
+        else 0
 
-        current_gain_pct = 0
+    )
 
 
-    # -----------------------------------------------------
+    # =====================================================
     # GAP MAINTAINED
-    # -----------------------------------------------------
+    # =====================================================
 
-    if cmp_price >= today_open:
+    if today_close >= today_open:
 
         gap_maintained = "YES ✅"
 
-    elif cmp_price > previous_close:
+    elif today_close > previous_close:
 
         gap_maintained = "PARTIAL 🟡"
 
@@ -619,51 +867,387 @@ for _, row in top200.iterrows():
         gap_maintained = "NO 🔴"
 
 
+    # =====================================================
+    # HISTORICAL DATA
+    # =====================================================
+
+    hist = history_data.get(
+        symbol,
+        []
+    )
+
+    # Newest first currently.
+    hist = sorted(
+        hist,
+        key=lambda x: x["date"]
+    )
+
+
     # -----------------------------------------------------
-    # SIGNAL
+    # CLOSES FOR BB
     # -----------------------------------------------------
 
-    if (
-        previous_close < previous_open
-        and gap_up_pct >= 0.50
-        and cmp_price >= today_open
-    ):
+    historical_closes = [
 
-        signal = "🔥 STRONG GAP UP"
+        x["close"]
 
+        for x in hist
+
+        if x["close"] is not None
+
+    ]
+
+
+    # Current close is added
+    # for today's BB calculation.
+
+    bb_closes = (
+        historical_closes
+        + [today_close]
+    )
+
+
+    # =====================================================
+    # LOWER BB
+    # =====================================================
+
+    lower_bb = calculate_lower_bb(
+        bb_closes,
+        BB_LENGTH,
+        BB_MULTIPLIER
+    )
+
+
+    # =====================================================
+    # BB TOUCH
+    # =====================================================
+
+    bb_touch = False
+
+    if lower_bb is not None:
+
+        bb_touch = (
+            today_low <= lower_bb
+        )
+
+
+    # =====================================================
+    # PREVIOUS 3 CANDLE FALL
+    # =====================================================
+
+    falling_before_reversal = False
+
+    if len(hist) >= 3:
+
+        c1 = hist[-3]["close"]
+        c2 = hist[-2]["close"]
+        c3 = hist[-1]["close"]
+
+        falling_before_reversal = (
+
+            c1 > c2 > c3
+
+        )
+
+
+    # =====================================================
+    # STRONG GREEN CANDLE
+    # =====================================================
+
+    strong_green = is_strong_green_candle(
+
+        today_open,
+        today_high,
+        today_low,
+        today_close
+
+    )
+
+
+    # =====================================================
+    # BB REVERSAL
+    # =====================================================
+
+    bb_reversal = (
+
+        bb_touch
+
+        and
+        falling_before_reversal
+
+        and
+        strong_green
+
+    )
+
+
+    # =====================================================
+    # BB GAP REVERSAL
+    # =====================================================
+
+    bb_gap_reversal = (
+
+        bb_touch
+
+        and
+        falling_before_reversal
+
+        and
+        gap_up_pct >= MIN_GAP_UP
+
+        and
+        today_close >= today_open
+
+    )
+
+
+    # =====================================================
+    # TURNOVER STRENGTH
+    # =====================================================
+
+    rank = turnover_rank.get(
+        symbol,
+        999
+    )
+
+    high_turnover = (
+        rank <= HIGH_TURNOVER_RANK
+    )
+
+
+    # =====================================================
+    # GAP SETUP
+    # =====================================================
+
+    strong_gap = (
+
+        previous_candle == "RED 🔴"
+
+        and
+        gap_up_pct >= MIN_GAP_UP
+
+        and
+        today_close >= today_open
+
+    )
+
+
+    # =====================================================
+    # CORE GAP SIGNAL
+    # =====================================================
+
+    if strong_gap:
+
+        gap_signal = (
+            "🔥 STRONG GAP UP"
+        )
 
     elif (
-        previous_close < previous_open
-        and gap_up_pct > 0
-        and cmp_price > previous_close
+
+        previous_candle == "RED 🔴"
+
+        and
+        gap_up_pct > 0
+
+        and
+        today_close > previous_close
+
     ):
 
-        signal = "🟢 GAP HOLD"
-
-
-    elif (
-        previous_close < previous_open
-        and gap_up_pct > 0
-        and cmp_price <= previous_close
-    ):
-
-        signal = "🔴 GAP FAILED"
-
+        gap_signal = (
+            "🟢 GAP HOLD"
+        )
 
     else:
 
-        signal = "—"
+        gap_signal = "—"
 
 
-    # -----------------------------------------------------
-    # FINAL ROW
-    # -----------------------------------------------------
+    # =====================================================
+    # BB SIGNAL
+    # =====================================================
+
+    if bb_gap_reversal:
+
+        bb_signal = (
+            "🔥 BB GAP REVERSAL"
+        )
+
+    elif bb_reversal:
+
+        bb_signal = (
+            "🟢 BB REVERSAL"
+        )
+
+    else:
+
+        bb_signal = "—"
+
+
+    # =====================================================
+    # SETUP TYPE
+    # =====================================================
+
+    if (
+        bb_gap_reversal
+        and high_turnover
+    ):
+
+        setup_type = (
+            "💎 BB GAP REVERSAL + HIGH TURNOVER"
+        )
+
+    elif (
+        bb_reversal
+        and high_turnover
+    ):
+
+        setup_type = (
+            "💎 BB REVERSAL + HIGH TURNOVER"
+        )
+
+    elif (
+        strong_gap
+        and high_turnover
+    ):
+
+        setup_type = (
+            "🔥 GAP UP + HIGH TURNOVER"
+        )
+
+    elif bb_gap_reversal:
+
+        setup_type = (
+            "🔥 BB GAP REVERSAL"
+        )
+
+    elif bb_reversal:
+
+        setup_type = (
+            "🟢 BB REVERSAL"
+        )
+
+    elif strong_gap:
+
+        setup_type = (
+            "🔥 STRONG GAP UP"
+        )
+
+    else:
+
+        setup_type = "—"
+
+
+    # =====================================================
+    # FINAL STRENGTH SCORE
+    # =====================================================
+
+    score = 0
+
+
+    # High turnover
+    if high_turnover:
+
+        score += 25
+
+
+    # Previous red candle
+    if previous_candle == "RED 🔴":
+
+        score += 15
+
+
+    # Strong gap
+    if gap_up_pct >= MIN_GAP_UP:
+
+        score += 20
+
+
+    # Gain maintained
+    if today_close >= today_open:
+
+        score += 15
+
+
+    # Lower BB touch
+    if bb_touch:
+
+        score += 10
+
+
+    # Strong green candle
+    if strong_green:
+
+        score += 10
+
+
+    # BB reversal
+    if bb_reversal:
+
+        score += 5
+
+
+    if score > 100:
+
+        score = 100
+
+
+    # =====================================================
+    # FINAL SIGNAL
+    # =====================================================
+
+    if (
+        bb_gap_reversal
+        and high_turnover
+    ):
+
+        final_signal = (
+            "💎 STRONG BB GAP REVERSAL"
+        )
+
+    elif (
+        bb_reversal
+        and high_turnover
+    ):
+
+        final_signal = (
+            "💎 STRONG BB REVERSAL"
+        )
+
+    elif (
+        strong_gap
+        and high_turnover
+    ):
+
+        final_signal = (
+            "🔥 STRONG GAP UP"
+        )
+
+    elif strong_gap:
+
+        final_signal = (
+            "🟢 GAP HOLD"
+        )
+
+    elif bb_reversal:
+
+        final_signal = (
+            "🟢 BB REVERSAL"
+        )
+
+    else:
+
+        final_signal = "—"
+
+
+    # =====================================================
+    # OUTPUT
+    # =====================================================
 
     output_rows.append([
 
         symbol,
         turnover,
-        today_close,
 
         previous_open,
         previous_high,
@@ -679,7 +1263,7 @@ for _, row in top200.iterrows():
             2
         ),
 
-        cmp_price,
+        today_close,
 
         round(
             current_gain_pct,
@@ -688,42 +1272,38 @@ for _, row in top200.iterrows():
 
         gap_maintained,
 
-        signal
+        round(
+            lower_bb,
+            2
+        )
+        if lower_bb is not None
+        else "",
+
+        "YES ✅"
+        if bb_touch
+        else "NO",
+
+        "YES 🔥"
+        if bb_reversal
+        else "NO",
+
+        setup_type,
+
+        rank,
+
+        score,
+
+        final_signal
 
     ])
-    # =========================================================
-# FINAL LIST
-# HIGH TURNOVER + RED CANDLE + STRONG GAP UP + GAIN HOLD
+
+
+# =========================================================
+# NIFTY200 HEADER
 # =========================================================
 
-FINAL_SHEET_NAME = "Final List"
+nifty_headers = [
 
-# ---------------------------------------------------------
-# CREATE / GET FINAL LIST SHEET
-# ---------------------------------------------------------
-
-try:
-    sheet_final = client.open_by_key(
-        SPREADSHEET_ID
-    ).worksheet(FINAL_SHEET_NAME)
-
-except gspread.WorksheetNotFound:
-
-    sheet_final = client.open_by_key(
-        SPREADSHEET_ID
-    ).add_worksheet(
-        title=FINAL_SHEET_NAME,
-        rows=500,
-        cols=15
-    )
-
-# ---------------------------------------------------------
-# FINAL LIST HEADER
-# ---------------------------------------------------------
-
-final_headers = [
-
-    "Rank",
     "NSE Code",
     "Turnover",
     "Previous Open",
@@ -736,123 +1316,310 @@ final_headers = [
     "CMP",
     "Current Gain %",
     "Gap Maintained?",
+    "Lower BB (20,1.5)",
+    "BB Touch?",
+    "BB Reversal?",
+    "Setup Type",
+    "Turnover Rank",
+    "Strength Score",
     "Signal"
 
 ]
 
-# ---------------------------------------------------------
-# FILTER STRONG STOCKS
-# ---------------------------------------------------------
 
-strong_stocks = []
+# =========================================================
+# UPDATE NIFTY200
+# =========================================================
+
+sheet_nifty.batch_clear(
+    ["A1:S1000"]
+)
+
+
+sheet_nifty.update(
+    range_name="A1:S1",
+    values=[nifty_headers],
+    value_input_option="RAW"
+)
+
+
+sheet_nifty.update(
+    range_name="A2",
+    values=output_rows,
+    value_input_option="RAW"
+)
+
+
+# =========================================================
+# FINAL LIST FILTER
+# =========================================================
+
+final_candidates = []
+
 
 for row in output_rows:
 
-    if len(row) < 14:
+    if len(row) < 19:
         continue
+
 
     symbol = row[0]
     turnover = row[1]
 
-    previous_open = row[3]
-    previous_high = row[4]
-    previous_low = row[5]
-    previous_close = row[6]
+    previous_open = row[2]
+    previous_high = row[3]
+    previous_low = row[4]
+    previous_close = row[5]
 
-    previous_candle = row[7]
+    previous_candle = row[6]
 
-    today_open = row[8]
-    gap_up_pct = row[9]
+    today_open = row[7]
+    gap_up_pct = row[8]
 
-    cmp_price = row[10]
-    current_gain_pct = row[11]
+    cmp_price = row[9]
+    current_gain_pct = row[10]
 
-    gap_maintained = row[12]
-    signal = row[13]
+    gap_maintained = row[11]
 
-    # -----------------------------------------------------
-    # FINAL FILTER
-    # -----------------------------------------------------
+    lower_bb = row[12]
+    bb_touch = row[13]
+    bb_reversal = row[14]
 
-    if (
+    setup_type = row[15]
+    turnover_rank_value = row[16]
+    score = row[17]
+    signal = row[18]
+
+
+    # =====================================================
+    # HIGH TURNOVER
+    # =====================================================
+
+    high_turnover = (
+
+        isinstance(
+            turnover_rank_value,
+            int
+        )
+
+        and
+        turnover_rank_value
+        <= HIGH_TURNOVER_RANK
+
+    )
+
+
+    # =====================================================
+    # CORE GAP SETUP
+    # =====================================================
+
+    core_gap_setup = (
 
         previous_candle == "RED 🔴"
 
-        and isinstance(gap_up_pct, (int, float))
-        and gap_up_pct >= 0.50
+        and
+        isinstance(
+            gap_up_pct,
+            (int, float)
+        )
 
-        and isinstance(cmp_price, (int, float))
-        and isinstance(today_open, (int, float))
-        and cmp_price >= today_open
+        and
+        gap_up_pct >= MIN_GAP_UP
+
+        and
+        isinstance(
+            cmp_price,
+            (int, float)
+        )
+
+        and
+        isinstance(
+            today_open,
+            (int, float)
+        )
+
+        and
+        cmp_price >= today_open
+
+        and
+        high_turnover
+
+    )
+
+
+    # =====================================================
+    # BB REVERSAL SETUP
+    # =====================================================
+
+    bb_setup = (
+
+        bb_reversal == "YES 🔥"
+
+        and
+        high_turnover
+
+    )
+
+
+    # =====================================================
+    # BB GAP REVERSAL
+    # =====================================================
+
+    bb_gap_setup = (
+
+        "BB GAP REVERSAL"
+        in str(setup_type)
+
+        and
+        high_turnover
+
+    )
+
+
+    # =====================================================
+    # FINAL FILTER
+    # =====================================================
+
+    if (
+
+        core_gap_setup
+
+        or
+        bb_setup
+
+        or
+        bb_gap_setup
 
     ):
 
-        strong_stocks.append([
-
-            symbol,
-            turnover,
-
-            previous_open,
-            previous_high,
-            previous_low,
-            previous_close,
-
-            previous_candle,
-
-            today_open,
-            gap_up_pct,
-
-            cmp_price,
-            current_gain_pct,
-
-            gap_maintained,
-            "🔥 STRONG GAP UP"
-
-        ])
+        final_candidates.append(row)
 
 
 # =========================================================
-# SORT BY TURNOVER
+# SORT FINAL LIST
 # =========================================================
 
-strong_stocks.sort(
-    key=lambda x: x[1],
+final_candidates.sort(
+
+    key=lambda x: (
+        x[17],
+        -x[16],
+        x[8]
+    ),
+
     reverse=True
+
 )
 
 
 # =========================================================
-# ADD RANK
+# FINAL LIST OUTPUT
 # =========================================================
 
 final_output = []
 
+
 for rank, row in enumerate(
-    strong_stocks,
+    final_candidates,
     start=1
 ):
 
     final_output.append([
-        rank
-    ] + row)
+
+        rank,
+
+        row[0],
+        row[1],
+
+        row[2],
+        row[3],
+        row[4],
+        row[5],
+
+        row[6],
+
+        row[7],
+        row[8],
+
+        row[9],
+        row[10],
+
+        row[11],
+
+        row[12],
+
+        row[13],
+
+        row[14],
+
+        row[15],
+
+        row[16],
+
+        row[17],
+
+        row[18]
+
+    ])
 
 
 # =========================================================
-# CLEAR OLD FINAL LIST
+# FINAL LIST HEADERS
+# =========================================================
+
+final_headers = [
+
+    "Rank",
+    "NSE Code",
+    "Turnover",
+
+    "Previous Open",
+    "Previous High",
+    "Previous Low",
+    "Previous Close",
+
+    "Previous Candle",
+
+    "Today Open",
+    "Gap Up %",
+
+    "CMP",
+    "Current Gain %",
+
+    "Gap Maintained?",
+
+    "Lower BB (20,1.5)",
+    "BB Touch?",
+    "BB Reversal?",
+
+    "Setup Type",
+
+    "Turnover Rank",
+
+    "Strength Score",
+
+    "Signal"
+
+]
+
+
+# =========================================================
+# CLEAR FINAL LIST
 # =========================================================
 
 sheet_final.batch_clear(
-    ["A1:N500"]
+    ["A1:T1000"]
 )
 
 
 # =========================================================
-# WRITE HEADER
+# WRITE FINAL LIST HEADER
 # =========================================================
 
 sheet_final.update(
-    range_name="A1:N1",
-    values=[final_headers]
+    range_name="A1:T1",
+    values=[final_headers],
+    value_input_option="RAW"
 )
 
 
@@ -864,120 +1631,7 @@ if final_output:
 
     sheet_final.update(
         range_name="A2",
-        values=final_output
-    )
-
-
-# =========================================================
-# FORMAT FINAL LIST
-# =========================================================
-
-try:
-
-    sheet_final.format(
-        "A1:N1",
-        {
-            "textFormat": {
-                "bold": True
-            },
-            "horizontalAlignment": "CENTER"
-        }
-    )
-
-    sheet_final.freeze(
-        rows=1
-    )
-
-except Exception as e:
-
-    print(
-        f"Final List Formatting Warning : {e}"
-    )
-
-
-print(
-    "========================================"
-)
-
-print(
-    "FINAL LIST UPDATED"
-)
-
-print(
-    f"Strong Stocks : {len(final_output)}"
-)
-
-print(
-    "Logic : "
-    "High Turnover + "
-    "Red Previous Candle + "
-    "Gap Up >= 0.50% + "
-    "CMP >= Today Open"
-)
-
-print(
-    "========================================"
-)
-
-
-# =========================================================
-# GOOGLE SHEET HEADER
-# =========================================================
-
-headers = [
-
-    "NSE Code",
-    "Turnover",
-    "Close Price",
-
-    "Previous Open",
-    "Previous High",
-    "Previous Low",
-    "Previous Close",
-
-    "Previous Candle",
-
-    "Today Open",
-    "Gap Up %",
-
-    "CMP",
-    "Current Gain %",
-
-    "Gap Maintained?",
-    "Signal"
-
-]
-
-
-# =========================================================
-# CLEAR OLD NIFTY200 DATA
-# =========================================================
-
-sheet_nifty.batch_clear(
-    ["A1:N1000"]
-)
-
-
-# =========================================================
-# WRITE HEADER
-# =========================================================
-
-sheet_nifty.update(
-    "A1",
-    [headers],
-    value_input_option="RAW"
-)
-
-
-# =========================================================
-# WRITE DATA
-# =========================================================
-
-if output_rows:
-
-    sheet_nifty.update(
-        "A2",
-        output_rows,
+        values=final_output,
         value_input_option="RAW"
     )
 
@@ -989,7 +1643,17 @@ if output_rows:
 try:
 
     sheet_nifty.format(
-        "A1:N1",
+        "A1:S1",
+        {
+            "textFormat": {
+                "bold": True
+            },
+            "horizontalAlignment": "CENTER"
+        }
+    )
+
+    sheet_final.format(
+        "A1:T1",
         {
             "textFormat": {
                 "bold": True
@@ -1002,6 +1666,10 @@ try:
         rows=1
     )
 
+    sheet_final.freeze(
+        rows=1
+    )
+
 except Exception as e:
 
     print(
@@ -1010,7 +1678,7 @@ except Exception as e:
 
 
 # =========================================================
-# FINAL MESSAGE
+# FINAL LOG
 # =========================================================
 
 print(
@@ -1018,16 +1686,17 @@ print(
 )
 
 print(
-    "NIFTY200 GAP-UP SCREENER UPDATED"
+    "NIFTY200 GAP + BB SCREENER UPDATED"
 )
 
 print(
-    f"Trading Date : {today_date_text}"
+    f"Trading Date : "
+    f"{latest_date.strftime('%d-%b-%Y')}"
 )
 
 print(
-    "Previous Date : "
-    f"{previous_date_obj.strftime('%d-%b-%Y')}"
+    f"Previous Date : "
+    f"{previous_date.strftime('%d-%b-%Y')}"
 )
 
 print(
@@ -1035,9 +1704,23 @@ print(
 )
 
 print(
-    "MACD MODULE : REMOVED"
+    f"Final Strong Stocks : "
+    f"{len(final_output)}"
+)
+
+print(
+    "Bollinger Band : 20, 1.5"
+)
+
+print(
+    "High Turnover : Top 50"
+)
+
+print(
+    "MACD : REMOVED"
 )
 
 print(
     "========================================"
+
 )
