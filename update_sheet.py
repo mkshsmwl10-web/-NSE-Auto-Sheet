@@ -1587,14 +1587,62 @@ def macd_histogram_from_closes(closes, fast=12, slow=26, signal=9):
     return (macd_line - signal_line).tolist()
 
 
-def detect_macd_bend(closes):
-    hist = macd_histogram_from_closes(closes)
-    if len(hist) < 3:
-        return False, False, None
-    h2, h1, h0 = hist[-3], hist[-2], hist[-1]
-    bend_up = h1 < h2 and h0 > h1 and h0 < 0
-    strong_recovery = h2 > h1 and h1 < h0 < 0
-    return bend_up, strong_recovery, h0
+def detect_macd_bend(closes, fast=12, slow=26, signal=9):
+    """
+    Daily MACD EARLY-REVERSAL logic based on the TradingView chart pattern:
+
+    1) MACD line is BELOW zero.
+    2) MACD line makes a local low.
+    3) The latest MACD line starts bending upward.
+
+    This intentionally does NOT wait for the MACD line to cross above zero.
+    A later cross above the signal line is treated as a stronger confirmation.
+    """
+
+    if len(closes) < slow + signal + 3:
+        return False, False, False, None, None, None
+
+    series = pd.Series(closes, dtype=float)
+    macd_line = (
+        series.ewm(span=fast, adjust=False).mean()
+        - series.ewm(span=slow, adjust=False).mean()
+    )
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+
+    m2, m1, m0 = macd_line.iloc[-3], macd_line.iloc[-2], macd_line.iloc[-1]
+    s1, s0 = signal_line.iloc[-2], signal_line.iloc[-1]
+
+    # Fresh local bottom -> upward bend while still below zero.
+    bend_up = (
+        m1 < m2
+        and m0 > m1
+        and m0 < 0
+    )
+
+    # Stronger recovery: MACD line has risen for two consecutive bars
+    # and remains below zero.
+    strong_recovery = (
+        m2 > m1
+        and m1 < m0
+        and m0 < 0
+        and m0 > m1
+    )
+
+    # Strong confirmation: MACD line crosses its signal line upward.
+    macd_cross_up = (
+        macd_line.iloc[-2] <= signal_line.iloc[-2]
+        and macd_line.iloc[-1] > signal_line.iloc[-1]
+        and m0 < 0
+    )
+
+    return (
+        bend_up,
+        strong_recovery,
+        macd_cross_up,
+        float(m0),
+        float(s0),
+        float(m0 - s0)
+    )
 
 
 # =========================================================
@@ -1679,7 +1727,14 @@ for _, row in top200.iterrows():
     )
 
     macd_closes = [x["close"] for x in hist] + [today_close]
-    macd_bend_up, macd_strong_recovery, macd_hist_now = detect_macd_bend(macd_closes)
+    (
+        macd_bend_up,
+        macd_strong_recovery,
+        macd_cross_up,
+        macd_line_now,
+        macd_signal_now,
+        macd_hist_now
+    ) = detect_macd_bend(macd_closes)
 
     # The last historical candle is the previous trading day.
     setup = hist[-1] if len(hist) >= 1 else None
@@ -2055,6 +2110,8 @@ for _, row in top200.iterrows():
         score += 8
     if macd_strong_recovery:
         score += 4
+    if macd_cross_up:
+        score += 4
 
     if deep_oversold:
         score += 5
@@ -2135,6 +2192,8 @@ for _, row in top200.iterrows():
 
     if macd_bend_up:
         setup_names.append("🔄 MACD BEND UP")
+    elif macd_cross_up:
+        setup_names.append("🔥 MACD CROSS UP")
 
     if len(setup_names) == 0:
         setup_type = "—"
@@ -2224,6 +2283,9 @@ for _, row in top200.iterrows():
         # Internal V7 fields; not shown in Final List.
         "YES 🔄" if macd_bend_up else "NO",
         "YES 🚀" if macd_strong_recovery else "NO",
+        "YES 🔥" if macd_cross_up else "NO",
+        (round(macd_line_now, 6) if macd_line_now is not None else ""),
+        (round(macd_signal_now, 6) if macd_signal_now is not None else ""),
         (round(macd_hist_now, 6) if macd_hist_now is not None else "")
     ])
 
@@ -2351,6 +2413,7 @@ for row in output_rows:
     gap_hold = str(row[11]).startswith("YES")
     macd_bend_up = str(row[27]).startswith("YES")
     macd_strong_recovery = str(row[28]).startswith("YES")
+    macd_cross_up = str(row[29]).startswith("YES")
 
     try:
         gap_pct = float(row[8])
@@ -2500,6 +2563,8 @@ for row in output_rows:
         swing_score += 8
     if macd_strong_recovery:
         swing_score += 4
+    if macd_cross_up:
+        swing_score += 4
 
     # Base technical score is a small tie-break/support factor only.
     swing_score += min(5, max(0, int(base_score) // 20))
@@ -2623,6 +2688,8 @@ for rank, item in enumerate(final_candidates, start=1):
         confirmations.append("GAP HOLD")
     if str(row[27]).startswith("YES"):
         confirmations.append("MACD BEND")
+    elif str(row[29]).startswith("YES"):
+        confirmations.append("MACD CROSS")
 
     confirmation_text = " + ".join(confirmations)
 
@@ -2854,6 +2921,6 @@ print("SETUPS : BB REVERSAL / ENGULFING / OVERSOLD + RSI RECOVERY")
 print("V7 : FRESH MOVE + PRICE CONFIRMATION + TURNOVER")
 print("V7 : TOP 3 MAXIMUM — ONLY QUALIFIED STOCKS")
 print("V7 : ONLY RANK #1 CAN BE TOP SWING")
-print("MACD : DAILY FRESH BEND BELOW ZERO -> UP")
+print("MACD : DAILY MACD LINE FRESH BEND BELOW ZERO -> UP + SIGNAL CROSS CONFIRMATION")
 print("========================================")
 
