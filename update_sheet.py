@@ -2600,7 +2600,10 @@ for rank, item in enumerate(final_candidates, start=1):
 # CLEAR + WRITE FINAL LIST
 # =========================================================
 
-sheet_final.batch_clear(["A1:N1000"])
+sheet_final.batch_clear(["A1:AA1000"])
+
+# FINAL LIST is intentionally limited to A:N.
+# Clearing A:AA above removes any leftover columns from older V1-V6 layouts.
 
 sheet_final.update(
     range_name="A1:N1",
@@ -2766,7 +2769,7 @@ except Exception as e:
 # =========================================================
 
 print("----------------------------------------")
-print("FINAL LIST V7 : TOP 3 + ONE TOP SWING")
+print("FINAL LIST V7 : CLEAN TOP 3 + ONE TOP SWING")
 print(f"Qualified Stocks : {len(final_output)}")
 
 for rank, item in enumerate(final_candidates, start=1):
@@ -2799,7 +2802,7 @@ print("BOLLINGER : 20, 1.5")
 print("RSI : 14")
 print("SETUPS : BB REVERSAL / ENGULFING / OVERSOLD + RSI RECOVERY")
 print("V7 : FRESH MOVE + PRICE CONFIRMATION + TURNOVER")
-print("V7 : TOP 3 ONLY")
+print("V7 : TOP 3 MAXIMUM — ONLY QUALIFIED STOCKS")
 print("V7 : ONLY RANK #1 CAN BE TOP SWING")
 print("MACD : REMOVED")
 print("========================================")
