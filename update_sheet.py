@@ -30,6 +30,7 @@ import zipfile
 import requests
 import gspread
 import pandas as pd
+import time
 
 from datetime import datetime, timedelta
 from oauth2client.service_account import (
@@ -117,14 +118,47 @@ client = gspread.authorize(
 
 
 # =========================================================
+# GOOGLE SHEETS SAFE RETRY
+# =========================================================
+def _is_retryable_google_error(exc):
+    text = str(exc)
+    return any(code in text for code in ("429", "500", "502", "503", "504"))
+
+
+def safe_google_call(func, *args, retries=6, **kwargs):
+    last_error = None
+    for attempt in range(retries):
+        try:
+            return func(*args, **kwargs)
+        except gspread.exceptions.APIError as exc:
+            last_error = exc
+            if not _is_retryable_google_error(exc) or attempt == retries - 1:
+                raise
+            wait = min(30, 2 ** attempt)
+            print(f"Google Sheets API retry {attempt + 1}/{retries} after {wait}s : {exc}")
+            time.sleep(wait)
+    raise last_error
+
+
+def safe_batch_clear(sheet, ranges):
+    return safe_google_call(sheet.batch_clear, ranges)
+
+
+def safe_update(sheet, *args, **kwargs):
+    return safe_google_call(sheet.update, *args, **kwargs)
+
+
+def safe_format(sheet, *args, **kwargs):
+    return safe_google_call(sheet.format, *args, **kwargs)
+
+
+# =========================================================
 # GOOGLE SHEET
 # =========================================================
 
-spreadsheet = (
-    client
-    .open_by_key(
-        SPREADSHEET_ID
-    )
+spreadsheet = safe_google_call(
+    client.open_by_key,
+    SPREADSHEET_ID
 )
 
 
@@ -2393,9 +2427,7 @@ nifty_headers = [
 # WRITE NIFTY200
 # =========================================================
 
-sheet_nifty.batch_clear(
-    ["A1:AN1000"]
-)
+safe_batch_clear(sheet_nifty, ["A1:AN1000"])
 
 sheet_nifty.update(
     range_name="A1:AN1",
@@ -2454,7 +2486,7 @@ for row in output_rows:
     macd_bend_up = str(row[27]).startswith("YES")
     macd_strong_recovery = str(row[28]).startswith("YES")
     macd_cross_up = str(row[29]).startswith("YES")
-    daily_macd_positive_turn = str(row[36]).startswith("YES")
+    daily_macd_positive_turn = str(row[35]).startswith("YES")
     weekly_macd_bend = str(row[33]).startswith("YES")
     weekly_macd_downtrend = str(row[34]).startswith("YES")
     previous_red_lower_bb = str(row[37]).startswith("YES")
@@ -2466,97 +2498,157 @@ for row in output_rows:
     except (TypeError, ValueError):
         gap_pct = 0.0
 
-    # ---------------- HARD FILTERS ----------------
-    # Fresh move only; avoid chasing a stock that already ran.
+    # ---------------- V8 FINAL ROUTES ----------------
+    # FINAL LIST = every stock that passes at least ONE valid
+    # reversal route.  No all-conditions AND filter.
+    # Daily MACD + Lower BB remain the highest-priority signals.
+
     if gain <= 0 or gain > 8:
         continue
 
-    # Weekly regime is mandatory.
-    if not (weekly_macd_downtrend and weekly_macd_bend):
-        continue
-
-    # Daily MACD turn positive is mandatory.
-    if not daily_macd_positive_turn:
-        continue
-
-    # Lower BB reversal is mandatory — this is the heart of V8.
     bb_core = bb_touch and bb_rejection
-    bb_pattern = bb_core or gapup_after_red_bb
-    if not bb_pattern:
+
+    # Daily MACD reversal: early bend below zero is intentionally
+    # accepted before a full positive crossover.
+    daily_macd_reversal = (
+        macd_bend_up
+        or macd_strong_recovery
+        or daily_macd_positive_turn
+        or macd_cross_up
+    )
+
+    weekly_macd_reversal = (
+        weekly_macd_downtrend and weekly_macd_bend
+    )
+
+    bb_route = (
+        bb_core
+        or previous_red_lower_bb
+        or gapup_after_red_bb
+        or (recent_bb_touch and (strong_green or engulfing))
+    )
+
+    macd_route = daily_macd_reversal
+
+    rsi_route = (
+        oversold
+        or rsi_recovery
+        or current_rsi_recovery
+    )
+
+    gap_route = (
+        previous_red_lower_bb
+        and gapup_after_red_bb
+    )
+
+    price_route = (
+        strong_green
+        and (high_break or low_protected or gap_hold)
+    )
+
+    engulf_route = (
+        engulfing
+        and (recent_bb_touch or oversold or selling_exhaustion)
+    )
+
+    # Weekly MACD is a regime/quality filter, not a mandatory gate.
+    # This prevents the Final List from becoming empty while still
+    # rewarding the desired weekly downtrend -> bend setup.
+    any_valid_route = (
+        bb_route
+        or macd_route
+        or rsi_route
+        or gap_route
+        or price_route
+        or engulf_route
+    )
+
+    if not any_valid_route:
         continue
 
-    # RSI recovery is mandatory, either setup RSI recovery or current recovery.
-    if not (rsi_recovery or current_rsi_recovery):
-        continue
-
-    # At least one real price confirmation.
-    confirmations = sum([strong_green, high_break, low_protected, gap_hold, gapup_after_red_bb])
-    if confirmations < 2:
-        continue
+    confirmations = sum([
+        bb_core,
+        daily_macd_reversal,
+        weekly_macd_reversal,
+        oversold,
+        rsi_recovery or current_rsi_recovery,
+        strong_green,
+        high_break,
+        low_protected,
+        gapup_after_red_bb,
+        engulfing
+    ])
 
     # ---------------- V8 SCORE ----------------
+    # 100-point scale. BB + Daily MACD dominate.
     score = 0
 
-    # A. CORE REVERSAL — 50 points, deliberately dominant
+    # A. LOWER BB REVERSAL — PRIMARY
     if bb_core:
-        score += 25
-    elif gapup_after_red_bb:
-        score += 18
+        score += 28
+    elif recent_bb_touch:
+        score += 15
 
     if bb_rejection:
-        score += 8
-    if bb_touch:
-        score += 5
+        score += 10
     if previous_red_lower_bb:
-        score += 6
+        score += 7
     if gapup_after_red_bb:
-        score += 6
+        score += 7
 
-    # B. DAILY MACD — 20 points
+    # B. DAILY MACD REVERSAL — PRIMARY
+    if macd_bend_up:
+        score += 15
+    if macd_strong_recovery:
+        score += 5
     if daily_macd_positive_turn:
-        score += 14
+        score += 8
     if macd_cross_up:
         score += 4
-    if macd_strong_recovery:
-        score += 2
 
-    # C. RSI — 10 points
+    # C. WEEKLY MACD — REGIME CONFIRMATION
+    if weekly_macd_downtrend:
+        score += 5
+    if weekly_macd_bend:
+        score += 7
+
+    # D. RSI RECOVERY
+    if oversold:
+        score += 5
     if rsi_recovery:
         score += 6
     if current_rsi_recovery:
         score += 4
-    if oversold:
+    if deep_oversold:
         score += 2
 
-    # D. PRICE CONFIRMATION — 20 points
+    # E. PRICE CONFIRMATION
     if strong_green:
         score += 5
     if high_break:
         score += 5
     if low_protected:
-        score += 5
-    if gap_hold:
+        score += 4
+    if gap_maintained == "YES ✅":
         score += 3
     if engulfing:
-        score += 2
-
-    # E. TURNOVER — supportive, never dominant
-    if turnover_rank_value <= 25:
-        score += 5
-    elif turnover_rank_value <= 50:
-        score += 4
-    elif turnover_rank_value <= 100:
         score += 3
-    elif turnover_rank_value <= 150:
+
+    # F. TURNOVER — SUPPORTIVE ONLY
+    if turnover_rank_value <= 25:
+        score += 4
+    elif turnover_rank_value <= 50:
+        score += 3
+    elif turnover_rank_value <= 100:
         score += 2
     else:
         score += 1
 
-    # Fresh-move bonus: room for the intended swing.
+    # Fresh move bonus: leave room for the intended swing.
     if 0.5 <= gain <= 3:
-        score += 5
+        score += 4
     elif 3 < gain <= 5:
-        score += 3
+        score += 2
 
     score = min(100, score)
 
@@ -2590,7 +2682,7 @@ final_candidates.sort(
     ),
     reverse=True
 )
-final_candidates = final_candidates[:3]
+# Keep ALL qualified stocks; ranking decides priority.
 
 # Only rank #1 can be TOP SWING.
 for rank, item in enumerate(final_candidates, start=1):
@@ -2622,15 +2714,15 @@ for rank, item in enumerate(final_candidates, start=1):
     if str(row[37]).startswith("YES"): confirmations.append("RED+LOWER BB")
     if str(row[38]).startswith("YES"): confirmations.append("GAP-UP")
 
-    macd_text = "MACD+" if str(row[36]).startswith("YES") else "—"
-    weekly_text = "BEND ↑" if str(row[33]).startswith("YES") else "—"
+    macd_text = "MACD+" if str(row[35]).startswith("YES") else ("BEND ↑" if str(row[27]).startswith("YES") else "—")
+    weekly_text = "BEND ↑" if str(row[33]).startswith("YES") else ("DOWN 📉" if str(row[34]).startswith("YES") else "—")
     final_output.append([
         rank,
         row[0],
         row[9],
         row[10],
         row[12],
-        row[39] if len(row) > 39 else row[13],
+        row[36] if len(row) > 36 else row[13],
         macd_text,
         weekly_text,
         " + ".join(confirmations),
@@ -2639,30 +2731,30 @@ for rank, item in enumerate(final_candidates, start=1):
         item["signal"]
     ])
 
-sheet_final.batch_clear(["A1:AZ1000"])
-sheet_final.update("A1:L1", [final_headers], value_input_option="RAW")
+safe_batch_clear(sheet_final, ["A1:AZ1000"])
+safe_update(sheet_final, "A1:L1", [final_headers], value_input_option="RAW")
 if final_output:
-    sheet_final.update("A2", final_output, value_input_option="RAW")
+    safe_update(sheet_final, "A2", final_output, value_input_option="RAW")
 
 # =========================================================
 # CLEAN V8 FORMATTING
 # =========================================================
 try:
-    sheet_final.format("A1:L1", {
+    safe_format(sheet_final, "A1:L1", {
         "backgroundColor": {"red": 0.05, "green": 0.12, "blue": 0.20},
         "textFormat": {"bold": True, "fontSize": 9, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
         "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP"
     })
     if final_output:
         last_row = len(final_output) + 1
-        sheet_final.format(f"A2:L{last_row}", {
+        safe_format(sheet_final, f"A2:L{last_row}", {
             "textFormat": {"fontSize": 8},
             "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP"
         })
-        sheet_final.format(f"B2:B{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "horizontalAlignment": "LEFT"})
-        sheet_final.format(f"I2:J{last_row}", {"textFormat": {"bold": True, "fontSize": 8}, "wrapStrategy": "WRAP"})
-        sheet_final.format(f"K2:L{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "wrapStrategy": "WRAP"})
-        sheet_final.format("A2:L2", {
+        safe_format(sheet_final, f"B2:B{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "horizontalAlignment": "LEFT"})
+        safe_format(sheet_final, f"I2:J{last_row}", {"textFormat": {"bold": True, "fontSize": 8}, "wrapStrategy": "WRAP"})
+        safe_format(sheet_final, f"K2:L{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "wrapStrategy": "WRAP"})
+        safe_format(sheet_final, "A2:L2", {
             "backgroundColor": {"red": 0.90, "green": 0.97, "blue": 0.90},
             "textFormat": {"bold": True, "fontSize": 9}
         })
@@ -2670,7 +2762,7 @@ try:
               "G:G": 70, "H:H": 70, "I:I": 180, "J:J": 180, "K:K": 50, "L:L": 105}
     for col_range, width in widths.items():
         try:
-            sheet_final.format(col_range, {"padding": {"top": 2, "bottom": 2, "left": 2, "right": 2}})
+            safe_format(sheet_final, col_range, {"padding": {"top": 2, "bottom": 2, "left": 2, "right": 2}})
         except Exception:
             pass
     sheet_final.freeze(rows=1)
@@ -2682,7 +2774,7 @@ except Exception as e:
 # =========================================================
 
 print("----------------------------------------")
-print("FINAL LIST V8 : WEEKLY MACD DOWN+BEND + DAILY MACD POSITIVE + BB REVERSAL")
+print("FINAL LIST V8 : ANY VALID REVERSAL ROUTE | BB + DAILY MACD PRIORITY")
 print(f"Qualified Stocks : {len(final_output)}")
 
 for rank, item in enumerate(final_candidates, start=1):
@@ -2698,7 +2790,7 @@ for rank, item in enumerate(final_candidates, start=1):
         "| Turnover Rank:",
         item["turnover_rank"],
         "| Confirmations:",
-        item["price_confirmations"],
+        item["confirmations"],
         "| Signal:",
         item["signal"]
     )
@@ -2715,8 +2807,8 @@ print("BOLLINGER : 20, 1.5")
 print("RSI : 14")
 print("SETUPS : BB REVERSAL / ENGULFING / OVERSOLD + RSI RECOVERY")
 print("V8 : WEEKLY MACD DOWN-TREND + BEND + DAILY MACD POSITIVE TURN + LOWER BB REVERSAL")
-print("V8 : TOP 3 MAXIMUM — ONLY QUALIFIED STOCKS")
-print("V8 : ONLY RANK #1 CAN BE TOP SWING")
-print("MACD : WEEKLY DOWN-TREND + BEND, DAILY MACD POSITIVE TURN, LOWER BB REVERSAL PRIORITY")
+print("V8 : ALL QUALIFIED STOCKS — NO TOP-3 LIMIT")
+print("V8 : RANK #1 IS TOP SWING WHEN SCORE >= 85")
+print("MACD : DAILY BEND/POSITIVE TURN + WEEKLY DOWN/BEND | LOWER BB HIGHEST PRIORITY")
 print("========================================")
 
