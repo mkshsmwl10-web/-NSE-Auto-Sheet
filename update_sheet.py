@@ -2605,6 +2605,8 @@ sheet_final.batch_clear(["A1:AA1000"])
 # FINAL LIST is intentionally limited to A:N.
 # Clearing A:AA above removes any leftover columns from older V1-V6 layouts.
 
+sheet_final.batch_clear(["A:AZ"])
+
 sheet_final.update(
     range_name="A1:N1",
     values=[final_headers],
