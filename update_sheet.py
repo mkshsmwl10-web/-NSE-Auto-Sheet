@@ -1993,201 +1993,201 @@ for _, row in top200.iterrows():
     else:
         turnover_score = 1
 
-    # -----------------------------------------------------
-    # SCORE
-# ---------------------------------------------------------
-# PURPOSE:
-# Find stocks that are not merely "near the BB", but are
-# actually showing a reversal + confirmation + momentum.
-#
-# The score is deliberately biased toward PRICE ACTION.
-# Turnover is supportive, not the main reason for a high score.
-# ---------------------------------------------------------
+        # -----------------------------------------------------
+        # SCORE
+    # ---------------------------------------------------------
+    # PURPOSE:
+    # Find stocks that are not merely "near the BB", but are
+    # actually showing a reversal + confirmation + momentum.
+    #
+    # The score is deliberately biased toward PRICE ACTION.
+    # Turnover is supportive, not the main reason for a high score.
+    # ---------------------------------------------------------
 
-score = 0
+    score = 0
 
-# 1) BB / exhaustion
-if recent_bb_touch:
-    score += 10
+    # 1) BB / exhaustion
+    if recent_bb_touch:
+        score += 10
 
-if recent_bb_rejection:
-    score += 10
+    if recent_bb_rejection:
+        score += 10
 
-if selling_exhaustion:
-    score += 8
+    if selling_exhaustion:
+        score += 8
 
-# 2) Reversal trigger
-if engulfing:
-    score += 15
+    # 2) Reversal trigger
+    if engulfing:
+        score += 15
 
-if oversold:
-    score += 10
+    if oversold:
+        score += 10
 
-if rsi_recovery:
-    score += 10
+    if rsi_recovery:
+        score += 10
 
-if deep_oversold:
-    score += 5
+    if deep_oversold:
+        score += 5
 
-# 3) Real price confirmation — highest importance
-if strong_green:
-    score += 12
+    # 3) Real price confirmation — highest importance
+    if strong_green:
+        score += 12
 
-if high_break:
-    score += 12
+    if high_break:
+        score += 12
 
-if low_protected:
-    score += 8
+    if low_protected:
+        score += 8
 
-# 4) Gap confirmation
-if gap_up:
-    score += 4
+    # 4) Gap confirmation
+    if gap_up:
+        score += 4
 
-if strong_gap_up:
-    score += 5
+    if strong_gap_up:
+        score += 5
 
-if gap_maintained == "YES ✅":
-    score += 5
+    if gap_maintained == "YES ✅":
+        score += 5
 
-# 5) Turnover — supportive only
-score += turnover_score
+    # 5) Turnover — supportive only
+    score += turnover_score
 
-# 6) Independent setup agreement
-setup_count = sum([
-    bb_reversal,
-    engulfing_reversal,
-    oversold_reversal
-])
-
-if setup_count >= 2:
-    score += 5
-
-if setup_count >= 3:
-    score += 5
-
-# ---------------------------------------------------------
-# IMPORTANT:
-# A stock with negative current gain must not become a
-# "strong reversal" only because several historical signals
-# are present.
-# ---------------------------------------------------------
-
-if current_gain_pct < 0:
-    score = min(score, 59)
-
-# Positive momentum bonus
-if current_gain_pct >= 2.0:
-    score += 3
-
-if current_gain_pct >= 4.0:
-    score += 3
-
-if score > 100:
-    score = 100
-
-# ---------------------------------------------------------
-# SETUP TYPE
-    # -----------------------------------------------------
-
-    setup_names = []
-
-    if bb_reversal:
-        setup_names.append("💎 BB REVERSAL")
-
-    if engulfing_reversal:
-        setup_names.append("🔥 ENGULFING")
-
-    if oversold_reversal:
-        if rsi_recovery:
-            setup_names.append("🚀 RSI RECOVERY")
-        else:
-            setup_names.append("🚀 OVERSOLD")
-
-    if len(setup_names) == 0:
-        setup_type = "—"
-    else:
-        setup_type = " + ".join(setup_names)
-
-    # -----------------------------------------------------
-    # SIGNAL
-# ---------------------------------------------------------
-
-if score >= 85:
-    final_signal = "💎 A+ POTENTIAL"
-
-elif score >= 75:
-    final_signal = "🔥 STRONG SWING"
-
-elif score >= 65:
-    final_signal = "👀 WATCH"
-
-else:
-    final_signal = "—"
-
-# ---------------------------------------------------------
-# OUTPUT
-    # -----------------------------------------------------
-
-    output_rows.append([
-
-        symbol,
-        turnover,
-
-        previous_open,
-        previous_high,
-        previous_low,
-        previous_close,
-        previous_candle,
-
-        today_open,
-        round(gap_up_pct, 2),
-
-        today_close,
-        round(current_gain_pct, 2),
-
-        gap_maintained,
-
-        (
-            round(setup_lower_bb, 2)
-            if setup_lower_bb is not None
-            else ""
-        ),
-
-        (
-            round(setup_rsi, 2)
-            if setup_rsi is not None
-            else ""
-        ),
-
-        (
-            round(previous_rsi, 2)
-            if previous_rsi is not None
-            else ""
-        ),
-
-        "YES 🔄" if rsi_recovery else "NO",
-
-        "YES ✅" if recent_bb_touch else "NO",
-
-        "YES 🔥" if recent_bb_rejection else "NO",
-
-        "YES 🔥" if engulfing else "NO",
-
-        "YES 🔥" if oversold else "NO",
-
-        "YES 🚀" if strong_green else "NO",
-
-        "YES 🚀" if high_break else "NO",
-
-        "YES ✅" if low_protected else "NO",
-
-        setup_type,
-
-        rank,
-        score,
-
-        final_signal
+    # 6) Independent setup agreement
+    setup_count = sum([
+        bb_reversal,
+        engulfing_reversal,
+        oversold_reversal
     ])
+
+    if setup_count >= 2:
+        score += 5
+
+    if setup_count >= 3:
+        score += 5
+
+    # ---------------------------------------------------------
+    # IMPORTANT:
+    # A stock with negative current gain must not become a
+    # "strong reversal" only because several historical signals
+    # are present.
+    # ---------------------------------------------------------
+
+    if current_gain_pct < 0:
+        score = min(score, 59)
+
+    # Positive momentum bonus
+    if current_gain_pct >= 2.0:
+        score += 3
+
+    if current_gain_pct >= 4.0:
+        score += 3
+
+    if score > 100:
+        score = 100
+
+    # ---------------------------------------------------------
+    # SETUP TYPE
+        # -----------------------------------------------------
+
+        setup_names = []
+
+        if bb_reversal:
+            setup_names.append("💎 BB REVERSAL")
+
+        if engulfing_reversal:
+            setup_names.append("🔥 ENGULFING")
+
+        if oversold_reversal:
+            if rsi_recovery:
+                setup_names.append("🚀 RSI RECOVERY")
+            else:
+                setup_names.append("🚀 OVERSOLD")
+
+        if len(setup_names) == 0:
+            setup_type = "—"
+        else:
+            setup_type = " + ".join(setup_names)
+
+        # -----------------------------------------------------
+        # SIGNAL
+    # ---------------------------------------------------------
+
+    if score >= 85:
+        final_signal = "💎 A+ POTENTIAL"
+
+    elif score >= 75:
+        final_signal = "🔥 STRONG SWING"
+
+    elif score >= 65:
+        final_signal = "👀 WATCH"
+
+    else:
+        final_signal = "—"
+
+    # ---------------------------------------------------------
+    # OUTPUT
+        # -----------------------------------------------------
+
+        output_rows.append([
+
+            symbol,
+            turnover,
+
+            previous_open,
+            previous_high,
+            previous_low,
+            previous_close,
+            previous_candle,
+
+            today_open,
+            round(gap_up_pct, 2),
+
+            today_close,
+            round(current_gain_pct, 2),
+
+            gap_maintained,
+
+            (
+                round(setup_lower_bb, 2)
+                if setup_lower_bb is not None
+                else ""
+            ),
+
+            (
+                round(setup_rsi, 2)
+                if setup_rsi is not None
+                else ""
+            ),
+
+            (
+                round(previous_rsi, 2)
+                if previous_rsi is not None
+                else ""
+            ),
+
+            "YES 🔄" if rsi_recovery else "NO",
+
+            "YES ✅" if recent_bb_touch else "NO",
+
+            "YES 🔥" if recent_bb_rejection else "NO",
+
+            "YES 🔥" if engulfing else "NO",
+
+            "YES 🔥" if oversold else "NO",
+
+            "YES 🚀" if strong_green else "NO",
+
+            "YES 🚀" if high_break else "NO",
+
+            "YES ✅" if low_protected else "NO",
+
+            setup_type,
+
+            rank,
+            score,
+
+            final_signal
+        ])
 
 
 # =========================================================
