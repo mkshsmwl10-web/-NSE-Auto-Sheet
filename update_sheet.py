@@ -1431,499 +1431,686 @@ for _, row in top200.iterrows():
 
 
     # =====================================================
-    # 1. PRICE FALL / SELLING EXHAUSTION
-    # =====================================================
-
-    falling_closes = False
-
-    lower_low = False
-
-
-    if (
-
-        c1 is not None
-
-        and
-
-        c2 is not None
-
-        and
-
-        setup is not None
-
-    ):
-
-        falling_closes = (
-
-            c1["close"]
-            > c2["close"]
-            > setup_close
-
-        )
+    
+# =========================================================
+# MULTI-REVERSAL SCORING ENGINE
+# =========================================================
+#
+# FINAL LIST IS NOT LIMITED TO ONE PERFECT BB SETUP.
+#
+# SETUP 1 : LOWER BB REVERSAL
+# SETUP 2 : BULLISH ENGULFING + BB/EXHAUSTION
+# SETUP 3 : OVERSOLD + STRONG CANDLE / GAP-UP
+#
+# TURNOVER IS A SCORE FACTOR, NOT A HARD FILTER.
+# FINAL LIST = TOP POTENTIAL REVERSALS, MAX 10
+# =========================================================
 
 
-        lower_low = (
+def rsi_from_closes(closes, length=14):
 
-            setup_low
-            < c2["low"]
+    if len(closes) < length + 1:
+        return None
 
-        )
+    s = pd.Series(closes, dtype=float)
 
+    delta = s.diff()
 
-    selling_exhaustion = (
+    gain = delta.clip(lower=0)
 
-        falling_closes
+    loss = -delta.clip(upper=0)
 
-        and
+    avg_gain = gain.rolling(
+        length
+    ).mean()
 
-        lower_low
+    avg_loss = loss.rolling(
+        length
+    ).mean()
 
+    ag = avg_gain.iloc[-1]
+    al = avg_loss.iloc[-1]
+
+    if pd.isna(ag) or pd.isna(al):
+        return None
+
+    if al == 0:
+        return 100.0
+
+    rs = ag / al
+
+    return float(
+        100 - (100 / (1 + rs))
     )
 
 
-    # =====================================================
-    # 2. LOWER BB TOUCH / BREAK
-    # =====================================================
+def candle_structure(
+    open_price,
+    high_price,
+    low_price,
+    close_price
+):
 
-    bb_touch = False
+    candle_range = high_price - low_price
 
-    bb_break = False
+    if candle_range <= 0:
+        return {
+            "body_ratio": 0,
+            "close_position": 0,
+            "lower_wick_ratio": 0,
+            "upper_wick_ratio": 0
+        }
+
+    body = abs(
+        close_price - open_price
+    )
+
+    lower_wick = (
+        min(open_price, close_price)
+        - low_price
+    )
+
+    upper_wick = (
+        high_price
+        - max(open_price, close_price)
+    )
+
+    return {
+        "body_ratio":
+            body / candle_range,
+
+        "close_position":
+            (close_price - low_price)
+            / candle_range,
+
+        "lower_wick_ratio":
+            lower_wick / candle_range,
+
+        "upper_wick_ratio":
+            upper_wick / candle_range
+    }
 
 
-    if (
+def bullish_engulfing(prev_candle, curr_candle):
 
-        setup_lower_bb is not None
+    if prev_candle is None or curr_candle is None:
+        return False
 
+    prev_open = prev_candle["open"]
+    prev_close = prev_candle["close"]
+
+    curr_open = curr_candle["open"]
+    curr_close = curr_candle["close"]
+
+    # Previous candle must be bearish.
+    if prev_close >= prev_open:
+        return False
+
+    # Current candle must be bullish.
+    if curr_close <= curr_open:
+        return False
+
+    # Real body engulfs previous real body.
+    return (
+        curr_open <= prev_close
         and
+        curr_close >= prev_open
+    )
 
-        setup is not None
 
-    ):
+def get_bb_for_index(candles, index):
 
-        bb_touch = (
+    if index < BB_LENGTH - 1:
+        return None, None, None
 
-            setup_low
-            <= setup_lower_bb
+    window = candles[
+        index - BB_LENGTH + 1:
+        index + 1
+    ]
 
+    return calculate_bb(
+        window,
+        BB_LENGTH,
+        BB_MULTIPLIER
+    )
+
+
+# =========================================================
+# OUTPUT
+# =========================================================
+
+output_rows = []
+
+
+# =========================================================
+# PROCESS TOP 200
+# =========================================================
+
+for _, row in top200.iterrows():
+
+    symbol = str(
+        row[symbol_col]
+    ).strip()
+
+    turnover = float(
+        row[turnover_col]
+    )
+
+    today_open = float(
+        row[open_col]
+    )
+
+    today_high = float(
+        row[high_col]
+    )
+
+    today_low = float(
+        row[low_col]
+    )
+
+    today_close = float(
+        row[close_col]
+    )
+
+    previous = previous_lookup.get(symbol)
+
+    if previous is None:
+        continue
+
+    previous_open = previous["open"]
+    previous_high = previous["high"]
+    previous_low = previous["low"]
+    previous_close = previous["close"]
+
+    if previous_close < previous_open:
+        previous_candle = "RED 🔴"
+    elif previous_close > previous_open:
+        previous_candle = "GREEN 🟢"
+    else:
+        previous_candle = "DOJI"
+
+    if previous_close != 0:
+        gap_up_pct = (
+            (today_open - previous_close)
+            / previous_close
+            * 100
         )
-
-
-        bb_break = (
-
-            setup_low
-            < setup_lower_bb
-
+        current_gain_pct = (
+            (today_close - previous_close)
+            / previous_close
+            * 100
         )
+    else:
+        gap_up_pct = 0
+        current_gain_pct = 0
 
+    if today_close >= today_open:
+        gap_maintained = "YES ✅"
+    elif today_close > previous_close:
+        gap_maintained = "PARTIAL 🟡"
+    else:
+        gap_maintained = "NO 🔴"
 
-    # =====================================================
-    # 3. CLOSE BACK ABOVE BB
-    # =====================================================
+    hist = sorted(
+        history_data.get(symbol, []),
+        key=lambda x: x["date"]
+    )
 
-    close_back_above_bb = False
+    # The last historical candle is the previous trading day.
+    setup = hist[-1] if len(hist) >= 1 else None
+    prev_setup = hist[-2] if len(hist) >= 2 else None
+    prev2_setup = hist[-3] if len(hist) >= 3 else None
 
-
-    if (
-
-        setup_lower_bb is not None
-
-        and
-
-        setup is not None
-
-    ):
-
-        close_back_above_bb = (
-
-            setup_close
-            > setup_lower_bb
-
-        )
-
-
-    # =====================================================
-    # 4. LOWER WICK REJECTION
-    # =====================================================
-
-    bb_rejection = False
-
+    setup_lower_bb = None
+    setup_rsi = None
 
     if setup is not None:
 
-        candle = candle_structure(
+        setup_index = len(hist) - 1
 
-            setup_open,
-
-            setup_high,
-
-            setup_low,
-
-            setup_close
-
+        _, _, setup_lower_bb = get_bb_for_index(
+            hist,
+            setup_index
         )
 
+        closes_to_setup = [
+            x["close"]
+            for x in hist[:setup_index + 1]
+        ]
 
-        meaningful_lower_wick = (
-
-            candle[
-                "lower_wick_ratio"
-            ]
-            >= 0.25
-
+        setup_rsi = rsi_from_closes(
+            closes_to_setup,
+            14
         )
 
+    # -----------------------------------------------------
+    # PRICE FALL / EXHAUSTION
+    # -----------------------------------------------------
 
-        close_upper_half = (
+    falling_closes = False
+    lower_low = False
 
-            candle[
-                "close_position"
-            ]
-            >= 0.50
+    if (
+        prev2_setup is not None
+        and
+        prev_setup is not None
+        and
+        setup is not None
+    ):
 
+        falling_closes = (
+            prev2_setup["close"]
+            > prev_setup["close"]
+            > setup["close"]
         )
 
-
-        bb_rejection = (
-
-            meaningful_lower_wick
-
-            and
-
-            close_upper_half
-
+        lower_low = (
+            setup["low"]
+            < prev_setup["low"]
         )
 
-
-    # =====================================================
-    # 5. COMPLETE REVERSAL SETUP
-    # =====================================================
-
-    reversal_setup = (
-
-        selling_exhaustion
-
+    selling_exhaustion = (
+        falling_closes
         and
-
-        bb_touch
-
-        and
-
-        bb_break
-
-        and
-
-        close_back_above_bb
-
-        and
-
-        bb_rejection
-
+        lower_low
     )
 
+    # -----------------------------------------------------
+    # LOWER BB
+    # -----------------------------------------------------
 
-    # =====================================================
-    # 6. TODAY HIGH BREAK
-    # =====================================================
+    bb_touch = False
+    bb_break = False
+    close_back_above_bb = False
+
+    if setup_lower_bb is not None and setup is not None:
+
+        bb_touch = (
+            setup["low"]
+            <= setup_lower_bb
+        )
+
+        bb_break = (
+            setup["low"]
+            < setup_lower_bb
+        )
+
+        close_back_above_bb = (
+            setup["close"]
+            > setup_lower_bb
+        )
+
+    # -----------------------------------------------------
+    # LOWER WICK REJECTION
+    # -----------------------------------------------------
+
+    bb_rejection = False
+
+    if setup is not None:
+
+        setup_candle = candle_structure(
+            setup["open"],
+            setup["high"],
+            setup["low"],
+            setup["close"]
+        )
+
+        bb_rejection = (
+            setup_candle["lower_wick_ratio"] >= 0.20
+            and
+            setup_candle["close_position"] >= 0.50
+        )
+
+    # -----------------------------------------------------
+    # BULLISH ENGULFING
+    # -----------------------------------------------------
+
+    engulfing = bullish_engulfing(
+        prev_setup,
+        setup
+    )
+
+    # -----------------------------------------------------
+    # OVERSOLD
+    # -----------------------------------------------------
+
+    oversold = (
+        setup_rsi is not None
+        and
+        setup_rsi <= 35
+    )
+
+    deep_oversold = (
+        setup_rsi is not None
+        and
+        setup_rsi <= 30
+    )
+
+    # -----------------------------------------------------
+    # TODAY STRONG CANDLE
+    # -----------------------------------------------------
+
+    today_candle = candle_structure(
+        today_open,
+        today_high,
+        today_low,
+        today_close
+    )
+
+    today_green = (
+        today_close > today_open
+    )
+
+    strong_green = (
+        today_green
+        and
+        today_candle["body_ratio"] >= 0.45
+        and
+        today_candle["close_position"] >= 0.65
+    )
+
+    # -----------------------------------------------------
+    # GAP-UP
+    # -----------------------------------------------------
+
+    gap_up = (
+        gap_up_pct >= 0.50
+    )
+
+    strong_gap_up = (
+        gap_up_pct >= 1.00
+    )
+
+    # -----------------------------------------------------
+    # TODAY CONFIRMATION
+    # -----------------------------------------------------
 
     high_break = False
-
+    low_protected = False
 
     if setup is not None:
 
         high_break = (
-
-            today_close
-            > setup_high
-
+            today_close > setup["high"]
         )
-
-
-    # =====================================================
-    # 7. LOW PROTECTED
-    # =====================================================
-
-    low_protected = False
-
-
-    if setup is not None:
 
         low_protected = (
-
-            today_low
-            > setup_low
-
+            today_low >= setup["low"]
         )
 
+    # -----------------------------------------------------
+    # RECENT BB TOUCH
+    #
+    # Gives the scanner some flexibility. A stock does not
+    # have to touch BB on exactly one candle if the touch
+    # happened in the recent 3-candle reversal area.
+    # -----------------------------------------------------
 
-    # =====================================================
-    # 8. TODAY STRONG GREEN
-    # =====================================================
+    recent_bb_touch = False
+    recent_bb_rejection = False
 
-    today_candle = candle_structure(
+    recent_rsi = setup_rsi
 
-        today_open,
+    recent_bb_low = setup_lower_bb
 
-        today_high,
+    recent_bars = hist[-3:] if len(hist) >= 3 else hist
 
-        today_low,
+    for idx_offset, bar in enumerate(recent_bars):
 
-        today_close
+        absolute_index = (
+            len(hist)
+            - len(recent_bars)
+            + idx_offset
+        )
 
-    )
+        _, _, bb_low = get_bb_for_index(
+            hist,
+            absolute_index
+        )
 
+        if bb_low is None:
+            continue
 
-    today_green = (
+        if bar["low"] <= bb_low:
 
-        today_close
-        > today_open
+            recent_bb_touch = True
 
-    )
+            cs = candle_structure(
+                bar["open"],
+                bar["high"],
+                bar["low"],
+                bar["close"]
+            )
 
+            if (
+                cs["lower_wick_ratio"] >= 0.20
+                and
+                cs["close_position"] >= 0.50
+            ):
+                recent_bb_rejection = True
 
-    strong_confirmation = (
+    # -----------------------------------------------------
+    # REVERSAL SETUPS
+    # -----------------------------------------------------
 
-        today_green
-
+    bb_reversal = (
+        recent_bb_touch
         and
-
-        today_candle[
-            "body_ratio"
-        ] >= 0.50
-
-        and
-
-        today_candle[
-            "close_position"
-        ] >= 0.70
-
+        (
+            recent_bb_rejection
+            or
+            strong_green
+            or
+            engulfing
+        )
     )
 
+    engulfing_reversal = (
+        engulfing
+        and
+        (
+            recent_bb_touch
+            or
+            selling_exhaustion
+        )
+    )
 
-    # =====================================================
-    # 9. TURNOVER
-    # =====================================================
+    oversold_reversal = (
+        oversold
+        and
+        (
+            strong_green
+            or
+            engulfing
+            or
+            gap_up
+        )
+    )
+
+    # -----------------------------------------------------
+    # CONFIRMATION QUALITY
+    # -----------------------------------------------------
+
+    confirmation = (
+        high_break
+        or
+        strong_green
+        or
+        strong_gap_up
+    )
+
+    # -----------------------------------------------------
+    # TURNOVER SCORE
+    # -----------------------------------------------------
 
     rank = turnover_rank.get(
-
         symbol,
-
         999
-
     )
 
+    if rank <= 25:
+        turnover_score = 10
+    elif rank <= 50:
+        turnover_score = 8
+    elif rank <= 100:
+        turnover_score = 5
+    elif rank <= 150:
+        turnover_score = 3
+    else:
+        turnover_score = 1
 
-    high_turnover = (
-
-        rank
-        <= HIGH_TURNOVER_RANK
-
-    )
-
-
-    # =====================================================
-    # 10. STRICT BB REVERSAL
-    # =====================================================
-
-    strict_bb_reversal = (
-
-        reversal_setup
-
-        and
-
-        high_break
-
-        and
-
-        low_protected
-
-        and
-
-        high_turnover
-
-    )
-
-
-    # =====================================================
+    # -----------------------------------------------------
     # SCORE
-    # =====================================================
+    # -----------------------------------------------------
+    #
+    # Maximum is normalized to 100.
+    # Multiple setups can stack together.
+    # -----------------------------------------------------
 
     score = 0
 
+    if recent_bb_touch:
+        score += 15
 
-    if high_turnover:
-
-        score += 20
-
+    if recent_bb_rejection:
+        score += 10
 
     if selling_exhaustion:
+        score += 10
 
+    if engulfing:
         score += 15
 
-
-    if bb_touch:
-
+    if strong_green:
         score += 10
 
-
-    if bb_break:
-
+    if oversold:
         score += 10
 
+    if deep_oversold:
+        score += 5
 
-    if close_back_above_bb:
+    if gap_up:
+        score += 5
 
-        score += 15
-
-
-    if bb_rejection:
-
-        score += 10
-
+    if strong_gap_up:
+        score += 5
 
     if high_break:
-
         score += 10
-
 
     if low_protected:
+        score += 5
 
+    score += turnover_score
+
+    # Bonus when multiple independent reversal signals agree.
+    setup_count = sum([
+        bb_reversal,
+        engulfing_reversal,
+        oversold_reversal
+    ])
+
+    if setup_count >= 2:
         score += 10
 
+    if setup_count >= 3:
+        score += 5
 
     if score > 100:
-
         score = 100
 
-
-    # =====================================================
+    # -----------------------------------------------------
     # SETUP TYPE
-    # =====================================================
+    # -----------------------------------------------------
 
-    if strict_bb_reversal:
+    setup_names = []
 
-        setup_type = (
-            "💎 BB REVERSAL CONFIRMED"
-        )
+    if bb_reversal:
+        setup_names.append("💎 BB REVERSAL")
 
-    elif reversal_setup:
+    if engulfing_reversal:
+        setup_names.append("🔥 ENGULFING")
 
-        setup_type = (
-            "🟡 BB REVERSAL WAIT"
-        )
+    if oversold_reversal:
+        setup_names.append("🚀 OVERSOLD")
 
-    elif bb_touch:
+    if len(setup_names) == 0:
+        setup_type = "—"
+    else:
+        setup_type = " + ".join(setup_names)
 
-        setup_type = (
-            "🟡 LOWER BB TOUCH"
-        )
+    # -----------------------------------------------------
+    # SIGNAL
+    # -----------------------------------------------------
+
+    if score >= 80:
+        final_signal = "💎 A+ POTENTIAL"
+
+    elif score >= 70:
+        final_signal = "🔥 STRONG REVERSAL"
+
+    elif score >= 60:
+        final_signal = "👀 WATCH"
 
     else:
+        final_signal = "—"
 
-        setup_type = (
-            "—"
-        )
-
-
-    # =====================================================
-    # FINAL SIGNAL
-    # =====================================================
-
-    if strict_bb_reversal:
-
-        final_signal = (
-            "💎 STRONG BB REVERSAL"
-        )
-
-    elif reversal_setup:
-
-        final_signal = (
-            "🟡 WAIT BREAKOUT"
-        )
-
-    else:
-
-        final_signal = (
-            "—"
-        )
-
-
-    # =====================================================
-    # NIFTY200 OUTPUT
-    # =====================================================
+    # -----------------------------------------------------
+    # OUTPUT
+    # -----------------------------------------------------
 
     output_rows.append([
 
         symbol,
-
         turnover,
 
         previous_open,
-
         previous_high,
-
         previous_low,
-
         previous_close,
-
         previous_candle,
 
         today_open,
-
-        round(
-            gap_up_pct,
-            2
-        ),
+        round(gap_up_pct, 2),
 
         today_close,
-
-        round(
-            current_gain_pct,
-            2
-        ),
+        round(current_gain_pct, 2),
 
         gap_maintained,
 
         (
-            round(
-                setup_lower_bb,
-                2
-            )
+            round(setup_lower_bb, 2)
             if setup_lower_bb is not None
             else ""
         ),
 
         (
-            "YES ✅"
-            if bb_touch
-            else "NO"
+            round(setup_rsi, 2)
+            if setup_rsi is not None
+            else ""
         ),
 
-        (
-            "YES 🔥"
-            if bb_rejection
-            else "NO"
-        ),
+        "YES ✅" if recent_bb_touch else "NO",
 
-        (
-            "YES 🚀"
-            if high_break
-            else "NO"
-        ),
+        "YES 🔥" if recent_bb_rejection else "NO",
 
-        (
-            "YES ✅"
-            if low_protected
-            else "NO"
-        ),
+        "YES 🔥" if engulfing else "NO",
+
+        "YES 🔥" if oversold else "NO",
+
+        "YES 🚀" if strong_green else "NO",
+
+        "YES 🚀" if high_break else "NO",
+
+        "YES ✅" if low_protected else "NO",
 
         setup_type,
 
         rank,
-
         score,
 
         final_signal
-
     ])
 
 
@@ -1934,47 +2121,36 @@ for _, row in top200.iterrows():
 nifty_headers = [
 
     "NSE Code",
-
     "Turnover",
 
     "Previous Open",
-
     "Previous High",
-
     "Previous Low",
-
     "Previous Close",
-
     "Previous Candle",
 
     "Today Open",
-
     "Gap Up %",
-
     "CMP",
-
     "Current Gain %",
-
     "Gap Maintained?",
 
     "Lower BB (20,1.5)",
+    "RSI 14",
 
     "BB Touch?",
-
     "BB Rejection?",
-
+    "Bullish Engulfing?",
+    "Oversold?",
+    "Strong Green?",
     "High Break?",
-
     "Low Protected?",
 
     "Setup Type",
 
     "Turnover Rank",
-
     "Strength Score",
-
     "Signal"
-
 ]
 
 
@@ -1983,140 +2159,74 @@ nifty_headers = [
 # =========================================================
 
 sheet_nifty.batch_clear(
-
-    [
-        "A1:U1000"
-    ]
-
+    ["A1:Y1000"]
 )
-
 
 sheet_nifty.update(
-
-    range_name="A1:U1",
-
-    values=[
-        nifty_headers
-    ],
-
+    range_name="A1:Y1",
+    values=[nifty_headers],
     value_input_option="RAW"
-
 )
-
 
 if output_rows:
 
     sheet_nifty.update(
-
         range_name="A2",
-
         values=output_rows,
-
         value_input_option="RAW"
-
     )
 
 
 # =========================================================
-# STRICT FINAL LIST
+# FINAL LIST
 # =========================================================
 #
 # IMPORTANT:
-# RED -> GAP -> HOLD
-# IS NOT INCLUDED HERE.
+# This is NOT a strict BB-only filter.
 #
-# ONLY STRICT BB REVERSAL.
+# It selects the highest-quality candidates from:
+#   1. BB REVERSAL
+#   2. BULLISH ENGULFING
+#   3. OVERSOLD REVERSAL
+#
+# Score >= 60
+# Maximum 10 stocks
 # =========================================================
 
 final_candidates = []
 
-
 for row in output_rows:
 
-    if len(row) < 21:
-
+    if len(row) < 25:
         continue
 
+    score = row[23]
 
-    bb_touch_value = str(
-        row[13]
-    ).strip()
+    if score < 60:
+        continue
 
-
-    bb_rejection_value = str(
-        row[14]
-    ).strip()
-
-
-    high_break_value = str(
-        row[15]
-    ).strip()
-
-
-    low_protected_value = str(
-        row[16]
-    ).strip()
-
-
-    turnover_rank_value = row[18]
-
-
-    # =====================================================
-    # STRICT FINAL CONDITION
-    # =====================================================
-
-    confirmed_bb_reversal = (
-
-        bb_touch_value
-        == "YES ✅"
-
-        and
-
-        bb_rejection_value
-        == "YES 🔥"
-
-        and
-
-        high_break_value
-        == "YES 🚀"
-
-        and
-
-        low_protected_value
-        == "YES ✅"
-
-        and
-
-        turnover_rank_value
-        <= HIGH_TURNOVER_RANK
-
-    )
-
-
-    if confirmed_bb_reversal:
-
-        final_candidates.append(
-            row
-        )
+    final_candidates.append(row)
 
 
 # =========================================================
-# SORT FINAL LIST
+# SORT BY SCORE
 # =========================================================
 
 final_candidates.sort(
-
     key=lambda x: (
-
-        x[19],     # Strength Score
-
-        -x[18]     # Turnover Rank
-
+        x[23],       # Strength Score
+        -x[22],      # Turnover Rank
+        x[10]        # Current Gain %
     ),
-
     reverse=True
-
 )
+
+
+# =========================================================
+# KEEP TOP 10
+# =========================================================
+
+final_candidates = final_candidates[:10]
 
 
 # =========================================================
@@ -2125,13 +2235,9 @@ final_candidates.sort(
 
 final_output = []
 
-
 for rank, row in enumerate(
-
     final_candidates,
-
     start=1
-
 ):
 
     final_output.append([
@@ -2139,47 +2245,37 @@ for rank, row in enumerate(
         rank,
 
         row[0],
-
         row[1],
 
         row[2],
-
         row[3],
-
         row[4],
-
         row[5],
-
         row[6],
 
         row[7],
-
         row[8],
 
         row[9],
-
         row[10],
-
         row[11],
 
         row[12],
-
         row[13],
 
         row[14],
-
         row[15],
-
         row[16],
-
-        "💎 BB REVERSAL",
-
+        row[17],
         row[18],
-
         row[19],
+        row[20],
 
-        "💎 STRONG BB REVERSAL"
+        row[21],
 
+        row[22],
+        row[23],
+        row[24]
     ])
 
 
@@ -2190,49 +2286,38 @@ for rank, row in enumerate(
 final_headers = [
 
     "Rank",
-
     "NSE Code",
-
     "Turnover",
 
     "Previous Open",
-
     "Previous High",
-
     "Previous Low",
-
     "Previous Close",
-
     "Previous Candle",
 
     "Today Open",
-
     "Gap Up %",
 
     "CMP",
-
     "Current Gain %",
-
     "Gap Maintained?",
 
     "Lower BB (20,1.5)",
+    "RSI 14",
 
     "BB Touch?",
-
     "BB Rejection?",
-
+    "Bullish Engulfing?",
+    "Oversold?",
+    "Strong Green?",
     "High Break?",
-
     "Low Protected?",
 
     "Setup Type",
 
     "Turnover Rank",
-
     "Strength Score",
-
     "Signal"
-
 ]
 
 
@@ -2241,11 +2326,7 @@ final_headers = [
 # =========================================================
 
 sheet_final.batch_clear(
-
-    [
-        "A1:V1000"
-    ]
-
+    ["A1:Z1000"]
 )
 
 
@@ -2254,15 +2335,9 @@ sheet_final.batch_clear(
 # =========================================================
 
 sheet_final.update(
-
-    range_name="A1:V1",
-
-    values=[
-        final_headers
-    ],
-
+    range_name="A1:Z1",
+    values=[final_headers],
     value_input_option="RAW"
-
 )
 
 
@@ -2273,13 +2348,9 @@ sheet_final.update(
 if final_output:
 
     sheet_final.update(
-
         range_name="A2",
-
         values=final_output,
-
         value_input_option="RAW"
-
     )
 
 
@@ -2290,54 +2361,30 @@ if final_output:
 try:
 
     sheet_nifty.format(
-
-        "A1:U1",
-
+        "A1:Y1",
         {
-
             "textFormat": {
-
                 "bold": True
-
             },
-
             "horizontalAlignment":
                 "CENTER"
-
         }
-
     )
-
 
     sheet_final.format(
-
-        "A1:V1",
-
+        "A1:Z1",
         {
-
             "textFormat": {
-
                 "bold": True
-
             },
-
             "horizontalAlignment":
                 "CENTER"
-
         }
-
     )
 
+    sheet_nifty.freeze(rows=1)
 
-    sheet_nifty.freeze(
-        rows=1
-    )
-
-
-    sheet_final.freeze(
-        rows=1
-    )
-
+    sheet_final.freeze(rows=1)
 
 except Exception as e:
 
@@ -2355,7 +2402,7 @@ print(
 )
 
 print(
-    "NIFTY200 STRICT BB REVERSAL UPDATED"
+    "NIFTY200 MULTI-REVERSAL SCREENER UPDATED"
 )
 
 print(
@@ -2369,12 +2416,12 @@ print(
 )
 
 print(
-    f"Stocks : "
+    f"Stocks Scanned : "
     f"{len(output_rows)}"
 )
 
 print(
-    f"STRICT BB REVERSAL : "
+    f"Final Candidates : "
     f"{len(final_output)}"
 )
 
@@ -2387,43 +2434,35 @@ print(
 )
 
 print(
-    "HIGH TURNOVER : TOP 50"
-)
-
-print(
     "BOLLINGER : 20, 1.5"
 )
 
 print(
-    "SELLING EXHAUSTION : YES"
+    "RSI : 14"
 )
 
 print(
-    "LOWER BB TOUCH : REQUIRED"
+    "SETUP 1 : LOWER BB REVERSAL"
 )
 
 print(
-    "LOWER BB BREAK : REQUIRED"
+    "SETUP 2 : BULLISH ENGULFING"
 )
 
 print(
-    "CLOSE BACK ABOVE BB : REQUIRED"
+    "SETUP 3 : OVERSOLD REVERSAL"
 )
 
 print(
-    "LOWER WICK REJECTION : REQUIRED"
+    "TURNOVER : SCORE FACTOR"
 )
 
 print(
-    "HIGH BREAK : REQUIRED"
+    "SCORE >= 60 : FINAL CANDIDATE"
 )
 
 print(
-    "LOW PROTECTED : REQUIRED"
-)
-
-print(
-    "RED GAP HOLD : NOT IN FINAL LIST"
+    "MAX FINAL STOCKS : 10"
 )
 
 print(
