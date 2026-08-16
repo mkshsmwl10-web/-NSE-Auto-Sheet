@@ -2358,20 +2358,23 @@ if output_rows:
 
 
 # =========================================================
+# FINAL LIST V7 — TOP 3 + ONE TOP SWING
 # =========================================================
-# FINAL LIST V8 — FRESH REVERSAL + DAILY MACD BEND
-# =========================================================
-# V8 goal:
-#   Find ONE fresh swing candidate from NIFTY 200 with room to move.
+# Goal:
+#   NIFTY 200 -> strong reversal shortlist -> TOP 3
+#   -> Rank #1 is the single TOP SWING candidate.
 #
-# Priority:
-#   1. Fresh daily MACD bend below zero -> up
-#   2. BB rejection / oversold / RSI recovery
-#   3. Low protected + high break / strong green
-#   4. Fresh current gain (avoid chasing extended stocks)
-#   5. Turnover as supporting quality, not the main trigger
-#
-# Final List remains intentionally CLEAN and shows only TOP 3.
+# V7 PRINCIPLES
+# ---------------------------------------------------------
+# 1. Fresh reversal is more important than raw momentum.
+# 2. Current gain must be positive.
+# 3. Low must be protected.
+# 4. At least TWO real price confirmations are required.
+# 5. BB rejection / oversold / RSI recovery are the core setup.
+# 6. Turnover supports the score; it does not dominate it.
+# 7. Already-extended stocks are penalized.
+# 8. Only Rank #1 can be called TOP SWING.
+# 9. Rank #2 and #3 can be STRONG SWING.
 # =========================================================
 
 SCORE_INDEX = 25
@@ -2400,7 +2403,7 @@ for row in output_rows:
     except (TypeError, ValueError):
         turnover_rank_value = 9999
 
-    # Output column flags
+    # Signal flags
     rsi_recovery = str(row[15]).startswith("YES")
     bb_touch = str(row[16]).startswith("YES")
     bb_rejection = str(row[17]).startswith("YES")
@@ -2410,8 +2413,6 @@ for row in output_rows:
     high_break = str(row[21]).startswith("YES")
     low_protected = str(row[22]).startswith("YES")
     gap_hold = str(row[11]).startswith("YES")
-
-    # Internal V7/V8 MACD fields
     macd_bend_up = str(row[27]).startswith("YES")
     macd_strong_recovery = str(row[28]).startswith("YES")
     macd_cross_up = str(row[29]).startswith("YES")
@@ -2421,23 +2422,31 @@ for row in output_rows:
     except (TypeError, ValueError):
         gap_pct = 0.0
 
-    # ---------------------------------------------------------
-    # V8 HARD FILTERS
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
+    # HARD FILTERS
+    # -----------------------------------------------------
 
-    # We want stocks already showing upward price action.
+    # We want a stock moving up now.
     if gain <= 0:
         continue
 
-    # Do not chase a stock that has already travelled too far.
-    if gain > 10:
+    # Reversal/exhaustion trigger is mandatory.
+    reversal_trigger = (
+        bb_rejection
+        or oversold
+        or rsi_recovery
+        or engulfing
+        or bb_touch
+    )
+
+    if not reversal_trigger:
         continue
 
-    # A protected low is mandatory for the swing setup.
+    # A protected low is essential for a fresh swing setup.
     if not low_protected:
         continue
 
-    # At least TWO real price confirmations.
+    # Real price confirmation.
     price_confirmations = sum([
         strong_green,
         high_break,
@@ -2448,184 +2457,163 @@ for row in output_rows:
     if price_confirmations < 2:
         continue
 
-    # At least one reversal/exhaustion trigger.
-    reversal_trigger = (
-        bb_rejection
-        or oversold
-        or rsi_recovery
-        or engulfing
-        or bb_touch
-        or macd_bend_up
-    )
-
-    if not reversal_trigger:
+    # Do not chase a stock that has already run too far today.
+    if gain > 10:
         continue
 
-    # ---------------------------------------------------------
-    # V8 SCORE — 100 POINT CORE
-    # ---------------------------------------------------------
-    # The key change from V7:
-    # MACD fresh bend is treated as an EARLY ENTRY signal,
-    # not merely another small bonus.
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
+    # V7 SWING SCORE — 100 BASE + QUALITY BONUSES
+    # -----------------------------------------------------
 
-    v8_score = 0.0
+    swing_score = 0
 
-    # 1. DAILY MACD EARLY REVERSAL — 25 points
-    # Fresh bend below zero -> up is the preferred event.
-    if macd_bend_up:
-        v8_score += 15
-    if macd_strong_recovery:
-        v8_score += 6
-    if macd_cross_up:
-        v8_score += 4
-
-    # 2. BB / RSI REVERSAL — 25 points
+    # A. REVERSAL QUALITY — 25
     if bb_rejection:
-        v8_score += 9
+        swing_score += 10
     elif bb_touch:
-        v8_score += 4
+        swing_score += 5
 
     if oversold:
-        v8_score += 7
+        swing_score += 7
 
     if rsi_recovery:
-        v8_score += 7
+        swing_score += 6
 
     if engulfing:
-        v8_score += 6
+        swing_score += 5
 
-    # 3. PRICE CONFIRMATION — 25 points
-    if low_protected:
-        v8_score += 7
-
+    # B. PRICE CONFIRMATION — 30
     if high_break:
-        v8_score += 8
+        swing_score += 10
 
     if strong_green:
-        v8_score += 6
+        swing_score += 8
+
+    if low_protected:
+        swing_score += 7
 
     if engulfing:
-        v8_score += 4
+        swing_score += 5
 
-    # 4. GAP / HOLD — 8 points
+    # C. GAP / HOLD — 10
     if gap_pct > 0:
-        v8_score += 2
+        swing_score += 3
+
     if gap_pct >= 1:
-        v8_score += 1
+        swing_score += 2
+
     if gap_hold:
-        v8_score += 5
+        swing_score += 5
 
-    # 5. TURNOVER QUALITY — 7 points
+    # D. TURNOVER — 10
     if turnover_rank_value <= 25:
-        v8_score += 7
+        swing_score += 10
     elif turnover_rank_value <= 50:
-        v8_score += 6
+        swing_score += 9
     elif turnover_rank_value <= 100:
-        v8_score += 5
+        swing_score += 7
     elif turnover_rank_value <= 150:
-        v8_score += 3
+        swing_score += 4
     else:
-        v8_score += 1
+        swing_score += 2
 
-    # 6. FRESHNESS / ROOM FOR A SWING — 10 points
-    # Best zone is still early in the move.
+    # E. FRESH-MOVE / ROOM TO MOVE — 20
+    # Sweet spot is roughly 0.5% to 4% current gain.
     if 0.5 <= gain <= 2:
-        v8_score += 10
+        swing_score += 20
     elif 2 < gain <= 4:
-        v8_score += 9
+        swing_score += 19
     elif 4 < gain <= 6:
-        v8_score += 7
+        swing_score += 16
     elif 6 < gain <= 8:
-        v8_score += 4
+        swing_score += 11
     elif 8 < gain <= 10:
-        v8_score += 1
+        swing_score += 5
     elif 0 < gain < 0.5:
-        v8_score += 8
+        swing_score += 15
 
-    # ---------------------------------------------------------
-    # V8 QUALITY BOOSTS / PENALTIES
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
+    # QUALITY BONUSES
+    # -----------------------------------------------------
 
-    # Ideal sniper combination.
-    if macd_bend_up and bb_rejection:
-        v8_score += 4
+    # BB rejection + RSI recovery/oversold is a strong combination.
+    if bb_rejection and (rsi_recovery or oversold):
+        swing_score += 5
 
-    if macd_bend_up and (rsi_recovery or oversold):
-        v8_score += 4
+    # Breakout + protected low is stronger than either alone.
+    if high_break and low_protected:
+        swing_score += 4
 
-    if macd_bend_up and low_protected and high_break:
-        v8_score += 4
-
-    if bb_rejection and (rsi_recovery or oversold) and low_protected:
-        v8_score += 3
-
+    # Strong green + high break = actual price momentum.
     if strong_green and high_break:
-        v8_score += 3
+        swing_score += 4
 
+    # Fresh gap that is actually holding.
     if gap_pct > 0 and gap_hold:
-        v8_score += 2
+        swing_score += 3
 
-    # Extended move penalty — preserve room for the intended swing.
-    if gain > 6:
-        v8_score -= (gain - 6) * 1.5
+    # Penalize extended moves so they cannot dominate a fresh setup.
+    if gain > 8:
+        swing_score -= 8
 
-    # Weak price confirmation penalty.
+    # Penalize weak confirmation.
     if price_confirmations == 2:
-        v8_score -= 2
+        swing_score -= 2
 
-    # If MACD is not bending/recovering, a BB setup can still qualify,
-    # but it should not outrank a genuinely fresh MACD reversal.
-    if not macd_bend_up and not macd_strong_recovery and not macd_cross_up:
-        v8_score -= 3
+    # Daily MACD early reversal confirmation.
+    if macd_bend_up:
+        swing_score += 8
+    if macd_strong_recovery:
+        swing_score += 4
+    if macd_cross_up:
+        swing_score += 4
 
-    v8_score = max(0, min(100, round(v8_score)))
+    # Base technical score is a small tie-break/support factor only.
+    swing_score += min(5, max(0, int(base_score) // 20))
 
-    # ---------------------------------------------------------
-    # V8 SIGNAL
-    # ---------------------------------------------------------
+    swing_score = max(0, min(100, swing_score))
 
-    if v8_score >= 82:
-        signal = "🎯 TOP SWING"
-    elif v8_score >= 74:
+    # -----------------------------------------------------
+    # CLASSIFICATION
+    # -----------------------------------------------------
+
+    if swing_score >= 72:
         signal = "🔥 STRONG SWING"
-    elif v8_score >= 66:
+    elif swing_score >= 65:
         signal = "👀 WATCH"
     else:
         continue
 
-    # Fresh MACD bend is a preferred candidate even when score is close
-    # to the threshold; it must still have basic price confirmation.
-    if macd_bend_up and price_confirmations >= 3 and gain <= 6 and v8_score >= 76:
-        signal = "🎯 TOP SWING"
-
     final_candidates.append({
         "row": row,
-        "score": v8_score,
+        "score": swing_score,
         "base_score": base_score,
         "gain": gain,
         "turnover_rank": turnover_rank_value,
         "price_confirmations": price_confirmations,
-        "macd_priority": int(macd_bend_up) * 3 + int(macd_strong_recovery) * 2 + int(macd_cross_up),
         "signal": signal
     })
 
 
 # =========================================================
-# V8 RANKING
+# V7 RANKING
 # =========================================================
-# A fresh MACD bend wins ties. Then price confirmation, freshness,
-# turnover and base score are used as tie-breakers.
+# Priority:
+#   1. Fresh swing score
+#   2. Confirmation count
+#   3. Ideal gain zone
+#   4. Turnover rank
+#   5. Base technical score
 # =========================================================
 
 def freshness_distance(gain):
-    return abs(gain - 2.0)
+    # Ideal current gain around 2.5%.
+    return abs(gain - 2.5)
 
 
 final_candidates.sort(
     key=lambda item: (
         item["score"],
-        item["macd_priority"],
         item["price_confirmations"],
         -freshness_distance(item["gain"]),
         -item["turnover_rank"],
@@ -2634,27 +2622,31 @@ final_candidates.sort(
     reverse=True
 )
 
-# Keep the clean TOP 3 only.
+# V7 intentionally shows only the best 3.
 final_candidates = final_candidates[:3]
 
-# Only #1 can be called TOP SWING.
+
+# =========================================================
+# V7 SIGNAL — ONLY #1 CAN BE TOP SWING
+# =========================================================
+
 for rank, item in enumerate(final_candidates, start=1):
 
     if (
         rank == 1
         and item["score"] >= 80
-        and item["gain"] <= 6
+        and item["gain"] <= 8
         and item["price_confirmations"] >= 3
     ):
         item["signal"] = "🎯 TOP SWING"
-    elif item["score"] >= 74:
+    elif item["score"] >= 72:
         item["signal"] = "🔥 STRONG SWING"
     else:
         item["signal"] = "👀 WATCH"
 
 
 # =========================================================
-# COMPACT FINAL LIST V8
+# COMPACT FINAL LIST V7
 # =========================================================
 
 final_headers = [
@@ -2679,6 +2671,7 @@ final_output = []
 for rank, item in enumerate(final_candidates, start=1):
 
     row = item["row"]
+
     confirmations = []
 
     if str(row[17]).startswith("YES"):
@@ -2721,8 +2714,13 @@ for rank, item in enumerate(final_candidates, start=1):
 
 
 # =========================================================
-# WRITE CLEAN FINAL LIST
+# CLEAR + WRITE FINAL LIST
 # =========================================================
+
+sheet_final.batch_clear(["A1:AA1000"])
+
+# FINAL LIST is intentionally limited to A:N.
+# Clearing A:AA above removes any leftover columns from older V1-V6 layouts.
 
 sheet_final.batch_clear(["A:AZ"])
 
@@ -2741,10 +2739,11 @@ if final_output:
 
 
 # =========================================================
-# CLEAN V8 FORMATTING
+# FINAL LIST V7 — CLEAN COMPACT FORMATTING
 # =========================================================
 
 try:
+
     sheet_final.format(
         "A1:N1",
         {
@@ -2769,12 +2768,15 @@ try:
     )
 
     if final_output:
+
         last_row = len(final_output) + 1
 
         sheet_final.format(
             f"A2:N{last_row}",
             {
-                "textFormat": {"fontSize": 8},
+                "textFormat": {
+                    "fontSize": 8
+                },
                 "horizontalAlignment": "CENTER",
                 "verticalAlignment": "MIDDLE",
                 "wrapStrategy": "WRAP"
@@ -2784,7 +2786,10 @@ try:
         sheet_final.format(
             f"B2:B{last_row}",
             {
-                "textFormat": {"bold": True, "fontSize": 9},
+                "textFormat": {
+                    "bold": True,
+                    "fontSize": 9
+                },
                 "horizontalAlignment": "LEFT"
             }
         )
@@ -2792,25 +2797,36 @@ try:
         sheet_final.format(
             f"K2:L{last_row}",
             {
-                "textFormat": {"bold": True, "fontSize": 8},
+                "textFormat": {
+                    "bold": True,
+                    "fontSize": 8
+                },
                 "wrapStrategy": "WRAP"
             }
         )
 
         sheet_final.format(
             f"M2:M{last_row}",
-            {"textFormat": {"bold": True, "fontSize": 9}}
+            {
+                "textFormat": {
+                    "bold": True,
+                    "fontSize": 9
+                }
+            }
         )
 
         sheet_final.format(
             f"N2:N{last_row}",
             {
-                "textFormat": {"bold": True, "fontSize": 9},
+                "textFormat": {
+                    "bold": True,
+                    "fontSize": 9
+                },
                 "wrapStrategy": "WRAP"
             }
         )
 
-        # Rank #1 gets the strongest visual emphasis.
+        # Make Rank #1 visually stand out.
         sheet_final.format(
             "A2:N2",
             {
@@ -2818,15 +2834,95 @@ try:
                     "red": 0.90,
                     "green": 0.97,
                     "blue": 0.90
+                },
+                "textFormat": {
+                    "bold": True,
+                    "fontSize": 9
                 }
             }
         )
 
-except Exception as formatting_error:
-    print("Final formatting warning:", formatting_error)
+    widths = {
+        "A:A": 42,
+        "B:B": 95,
+        "C:C": 92,
+        "D:D": 75,
+        "E:E": 75,
+        "F:F": 55,
+        "G:G": 75,
+        "H:H": 60,
+        "I:I": 78,
+        "J:J": 55,
+        "K:K": 180,
+        "L:L": 190,
+        "M:M": 55,
+        "N:N": 105
+    }
 
-print("V8 Final List : TOP", len(final_output), "stocks")
-if final_output:
-    print("V8 TOP SWING :", final_output[0][1], "Score:", final_output[0][12])
-else:
-    print("V8 TOP SWING : NONE")
+    for col_range, width in widths.items():
+        try:
+            sheet_final.format(
+                col_range,
+                {
+                    "padding": {
+                        "top": 2,
+                        "bottom": 2,
+                        "left": 2,
+                        "right": 2
+                    }
+                }
+            )
+        except Exception:
+            pass
+
+    sheet_final.freeze(rows=1)
+
+except Exception as e:
+    print(
+        f"Final List Formatting Warning : {e}"
+    )
+
+
+# =========================================================
+# V7 SUMMARY
+# =========================================================
+
+print("----------------------------------------")
+print("FINAL LIST V7 : CLEAN TOP 3 + ONE TOP SWING")
+print(f"Qualified Stocks : {len(final_output)}")
+
+for rank, item in enumerate(final_candidates, start=1):
+    row = item["row"]
+    print(
+        rank,
+        "|",
+        row[0],
+        "| Swing Score:",
+        item["score"],
+        "| Gain:",
+        item["gain"],
+        "| Turnover Rank:",
+        item["turnover_rank"],
+        "| Confirmations:",
+        item["price_confirmations"],
+        "| Signal:",
+        item["signal"]
+    )
+
+print("========================================")
+print("NIFTY200 V7 SWING SCREENER UPDATED")
+print(f"Trading Date : {latest_date.strftime('%d-%b-%Y')}")
+print(f"Previous Date : {previous_date.strftime('%d-%b-%Y')}")
+print(f"Stocks Scanned : {len(output_rows)}")
+print(f"Final Candidates : {len(final_output)}")
+print("----------------------------------------")
+print("TOP 200 BY TURNOVER : YES")
+print("BOLLINGER : 20, 1.5")
+print("RSI : 14")
+print("SETUPS : BB REVERSAL / ENGULFING / OVERSOLD + RSI RECOVERY")
+print("V7 : FRESH MOVE + PRICE CONFIRMATION + TURNOVER")
+print("V7 : TOP 3 MAXIMUM — ONLY QUALIFIED STOCKS")
+print("V7 : ONLY RANK #1 CAN BE TOP SWING")
+print("MACD : DAILY MACD LINE FRESH BEND BELOW ZERO -> UP + SIGNAL CROSS CONFIRMATION")
+print("========================================")
+
