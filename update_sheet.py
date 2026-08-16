@@ -1663,6 +1663,9 @@ for _, row in top200.iterrows():
 
     setup_lower_bb = None
     setup_rsi = None
+    previous_rsi = None
+    rsi_recovery = False
+    rsi_deep_oversold = False
 
     if setup is not None:
 
@@ -1681,6 +1684,31 @@ for _, row in top200.iterrows():
         setup_rsi = rsi_from_closes(
             closes_to_setup,
             14
+        )
+
+        # RSI of the candle immediately before the setup candle.
+        if len(closes_to_setup) >= 16:
+            previous_rsi = rsi_from_closes(
+                closes_to_setup[:-1],
+                14
+            )
+
+        rsi_deep_oversold = (
+            setup_rsi is not None
+            and
+            setup_rsi <= 30
+        )
+
+        # Fresh RSI recovery: RSI is still relatively low,
+        # but has started turning upward.
+        rsi_recovery = (
+            previous_rsi is not None
+            and
+            setup_rsi is not None
+            and
+            setup_rsi > previous_rsi
+            and
+            setup_rsi <= 45
         )
 
     # -----------------------------------------------------
@@ -1916,7 +1944,11 @@ for _, row in top200.iterrows():
     )
 
     oversold_reversal = (
-        oversold
+        (
+            oversold
+            or
+            rsi_recovery
+        )
         and
         (
             strong_green
@@ -1924,6 +1956,8 @@ for _, row in top200.iterrows():
             engulfing
             or
             gap_up
+            or
+            high_break
         )
     )
 
@@ -1987,6 +2021,9 @@ for _, row in top200.iterrows():
     if oversold:
         score += 10
 
+    if rsi_recovery:
+        score += 10
+
     if deep_oversold:
         score += 5
 
@@ -2033,7 +2070,10 @@ for _, row in top200.iterrows():
         setup_names.append("🔥 ENGULFING")
 
     if oversold_reversal:
-        setup_names.append("🚀 OVERSOLD")
+        if rsi_recovery:
+            setup_names.append("🚀 RSI RECOVERY")
+        else:
+            setup_names.append("🚀 OVERSOLD")
 
     if len(setup_names) == 0:
         setup_type = "—"
@@ -2091,6 +2131,14 @@ for _, row in top200.iterrows():
             else ""
         ),
 
+        (
+            round(previous_rsi, 2)
+            if previous_rsi is not None
+            else ""
+        ),
+
+        "YES 🔄" if rsi_recovery else "NO",
+
         "YES ✅" if recent_bb_touch else "NO",
 
         "YES 🔥" if recent_bb_rejection else "NO",
@@ -2137,6 +2185,8 @@ nifty_headers = [
 
     "Lower BB (20,1.5)",
     "RSI 14",
+    "Previous RSI 14",
+    "RSI Recovery?",
 
     "BB Touch?",
     "BB Rejection?",
@@ -2159,11 +2209,11 @@ nifty_headers = [
 # =========================================================
 
 sheet_nifty.batch_clear(
-    ["A1:Y1000"]
+    ["A1:AA1000"]
 )
 
 sheet_nifty.update(
-    range_name="A1:Y1",
+    range_name="A1:AA1",
     values=[nifty_headers],
     value_input_option="RAW"
 )
@@ -2200,7 +2250,7 @@ for row in output_rows:
     if len(row) < 25:
         continue
 
-    score = row[23]
+    score = row[26]
 
     if score < 60:
         continue
@@ -2214,8 +2264,8 @@ for row in output_rows:
 
 final_candidates.sort(
     key=lambda x: (
-        x[23],       # Strength Score
-        -x[22],      # Turnover Rank
+        x[26],       # Strength Score
+        -x[25],      # Turnover Rank (smaller rank is better)
         x[10]        # Current Gain %
     ),
     reverse=True
@@ -2262,20 +2312,23 @@ for rank, row in enumerate(
 
         row[12],
         row[13],
-
         row[14],
         row[15],
+
         row[16],
         row[17],
         row[18],
         row[19],
         row[20],
-
         row[21],
-
         row[22],
         row[23],
-        row[24]
+
+        row[24],
+
+        row[25],
+        row[26],
+        row[27]
     ])
 
 
@@ -2304,6 +2357,8 @@ final_headers = [
 
     "Lower BB (20,1.5)",
     "RSI 14",
+    "Previous RSI 14",
+    "RSI Recovery?",
 
     "BB Touch?",
     "BB Rejection?",
@@ -2326,7 +2381,7 @@ final_headers = [
 # =========================================================
 
 sheet_final.batch_clear(
-    ["A1:Z1000"]
+    ["A1:AA1000"]
 )
 
 
@@ -2335,7 +2390,7 @@ sheet_final.batch_clear(
 # =========================================================
 
 sheet_final.update(
-    range_name="A1:Z1",
+    range_name="A1:AA1",
     values=[final_headers],
     value_input_option="RAW"
 )
@@ -2450,7 +2505,7 @@ print(
 )
 
 print(
-    "SETUP 3 : OVERSOLD REVERSAL"
+    "SETUP 3 : OVERSOLD + RSI RECOVERY"
 )
 
 print(
