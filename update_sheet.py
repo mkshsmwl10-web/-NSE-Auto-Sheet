@@ -2259,7 +2259,7 @@ if output_rows:
 # FINAL LIST
 # =========================================================
 #
-# FINAL LIST V5
+# FINAL LIST V6
 #
 # Goal:
 #   Find a small number of HIGH-QUALITY reversal candidates
@@ -2321,8 +2321,11 @@ for row in output_rows:
     if len(row) <= SCORE_INDEX:
         continue
 
+    # -----------------------------------------------
+    # Safe numeric parsing
+    # -----------------------------------------------
     try:
-        score = float(row[SCORE_INDEX])
+        base_score = float(row[SCORE_INDEX])
     except (TypeError, ValueError):
         continue
 
@@ -2331,82 +2334,219 @@ for row in output_rows:
     except (TypeError, ValueError):
         gain = -999
 
-    # Boolean confirmation from the displayed YES/NO fields.
-    bb_touch = str(row[16]).startswith("YES")
+    try:
+        turnover_rank_value = float(row[TURNOVER_RANK_INDEX])
+    except (TypeError, ValueError):
+        turnover_rank_value = 9999
+
+    # -----------------------------------------------
+    # Confirmation flags
+    # -----------------------------------------------
+    rsi_recovery = str(row[15]).startswith("YES")
     bb_rejection = str(row[17]).startswith("YES")
     engulfing = str(row[18]).startswith("YES")
     oversold = str(row[19]).startswith("YES")
     strong_green = str(row[20]).startswith("YES")
     high_break = str(row[21]).startswith("YES")
     low_protected = str(row[22]).startswith("YES")
+    gap_hold = str(row[11]).startswith("YES")
 
-    gap_maintained = str(row[11])
-
-    # Core reversal setup.
-    core_reversal = (
-        bb_rejection
-        or engulfing
-        or oversold
-        or str(row[15]).startswith("YES")
-    )
-
-    # Real price-action confirmation.
-    price_confirmation = (
-        high_break
-        or strong_green
-        or engulfing
-        or (
-            str(row[8]).replace("%", "").strip() not in ("", "0", "0.0")
-            and gap_maintained.startswith("YES")
+    try:
+        gap_pct = float(
+            str(row[8]).replace("%", "").strip()
         )
+    except (TypeError, ValueError):
+        gap_pct = 0.0
+
+    # -----------------------------------------------
+    # V6 CORE IDEA:
+    # We want a stock that is REVERSING NOW and still
+    # has room for the next leg, not a stock that has
+    # already made a huge move.
+    # -----------------------------------------------
+
+    reversal_trigger = (
+        bb_rejection
+        or
+        oversold
+        or
+        rsi_recovery
+        or
+        engulfing
     )
 
-    # HARD GATES
-    if not core_reversal:
-        continue
+    price_confirmations = sum([
+        bool(strong_green),
+        bool(engulfing),
+        bool(high_break),
+        bool(low_protected),
+        bool(gap_hold)
+    ])
 
+    # -----------------------------------------------
+    # HARD QUALITY GATES
+    # -----------------------------------------------
+
+    # No negative-current-gain setups in Final List.
     if gain <= 0:
         continue
 
+    # A real reversal trigger is mandatory.
+    if not reversal_trigger:
+        continue
+
+    # Low protection is mandatory for a swing candidate.
     if not low_protected:
         continue
 
-    if not price_confirmation:
+    # At least TWO price confirmations.
+    if price_confirmations < 2:
         continue
 
-    # Only genuine candidates enter the Final List.
-    if score < 65:
+    # Very extended stocks are not preferred for a fresh
+    # 10% swing. They remain in the main NIFTY200 sheet.
+    if gain > 10:
         continue
 
-    try:
-        turnover_rank_value = float(row[TURNOVER_RANK_INDEX])
-    except (TypeError, ValueError):
-        turnover_rank_value = 9999
+    # -----------------------------------------------
+    # V6 FRESH-MOVE SCORE
+    # -----------------------------------------------
 
-    # Prefer stocks with stronger current momentum, then score,
-    # then turnover rank.
+    swing_score = 0
+
+    # 1. Reversal quality — 25
+    if bb_rejection:
+        swing_score += 10
+
+    if oversold:
+        swing_score += 7
+
+    if rsi_recovery:
+        swing_score += 6
+
+    if engulfing:
+        swing_score += 5
+
+    # 2. Price confirmation — 35
+    if strong_green:
+        swing_score += 8
+
+    if high_break:
+        swing_score += 10
+
+    if low_protected:
+        swing_score += 7
+
+    if engulfing:
+        swing_score += 5
+
+    if gap_hold:
+        swing_score += 5
+
+    # 3. Gap confirmation — 8
+    if gap_pct > 0:
+        swing_score += 3
+
+    if gap_pct >= 1:
+        swing_score += 2
+
+    if gap_hold:
+        swing_score += 3
+
+    # 4. Turnover — 12
+    if turnover_rank_value <= 25:
+        swing_score += 12
+    elif turnover_rank_value <= 50:
+        swing_score += 10
+    elif turnover_rank_value <= 100:
+        swing_score += 8
+    elif turnover_rank_value <= 150:
+        swing_score += 5
+    else:
+        swing_score += 2
+
+    # 5. ROOM-TO-MOVE score — 20
+    # Best zone is roughly +0.5% to +6%.
+    if 0.5 <= gain <= 3:
+        swing_score += 20
+    elif 3 < gain <= 6:
+        swing_score += 17
+    elif 6 < gain <= 8:
+        swing_score += 11
+    elif 8 < gain <= 10:
+        swing_score += 5
+    elif 0 < gain < 0.5:
+        swing_score += 15
+
+    # -----------------------------------------------
+    # Extra quality agreement
+    # -----------------------------------------------
+    if bb_rejection and (rsi_recovery or oversold):
+        swing_score += 4
+
+    if high_break and low_protected:
+        swing_score += 4
+
+    if strong_green and high_break:
+        swing_score += 3
+
+    if swing_score > 100:
+        swing_score = 100
+
+    # -----------------------------------------------
+    # FINAL CLASSIFICATION
+    # -----------------------------------------------
+    if (
+        swing_score >= 80
+        and gain <= 8
+        and price_confirmations >= 3
+    ):
+        signal = "🎯 TOP SWING"
+
+    elif swing_score >= 72:
+        signal = "🔥 STRONG SWING"
+
+    elif swing_score >= 65:
+        signal = "👀 WATCH"
+
+    else:
+        continue
+
     final_candidates.append({
         "row": row,
-        "score": score,
+        "score": swing_score,
+        "base_score": base_score,
         "gain": gain,
-        "turnover_rank": turnover_rank_value
+        "turnover_rank": turnover_rank_value,
+        "signal": signal
     })
 
 
 # =========================================================
-# SORT — MOMENTUM FIRST, QUALITY SECOND
+# V6 SORT
+# =========================================================
+#
+# Priority:
+#   1. Fresh-move score
+#   2. Lower current extension
+#   3. Better turnover rank
+#   4. Base technical score
+#
+# This prevents a stock already up 15% from beating a
+# fresh 1–4% reversal simply because of momentum.
 # =========================================================
 
 final_candidates.sort(
     key=lambda item: (
         item["score"],
-        item["gain"],
-        -item["turnover_rank"]
+        -abs(item["gain"] - 2.5),
+        -item["turnover_rank"],
+        item["base_score"]
     ),
     reverse=True
 )
 
-# Maximum 10, but fewer is perfectly acceptable.
+# Keep only the best 10 qualifying stocks.
 final_candidates = final_candidates[:10]
 
 
@@ -2467,10 +2607,11 @@ for rank, item in enumerate(final_candidates, start=1):
 
     confirmation_text = " + ".join(confirmations)
 
-    # Make the #1 qualifying candidate visually distinct.
-    signal = row[26]
+    # Use V6 fresh-move classification.
+    signal = item["signal"]
 
-    if rank == 1 and item["score"] >= 75:
+    # Only the highest-quality fresh setup gets TOP SWING.
+    if rank == 1 and item["score"] >= 80 and item["gain"] <= 8:
         signal = "🎯 TOP SWING"
 
     final_output.append([
@@ -2486,7 +2627,7 @@ for rank, item in enumerate(final_candidates, start=1):
         row[13],
         confirmation_text,
         row[23],
-        row[25],
+        item["score"],
         signal
     ])
 
@@ -2689,7 +2830,7 @@ print(
 )
 
 print(
-    "FINAL LIST V5 : STRICT SWING QUALITY FILTER"
+    "FINAL LIST V6 : STRICT SWING QUALITY FILTER"
 )
 
 print(
