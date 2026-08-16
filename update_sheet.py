@@ -2469,22 +2469,184 @@ if final_output:
 
 
 # =========================================================
-# FINAL FORMATTING
+# FINAL LIST — CLEAN / COMPACT / VISUAL FORMATTING
 # =========================================================
 
 try:
 
+    # -----------------------------------------------------
+    # Header
+    # -----------------------------------------------------
     sheet_final.format(
         "A1:AB1",
         {
-            "textFormat": {
-                "bold": True
+            "backgroundColor": {
+                "red": 0.05,
+                "green": 0.12,
+                "blue": 0.20
             },
-            "horizontalAlignment":
-                "CENTER"
+            "textFormat": {
+                "bold": True,
+                "fontSize": 9,
+                "foregroundColor": {
+                    "red": 1,
+                    "green": 1,
+                    "blue": 1
+                }
+            },
+            "horizontalAlignment": "CENTER",
+            "verticalAlignment": "MIDDLE",
+            "wrapStrategy": "WRAP"
         }
     )
 
+    # -----------------------------------------------------
+    # Body — small font
+    # -----------------------------------------------------
+    if final_output:
+
+        last_row = len(final_output) + 1
+
+        sheet_final.format(
+            f"A2:AB{last_row}",
+            {
+                "textFormat": {
+                    "fontSize": 8
+                },
+                "horizontalAlignment": "CENTER",
+                "verticalAlignment": "MIDDLE",
+                "wrapStrategy": "WRAP"
+            }
+        )
+
+        # Stock names — slightly stronger
+        sheet_final.format(
+            f"B2:B{last_row}",
+            {
+                "textFormat": {
+                    "bold": True,
+                    "fontSize": 9
+                },
+                "horizontalAlignment": "LEFT"
+            }
+        )
+
+        # Setup Type — compact but readable
+        sheet_final.format(
+            f"Y2:Y{last_row}",
+            {
+                "textFormat": {
+                    "fontSize": 8,
+                    "bold": True
+                },
+                "wrapStrategy": "WRAP"
+            }
+        )
+
+        # Score — highlighted
+        sheet_final.format(
+            f"AA2:AA{last_row}",
+            {
+                "textFormat": {
+                    "bold": True,
+                    "fontSize": 9
+                },
+                "horizontalAlignment": "CENTER"
+            }
+        )
+
+        # Signal — bold
+        sheet_final.format(
+            f"AB2:AB{last_row}",
+            {
+                "textFormat": {
+                    "bold": True,
+                    "fontSize": 8
+                },
+                "horizontalAlignment": "CENTER",
+                "wrapStrategy": "WRAP"
+            }
+        )
+
+    # -----------------------------------------------------
+    # Useful columns only — compact widths
+    # -----------------------------------------------------
+    widths = {
+        "A:A": 42,   # Rank
+        "B:B": 95,   # NSE Code
+        "C:C": 95,   # Turnover
+        "D:G": 72,   # Previous OHLC
+        "H:H": 78,   # Candle
+        "I:I": 72,   # Today Open
+        "J:J": 60,   # Gap
+        "K:K": 72,   # CMP
+        "L:L": 62,   # Gain
+        "M:M": 78,   # Gap Maintained
+        "N:N": 82,   # Lower BB
+        "O:P": 60,   # RSI
+        "Q:Q": 70,   # RSI Recovery
+        "R:X": 68,   # Confirmation flags
+        "Y:Y": 190,  # Setup Type
+        "Z:Z": 62,   # Turnover Rank
+        "AA:AA": 58, # Score
+        "AB:AB": 100 # Signal
+    }
+
+    for col_range, width in widths.items():
+        sheet_final.format(
+            col_range,
+            {
+                "padding": {
+                    "top": 2,
+                    "bottom": 2,
+                    "left": 2,
+                    "right": 2
+                }
+            }
+        )
+
+    # -----------------------------------------------------
+    # Conditional-looking emphasis through number formats
+    # -----------------------------------------------------
+    if final_output:
+
+        last_row = len(final_output) + 1
+
+        # Gain / Gap columns
+        sheet_final.format(
+            f"J2:J{last_row}",
+            {
+                "numberFormat": {
+                    "type": "NUMBER",
+                    "pattern": "0.00"
+                }
+            }
+        )
+
+        sheet_final.format(
+            f"L2:L{last_row}",
+            {
+                "numberFormat": {
+                    "type": "NUMBER",
+                    "pattern": "0.00"
+                }
+            }
+        )
+
+        # Score
+        sheet_final.format(
+            f"AA2:AA{last_row}",
+            {
+                "numberFormat": {
+                    "type": "NUMBER",
+                    "pattern": "0"
+                }
+            }
+        )
+
+    # -----------------------------------------------------
+    # Freeze header
+    # -----------------------------------------------------
     sheet_final.freeze(rows=1)
 
 except Exception as e:
@@ -2500,6 +2662,10 @@ except Exception as e:
 
 print(
     "----------------------------------------"
+)
+
+print(
+    "FINAL LIST STYLE : COMPACT / CLEAN / TRADING VIEW"
 )
 
 print(
