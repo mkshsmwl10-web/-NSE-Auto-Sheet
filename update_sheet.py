@@ -1576,6 +1576,28 @@ def get_bb_for_index(candles, index):
 
 
 # =========================================================
+# DAILY MACD HISTOGRAM — FRESH BEND BELOW ZERO → UP
+# =========================================================
+def macd_histogram_from_closes(closes, fast=12, slow=26, signal=9):
+    if len(closes) < slow + signal:
+        return []
+    series = pd.Series(closes, dtype=float)
+    macd_line = series.ewm(span=fast, adjust=False).mean() - series.ewm(span=slow, adjust=False).mean()
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    return (macd_line - signal_line).tolist()
+
+
+def detect_macd_bend(closes):
+    hist = macd_histogram_from_closes(closes)
+    if len(hist) < 3:
+        return False, False, None
+    h2, h1, h0 = hist[-3], hist[-2], hist[-1]
+    bend_up = h1 < h2 and h0 > h1 and h0 < 0
+    strong_recovery = h2 > h1 and h1 < h0 < 0
+    return bend_up, strong_recovery, h0
+
+
+# =========================================================
 # OUTPUT
 # =========================================================
 
@@ -1655,6 +1677,9 @@ for _, row in top200.iterrows():
         history_data.get(symbol, []),
         key=lambda x: x["date"]
     )
+
+    macd_closes = [x["close"] for x in hist] + [today_close]
+    macd_bend_up, macd_strong_recovery, macd_hist_now = detect_macd_bend(macd_closes)
 
     # The last historical candle is the previous trading day.
     setup = hist[-1] if len(hist) >= 1 else None
@@ -2026,6 +2051,11 @@ for _, row in top200.iterrows():
     if rsi_recovery:
         score += 10
 
+    if macd_bend_up:
+        score += 8
+    if macd_strong_recovery:
+        score += 4
+
     if deep_oversold:
         score += 5
 
@@ -2102,6 +2132,9 @@ for _, row in top200.iterrows():
             setup_names.append("🚀 RSI RECOVERY")
         else:
             setup_names.append("🚀 OVERSOLD")
+
+    if macd_bend_up:
+        setup_names.append("🔄 MACD BEND UP")
 
     if len(setup_names) == 0:
         setup_type = "—"
@@ -2186,7 +2219,12 @@ for _, row in top200.iterrows():
         rank,
         score,
 
-        final_signal
+        final_signal,
+
+        # Internal V7 fields; not shown in Final List.
+        "YES 🔄" if macd_bend_up else "NO",
+        "YES 🚀" if macd_strong_recovery else "NO",
+        (round(macd_hist_now, 6) if macd_hist_now is not None else "")
     ])
 
 
@@ -2311,6 +2349,8 @@ for row in output_rows:
     high_break = str(row[21]).startswith("YES")
     low_protected = str(row[22]).startswith("YES")
     gap_hold = str(row[11]).startswith("YES")
+    macd_bend_up = str(row[27]).startswith("YES")
+    macd_strong_recovery = str(row[28]).startswith("YES")
 
     try:
         gap_pct = float(row[8])
@@ -2455,6 +2495,12 @@ for row in output_rows:
     if price_confirmations == 2:
         swing_score -= 2
 
+    # Daily MACD early reversal confirmation.
+    if macd_bend_up:
+        swing_score += 8
+    if macd_strong_recovery:
+        swing_score += 4
+
     # Base technical score is a small tie-break/support factor only.
     swing_score += min(5, max(0, int(base_score) // 20))
 
@@ -2575,6 +2621,8 @@ for rank, item in enumerate(final_candidates, start=1):
         confirmations.append("LOW HOLD")
     if str(row[11]).startswith("YES"):
         confirmations.append("GAP HOLD")
+    if str(row[27]).startswith("YES"):
+        confirmations.append("MACD BEND")
 
     confirmation_text = " + ".join(confirmations)
 
@@ -2806,6 +2854,6 @@ print("SETUPS : BB REVERSAL / ENGULFING / OVERSOLD + RSI RECOVERY")
 print("V7 : FRESH MOVE + PRICE CONFIRMATION + TURNOVER")
 print("V7 : TOP 3 MAXIMUM — ONLY QUALIFIED STOCKS")
 print("V7 : ONLY RANK #1 CAN BE TOP SWING")
-print("MACD : REMOVED")
+print("MACD : DAILY FRESH BEND BELOW ZERO -> UP")
 print("========================================")
 
