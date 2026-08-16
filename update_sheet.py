@@ -2698,7 +2698,7 @@ for rank, item in enumerate(final_candidates, start=1):
 # =========================================================
 final_headers = [
     "Rank", "NSE Code", "CMP", "Gain %", "Lower BB", "RSI",
-    "Daily MACD", "Weekly MACD", "Confirmation", "Setup", "Score", "Signal"
+    "Daily MACD", "Weekly MACD", "Confirmation", "Setup", "Score", "Signal", "Chart"
 ]
 
 final_output = []
@@ -2728,38 +2728,40 @@ for rank, item in enumerate(final_candidates, start=1):
         " + ".join(confirmations),
         row[23],
         item["score"],
-        item["signal"]
+        item["signal"],
+        f'=HYPERLINK("https://www.tradingview.com/chart/?symbol=NSE%3A{row[0]}","📈 CHART")'
     ])
 
 safe_batch_clear(sheet_final, ["A1:AZ1000"])
-safe_update(sheet_final, "A1:L1", [final_headers], value_input_option="RAW")
+safe_update(sheet_final, "A1:M1", [final_headers], value_input_option="RAW")
 if final_output:
-    safe_update(sheet_final, "A2", final_output, value_input_option="RAW")
+    safe_update(sheet_final, "A2", final_output, value_input_option="USER_ENTERED")
 
 # =========================================================
 # CLEAN V8 FORMATTING
 # =========================================================
 try:
-    safe_format(sheet_final, "A1:L1", {
+    safe_format(sheet_final, "A1:M1", {
         "backgroundColor": {"red": 0.05, "green": 0.12, "blue": 0.20},
         "textFormat": {"bold": True, "fontSize": 9, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
         "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP"
     })
     if final_output:
         last_row = len(final_output) + 1
-        safe_format(sheet_final, f"A2:L{last_row}", {
+        safe_format(sheet_final, f"A2:M{last_row}", {
             "textFormat": {"fontSize": 8},
             "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP"
         })
         safe_format(sheet_final, f"B2:B{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "horizontalAlignment": "LEFT"})
         safe_format(sheet_final, f"I2:J{last_row}", {"textFormat": {"bold": True, "fontSize": 8}, "wrapStrategy": "WRAP"})
         safe_format(sheet_final, f"K2:L{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "wrapStrategy": "WRAP"})
-        safe_format(sheet_final, "A2:L2", {
+        safe_format(sheet_final, f"M2:M{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "horizontalAlignment": "CENTER"})
+        safe_format(sheet_final, "A2:M2", {
             "backgroundColor": {"red": 0.90, "green": 0.97, "blue": 0.90},
             "textFormat": {"bold": True, "fontSize": 9}
         })
     widths = {"A:A": 38, "B:B": 100, "C:C": 75, "D:D": 55, "E:E": 75, "F:F": 50,
-              "G:G": 70, "H:H": 70, "I:I": 180, "J:J": 180, "K:K": 50, "L:L": 105}
+              "G:G": 70, "H:H": 70, "I:I": 180, "J:J": 180, "K:K": 50, "L:L": 105, "M:M": 90}
     for col_range, width in widths.items():
         try:
             safe_format(sheet_final, col_range, {"padding": {"top": 2, "bottom": 2, "left": 2, "right": 2}})
