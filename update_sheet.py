@@ -1993,8 +1993,8 @@ for _, row in top200.iterrows():
     else:
         turnover_score = 1
 
-        # -----------------------------------------------------
-        # SCORE
+    # ---------------------------------------------------------
+    # SCORE
     # ---------------------------------------------------------
     # PURPOSE:
     # Find stocks that are not merely "near the BB", but are
@@ -2087,29 +2087,29 @@ for _, row in top200.iterrows():
 
     # ---------------------------------------------------------
     # SETUP TYPE
-        # -----------------------------------------------------
+    # ---------------------------------------------------------
 
-        setup_names = []
+    setup_names = []
 
-        if bb_reversal:
-            setup_names.append("💎 BB REVERSAL")
+    if bb_reversal:
+        setup_names.append("💎 BB REVERSAL")
 
-        if engulfing_reversal:
-            setup_names.append("🔥 ENGULFING")
+    if engulfing_reversal:
+        setup_names.append("🔥 ENGULFING")
 
-        if oversold_reversal:
-            if rsi_recovery:
-                setup_names.append("🚀 RSI RECOVERY")
-            else:
-                setup_names.append("🚀 OVERSOLD")
-
-        if len(setup_names) == 0:
-            setup_type = "—"
+    if oversold_reversal:
+        if rsi_recovery:
+            setup_names.append("🚀 RSI RECOVERY")
         else:
-            setup_type = " + ".join(setup_names)
+            setup_names.append("🚀 OVERSOLD")
 
-        # -----------------------------------------------------
-        # SIGNAL
+    if len(setup_names) == 0:
+        setup_type = "—"
+    else:
+        setup_type = " + ".join(setup_names)
+
+    # ---------------------------------------------------------
+    # SIGNAL
     # ---------------------------------------------------------
 
     if score >= 85:
@@ -2126,68 +2126,68 @@ for _, row in top200.iterrows():
 
     # ---------------------------------------------------------
     # OUTPUT
-        # -----------------------------------------------------
+    # ---------------------------------------------------------
 
-        output_rows.append([
+    output_rows.append([
 
-            symbol,
-            turnover,
+        symbol,
+        turnover,
 
-            previous_open,
-            previous_high,
-            previous_low,
-            previous_close,
-            previous_candle,
+        previous_open,
+        previous_high,
+        previous_low,
+        previous_close,
+        previous_candle,
 
-            today_open,
-            round(gap_up_pct, 2),
+        today_open,
+        round(gap_up_pct, 2),
 
-            today_close,
-            round(current_gain_pct, 2),
+        today_close,
+        round(current_gain_pct, 2),
 
-            gap_maintained,
+        gap_maintained,
 
-            (
-                round(setup_lower_bb, 2)
-                if setup_lower_bb is not None
-                else ""
-            ),
+        (
+            round(setup_lower_bb, 2)
+            if setup_lower_bb is not None
+            else ""
+        ),
 
-            (
-                round(setup_rsi, 2)
-                if setup_rsi is not None
-                else ""
-            ),
+        (
+            round(setup_rsi, 2)
+            if setup_rsi is not None
+            else ""
+        ),
 
-            (
-                round(previous_rsi, 2)
-                if previous_rsi is not None
-                else ""
-            ),
+        (
+            round(previous_rsi, 2)
+            if previous_rsi is not None
+            else ""
+        ),
 
-            "YES 🔄" if rsi_recovery else "NO",
+        "YES 🔄" if rsi_recovery else "NO",
 
-            "YES ✅" if recent_bb_touch else "NO",
+        "YES ✅" if recent_bb_touch else "NO",
 
-            "YES 🔥" if recent_bb_rejection else "NO",
+        "YES 🔥" if recent_bb_rejection else "NO",
 
-            "YES 🔥" if engulfing else "NO",
+        "YES 🔥" if engulfing else "NO",
 
-            "YES 🔥" if oversold else "NO",
+        "YES 🔥" if oversold else "NO",
 
-            "YES 🚀" if strong_green else "NO",
+        "YES 🚀" if strong_green else "NO",
 
-            "YES 🚀" if high_break else "NO",
+        "YES 🚀" if high_break else "NO",
 
-            "YES ✅" if low_protected else "NO",
+        "YES ✅" if low_protected else "NO",
 
-            setup_type,
+        setup_type,
 
-            rank,
-            score,
+        rank,
+        score,
 
-            final_signal
-        ])
+        final_signal
+    ])
 
 
 # =========================================================
