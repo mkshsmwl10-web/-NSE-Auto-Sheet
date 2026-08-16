@@ -70,7 +70,7 @@ HIGH_TURNOVER_RANK = 50
 # HISTORICAL DAYS
 # =========================================================
 
-HISTORY_TRADING_DAYS = 25
+HISTORY_TRADING_DAYS = 60
 
 
 # =========================================================
@@ -1589,17 +1589,18 @@ def macd_histogram_from_closes(closes, fast=12, slow=26, signal=9):
 
 def detect_macd_bend(closes, fast=12, slow=26, signal=9):
     """
-    Daily MACD EARLY-REVERSAL logic based on the TradingView chart pattern:
+    Daily MACD line reversal logic matching the TradingView chart:
 
-    1) MACD line is BELOW zero.
-    2) MACD line makes a local low.
-    3) The latest MACD line starts bending upward.
+    - MACD LINE is below zero.
+    - It makes a recent local low.
+    - The latest bar turns upward (fresh bend).
+    - Continued rise is a stronger recovery.
+    - Crossing the signal line is the strongest confirmation.
 
-    This intentionally does NOT wait for the MACD line to cross above zero.
-    A later cross above the signal line is treated as a stronger confirmation.
+    We deliberately do NOT wait for a zero-line cross.
     """
-
-    if len(closes) < slow + signal + 3:
+    min_bars = slow + signal + 5
+    if len(closes) < min_bars:
         return False, False, False, None, None, None
 
     series = pd.Series(closes, dtype=float)
@@ -1609,26 +1610,27 @@ def detect_macd_bend(closes, fast=12, slow=26, signal=9):
     )
     signal_line = macd_line.ewm(span=signal, adjust=False).mean()
 
-    m2, m1, m0 = macd_line.iloc[-3], macd_line.iloc[-2], macd_line.iloc[-1]
-    s1, s0 = signal_line.iloc[-2], signal_line.iloc[-1]
+    m3, m2, m1, m0 = [float(x) for x in macd_line.iloc[-4:]]
+    s1, s0 = float(signal_line.iloc[-2]), float(signal_line.iloc[-1])
 
-    # Fresh local bottom -> upward bend while still below zero.
+    # Fresh bend: the MACD line was falling, formed a local low,
+    # and has just started rising while still below zero.
     bend_up = (
-        m1 < m2
-        and m0 > m1
-        and m0 < 0
+        m2 < m3 and
+        m1 <= m2 and
+        m0 > m1 and
+        m0 < 0
     )
 
-    # Stronger recovery: MACD line has risen for two consecutive bars
-    # and remains below zero.
+    # Strong recovery: after the local low, MACD rises for 2 bars.
     strong_recovery = (
-        m2 > m1
-        and m1 < m0
-        and m0 < 0
-        and m0 > m1
+        m2 < m3 and
+        m1 > m2 and
+        m0 > m1 and
+        m0 < 0
     )
 
-    # Strong confirmation: MACD line crosses its signal line upward.
+    # Signal-line cross while still below zero.
     macd_cross_up = (
         macd_line.iloc[-2] <= signal_line.iloc[-2]
         and macd_line.iloc[-1] > signal_line.iloc[-1]
@@ -1639,9 +1641,9 @@ def detect_macd_bend(closes, fast=12, slow=26, signal=9):
         bend_up,
         strong_recovery,
         macd_cross_up,
-        float(m0),
-        float(s0),
-        float(m0 - s0)
+        m0,
+        s0,
+        m0 - s0
     )
 
 
