@@ -2231,49 +2231,102 @@ if output_rows:
 # FINAL LIST
 # =========================================================
 #
+# FINAL LIST:
+#   - accepts multiple reversal setups
+#   - score >= 60
+#   - sorted by Strength Score first
+#   - turnover rank used as tie-breaker
+#   - maximum 10 stocks
+#
 # IMPORTANT:
-# This is NOT a strict BB-only filter.
-#
-# It selects the highest-quality candidates from:
-#   1. BB REVERSAL
-#   2. BULLISH ENGULFING
-#   3. OVERSOLD REVERSAL
-#
-# Score >= 60
-# Maximum 10 stocks
+# We use named positions from the known NIFTY200 output layout
+# instead of fragile hard-coded score indexes.
 # =========================================================
+
+# NIFTY200 row layout:
+#  0 Symbol
+#  1 Turnover
+#  2 Previous Open
+#  3 Previous High
+#  4 Previous Low
+#  5 Previous Close
+#  6 Previous Candle
+#  7 Today Open
+#  8 Gap Up %
+#  9 CMP
+# 10 Current Gain %
+# 11 Gap Maintained
+# 12 Lower BB
+# 13 RSI
+# 14 Previous RSI
+# 15 RSI Recovery
+# 16 BB Touch
+# 17 BB Rejection
+# 18 Bullish Engulfing
+# 19 Oversold
+# 20 Strong Green
+# 21 High Break
+# 22 Low Protected
+# 23 Setup Type
+# 24 Turnover Rank
+# 25 Strength Score
+# 26 Signal
+
+SCORE_INDEX = 25
+TURNOVER_RANK_INDEX = 24
+GAIN_INDEX = 10
 
 final_candidates = []
 
 for row in output_rows:
 
-    if len(row) < 25:
+    if len(row) <= SCORE_INDEX:
         continue
 
-    score = row[26]
+    try:
+        score = float(row[SCORE_INDEX])
+    except (TypeError, ValueError):
+        continue
 
     if score < 60:
         continue
 
-    final_candidates.append(row)
+    try:
+        turnover_rank_value = float(
+            row[TURNOVER_RANK_INDEX]
+        )
+    except (TypeError, ValueError):
+        turnover_rank_value = 9999
+
+    try:
+        gain_value = float(row[GAIN_INDEX])
+    except (TypeError, ValueError):
+        gain_value = -9999
+
+    final_candidates.append({
+        "row": row,
+        "score": score,
+        "turnover_rank": turnover_rank_value,
+        "gain": gain_value
+    })
 
 
 # =========================================================
-# SORT BY SCORE
+# SORT
 # =========================================================
 
 final_candidates.sort(
-    key=lambda x: (
-        x[26],       # Strength Score
-        -x[25],      # Turnover Rank (smaller rank is better)
-        x[10]        # Current Gain %
+    key=lambda item: (
+        item["score"],
+        -item["turnover_rank"],
+        item["gain"]
     ),
     reverse=True
 )
 
 
 # =========================================================
-# KEEP TOP 10
+# TOP 10
 # =========================================================
 
 final_candidates = final_candidates[:10]
@@ -2285,36 +2338,42 @@ final_candidates = final_candidates[:10]
 
 final_output = []
 
-for rank, row in enumerate(
+for rank, item in enumerate(
     final_candidates,
     start=1
 ):
+
+    row = item["row"]
 
     final_output.append([
 
         rank,
 
+        # Basic
         row[0],
         row[1],
 
+        # Previous candle
         row[2],
         row[3],
         row[4],
         row[5],
         row[6],
 
+        # Today
         row[7],
         row[8],
-
         row[9],
         row[10],
         row[11],
 
+        # BB / RSI
         row[12],
         row[13],
         row[14],
         row[15],
 
+        # Reversal confirmation
         row[16],
         row[17],
         row[18],
@@ -2322,13 +2381,14 @@ for rank, row in enumerate(
         row[20],
         row[21],
         row[22],
+
+        # Setup
         row[23],
 
+        # Ranking
         row[24],
-
         row[25],
-        row[26],
-        row[27]
+        row[26]
     ])
 
 
@@ -2350,7 +2410,6 @@ final_headers = [
 
     "Today Open",
     "Gap Up %",
-
     "CMP",
     "Current Gain %",
     "Gap Maintained?",
@@ -2381,23 +2440,23 @@ final_headers = [
 # =========================================================
 
 sheet_final.batch_clear(
-    ["A1:AA1000"]
+    ["A1:AB1000"]
 )
 
 
 # =========================================================
-# WRITE FINAL HEADER
+# WRITE HEADER
 # =========================================================
 
 sheet_final.update(
-    range_name="A1:AA1",
+    range_name="A1:AB1",
     values=[final_headers],
     value_input_option="RAW"
 )
 
 
 # =========================================================
-# WRITE FINAL DATA
+# WRITE DATA
 # =========================================================
 
 if final_output:
@@ -2410,24 +2469,13 @@ if final_output:
 
 
 # =========================================================
-# FORMATTING
+# FINAL FORMATTING
 # =========================================================
 
 try:
 
-    sheet_nifty.format(
-        "A1:Y1",
-        {
-            "textFormat": {
-                "bold": True
-            },
-            "horizontalAlignment":
-                "CENTER"
-        }
-    )
-
     sheet_final.format(
-        "A1:Z1",
+        "A1:AB1",
         {
             "textFormat": {
                 "bold": True
@@ -2436,15 +2484,45 @@ try:
                 "CENTER"
         }
     )
-
-    sheet_nifty.freeze(rows=1)
 
     sheet_final.freeze(rows=1)
 
 except Exception as e:
 
     print(
-        f"Formatting Warning : {e}"
+        f"Final List Formatting Warning : {e}"
+    )
+
+
+# =========================================================
+# FINAL LIST SUMMARY
+# =========================================================
+
+print(
+    "----------------------------------------"
+)
+
+print(
+    "FINAL LIST GENERATED"
+)
+
+print(
+    f"Qualified Stocks : "
+    f"{len(final_output)}"
+)
+
+for item in final_candidates:
+
+    row = item["row"]
+
+    print(
+        row[0],
+        "| Score:",
+        row[25],
+        "| Turnover Rank:",
+        row[24],
+        "| Setup:",
+        row[23]
     )
 
 
