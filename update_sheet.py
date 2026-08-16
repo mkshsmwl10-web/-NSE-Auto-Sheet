@@ -2256,59 +2256,24 @@ if output_rows:
 
 
 # =========================================================
-# FINAL LIST
+# FINAL LIST V7 — TOP 3 + ONE TOP SWING
 # =========================================================
-#
-# FINAL LIST V6
-#
 # Goal:
-#   Find a small number of HIGH-QUALITY reversal candidates
-#   from NIFTY 200 rather than filling the list with weak setups.
+#   NIFTY 200 -> strong reversal shortlist -> TOP 3
+#   -> Rank #1 is the single TOP SWING candidate.
 #
-# HARD ENTRY-QUALITY GATES:
-#   1. A genuine reversal setup exists
-#   2. Current gain is positive
-#   3. Today's low protects the setup candle low
-#   4. At least one real price confirmation exists:
-#        - High Break
-#        - Strong Green
-#        - Bullish Engulfing
-#        - Gap Up + Gap Hold
-#
-# This deliberately removes cases such as:
-#   HINDUNILVR: negative current gain + no gap hold
-#
-# Final list is compact and decision-focused.
+# V7 PRINCIPLES
+# ---------------------------------------------------------
+# 1. Fresh reversal is more important than raw momentum.
+# 2. Current gain must be positive.
+# 3. Low must be protected.
+# 4. At least TWO real price confirmations are required.
+# 5. BB rejection / oversold / RSI recovery are the core setup.
+# 6. Turnover supports the score; it does not dominate it.
+# 7. Already-extended stocks are penalized.
+# 8. Only Rank #1 can be called TOP SWING.
+# 9. Rank #2 and #3 can be STRONG SWING.
 # =========================================================
-
-# Known NIFTY200 row layout
-#  0 Symbol
-#  1 Turnover
-#  2 Previous Open
-#  3 Previous High
-#  4 Previous Low
-#  5 Previous Close
-#  6 Previous Candle
-#  7 Today Open
-#  8 Gap Up %
-#  9 CMP
-# 10 Current Gain %
-# 11 Gap Maintained
-# 12 Lower BB
-# 13 RSI
-# 14 Previous RSI
-# 15 RSI Recovery
-# 16 BB Touch
-# 17 BB Rejection
-# 18 Bullish Engulfing
-# 19 Oversold
-# 20 Strong Green
-# 21 High Break
-# 22 Low Protected
-# 23 Setup Type
-# 24 Turnover Rank
-# 25 Strength Score
-# 26 Signal
 
 SCORE_INDEX = 25
 TURNOVER_RANK_INDEX = 24
@@ -2321,9 +2286,6 @@ for row in output_rows:
     if len(row) <= SCORE_INDEX:
         continue
 
-    # -----------------------------------------------
-    # Safe numeric parsing
-    # -----------------------------------------------
     try:
         base_score = float(row[SCORE_INDEX])
     except (TypeError, ValueError):
@@ -2332,17 +2294,16 @@ for row in output_rows:
     try:
         gain = float(row[GAIN_INDEX])
     except (TypeError, ValueError):
-        gain = -999
+        continue
 
     try:
         turnover_rank_value = float(row[TURNOVER_RANK_INDEX])
     except (TypeError, ValueError):
         turnover_rank_value = 9999
 
-    # -----------------------------------------------
-    # Confirmation flags
-    # -----------------------------------------------
+    # Signal flags
     rsi_recovery = str(row[15]).startswith("YES")
+    bb_touch = str(row[16]).startswith("YES")
     bb_rejection = str(row[17]).startswith("YES")
     engulfing = str(row[18]).startswith("YES")
     oversold = str(row[19]).startswith("YES")
@@ -2352,71 +2313,60 @@ for row in output_rows:
     gap_hold = str(row[11]).startswith("YES")
 
     try:
-        gap_pct = float(
-            str(row[8]).replace("%", "").strip()
-        )
+        gap_pct = float(row[8])
     except (TypeError, ValueError):
         gap_pct = 0.0
 
-    # -----------------------------------------------
-    # V6 CORE IDEA:
-    # We want a stock that is REVERSING NOW and still
-    # has room for the next leg, not a stock that has
-    # already made a huge move.
-    # -----------------------------------------------
+    # -----------------------------------------------------
+    # HARD FILTERS
+    # -----------------------------------------------------
 
-    reversal_trigger = (
-        bb_rejection
-        or
-        oversold
-        or
-        rsi_recovery
-        or
-        engulfing
-    )
-
-    price_confirmations = sum([
-        bool(strong_green),
-        bool(engulfing),
-        bool(high_break),
-        bool(low_protected),
-        bool(gap_hold)
-    ])
-
-    # -----------------------------------------------
-    # HARD QUALITY GATES
-    # -----------------------------------------------
-
-    # No negative-current-gain setups in Final List.
+    # We want a stock moving up now.
     if gain <= 0:
         continue
 
-    # A real reversal trigger is mandatory.
+    # Reversal/exhaustion trigger is mandatory.
+    reversal_trigger = (
+        bb_rejection
+        or oversold
+        or rsi_recovery
+        or engulfing
+        or bb_touch
+    )
+
     if not reversal_trigger:
         continue
 
-    # Low protection is mandatory for a swing candidate.
+    # A protected low is essential for a fresh swing setup.
     if not low_protected:
         continue
 
-    # At least TWO price confirmations.
+    # Real price confirmation.
+    price_confirmations = sum([
+        strong_green,
+        high_break,
+        engulfing,
+        gap_hold
+    ])
+
     if price_confirmations < 2:
         continue
 
-    # Very extended stocks are not preferred for a fresh
-    # 10% swing. They remain in the main NIFTY200 sheet.
+    # Do not chase a stock that has already run too far today.
     if gain > 10:
         continue
 
-    # -----------------------------------------------
-    # V6 FRESH-MOVE SCORE
-    # -----------------------------------------------
+    # -----------------------------------------------------
+    # V7 SWING SCORE — 100 BASE + QUALITY BONUSES
+    # -----------------------------------------------------
 
     swing_score = 0
 
-    # 1. Reversal quality — 25
+    # A. REVERSAL QUALITY — 25
     if bb_rejection:
         swing_score += 10
+    elif bb_touch:
+        swing_score += 5
 
     if oversold:
         swing_score += 7
@@ -2427,12 +2377,12 @@ for row in output_rows:
     if engulfing:
         swing_score += 5
 
-    # 2. Price confirmation — 35
-    if strong_green:
-        swing_score += 8
-
+    # B. PRICE CONFIRMATION — 30
     if high_break:
         swing_score += 10
+
+    if strong_green:
+        swing_score += 8
 
     if low_protected:
         swing_score += 7
@@ -2440,10 +2390,7 @@ for row in output_rows:
     if engulfing:
         swing_score += 5
 
-    if gap_hold:
-        swing_score += 5
-
-    # 3. Gap confirmation — 8
+    # C. GAP / HOLD — 10
     if gap_pct > 0:
         swing_score += 3
 
@@ -2451,26 +2398,28 @@ for row in output_rows:
         swing_score += 2
 
     if gap_hold:
-        swing_score += 3
-
-    # 4. Turnover — 12
-    if turnover_rank_value <= 25:
-        swing_score += 12
-    elif turnover_rank_value <= 50:
-        swing_score += 10
-    elif turnover_rank_value <= 100:
-        swing_score += 8
-    elif turnover_rank_value <= 150:
         swing_score += 5
+
+    # D. TURNOVER — 10
+    if turnover_rank_value <= 25:
+        swing_score += 10
+    elif turnover_rank_value <= 50:
+        swing_score += 9
+    elif turnover_rank_value <= 100:
+        swing_score += 7
+    elif turnover_rank_value <= 150:
+        swing_score += 4
     else:
         swing_score += 2
 
-    # 5. ROOM-TO-MOVE score — 20
-    # Best zone is roughly +0.5% to +6%.
-    if 0.5 <= gain <= 3:
+    # E. FRESH-MOVE / ROOM TO MOVE — 20
+    # Sweet spot is roughly 0.5% to 4% current gain.
+    if 0.5 <= gain <= 2:
         swing_score += 20
-    elif 3 < gain <= 6:
-        swing_score += 17
+    elif 2 < gain <= 4:
+        swing_score += 19
+    elif 4 < gain <= 6:
+        swing_score += 16
     elif 6 < gain <= 8:
         swing_score += 11
     elif 8 < gain <= 10:
@@ -2478,37 +2427,47 @@ for row in output_rows:
     elif 0 < gain < 0.5:
         swing_score += 15
 
-    # -----------------------------------------------
-    # Extra quality agreement
-    # -----------------------------------------------
-    if bb_rejection and (rsi_recovery or oversold):
-        swing_score += 4
+    # -----------------------------------------------------
+    # QUALITY BONUSES
+    # -----------------------------------------------------
 
+    # BB rejection + RSI recovery/oversold is a strong combination.
+    if bb_rejection and (rsi_recovery or oversold):
+        swing_score += 5
+
+    # Breakout + protected low is stronger than either alone.
     if high_break and low_protected:
         swing_score += 4
 
+    # Strong green + high break = actual price momentum.
     if strong_green and high_break:
+        swing_score += 4
+
+    # Fresh gap that is actually holding.
+    if gap_pct > 0 and gap_hold:
         swing_score += 3
 
-    if swing_score > 100:
-        swing_score = 100
+    # Penalize extended moves so they cannot dominate a fresh setup.
+    if gain > 8:
+        swing_score -= 8
 
-    # -----------------------------------------------
-    # FINAL CLASSIFICATION
-    # -----------------------------------------------
-    if (
-        swing_score >= 80
-        and gain <= 8
-        and price_confirmations >= 3
-    ):
-        signal = "🎯 TOP SWING"
+    # Penalize weak confirmation.
+    if price_confirmations == 2:
+        swing_score -= 2
 
-    elif swing_score >= 72:
+    # Base technical score is a small tie-break/support factor only.
+    swing_score += min(5, max(0, int(base_score) // 20))
+
+    swing_score = max(0, min(100, swing_score))
+
+    # -----------------------------------------------------
+    # CLASSIFICATION
+    # -----------------------------------------------------
+
+    if swing_score >= 72:
         signal = "🔥 STRONG SWING"
-
     elif swing_score >= 65:
         signal = "👀 WATCH"
-
     else:
         continue
 
@@ -2518,44 +2477,63 @@ for row in output_rows:
         "base_score": base_score,
         "gain": gain,
         "turnover_rank": turnover_rank_value,
+        "price_confirmations": price_confirmations,
         "signal": signal
     })
 
 
 # =========================================================
-# V6 SORT
+# V7 RANKING
 # =========================================================
-#
 # Priority:
-#   1. Fresh-move score
-#   2. Lower current extension
-#   3. Better turnover rank
-#   4. Base technical score
-#
-# This prevents a stock already up 15% from beating a
-# fresh 1–4% reversal simply because of momentum.
+#   1. Fresh swing score
+#   2. Confirmation count
+#   3. Ideal gain zone
+#   4. Turnover rank
+#   5. Base technical score
 # =========================================================
+
+def freshness_distance(gain):
+    # Ideal current gain around 2.5%.
+    return abs(gain - 2.5)
+
 
 final_candidates.sort(
     key=lambda item: (
         item["score"],
-        -abs(item["gain"] - 2.5),
+        item["price_confirmations"],
+        -freshness_distance(item["gain"]),
         -item["turnover_rank"],
         item["base_score"]
     ),
     reverse=True
 )
 
-# Keep only the best 10 qualifying stocks.
-final_candidates = final_candidates[:10]
+# V7 intentionally shows only the best 3.
+final_candidates = final_candidates[:3]
 
 
 # =========================================================
-# COMPACT FINAL LIST
+# V7 SIGNAL — ONLY #1 CAN BE TOP SWING
 # =========================================================
-#
-# Only columns needed for a quick trading decision are shown.
-# The detailed NIFTY200 sheet still contains all diagnostics.
+
+for rank, item in enumerate(final_candidates, start=1):
+
+    if (
+        rank == 1
+        and item["score"] >= 80
+        and item["gain"] <= 8
+        and item["price_confirmations"] >= 3
+    ):
+        item["signal"] = "🎯 TOP SWING"
+    elif item["score"] >= 72:
+        item["signal"] = "🔥 STRONG SWING"
+    else:
+        item["signal"] = "👀 WATCH"
+
+
+# =========================================================
+# COMPACT FINAL LIST V7
 # =========================================================
 
 final_headers = [
@@ -2581,38 +2559,24 @@ for rank, item in enumerate(final_candidates, start=1):
 
     row = item["row"]
 
-    # Compact confirmation summary.
     confirmations = []
 
     if str(row[17]).startswith("YES"):
         confirmations.append("BB REJ")
-
     if str(row[18]).startswith("YES"):
         confirmations.append("ENGULF")
-
     if str(row[19]).startswith("YES"):
         confirmations.append("OVERSOLD")
-
     if str(row[20]).startswith("YES"):
         confirmations.append("GREEN")
-
     if str(row[21]).startswith("YES"):
         confirmations.append("HIGH BREAK")
-
     if str(row[22]).startswith("YES"):
         confirmations.append("LOW HOLD")
-
     if str(row[11]).startswith("YES"):
         confirmations.append("GAP HOLD")
 
     confirmation_text = " + ".join(confirmations)
-
-    # Use V6 fresh-move classification.
-    signal = item["signal"]
-
-    # Only the highest-quality fresh setup gets TOP SWING.
-    if rank == 1 and item["score"] >= 80 and item["gain"] <= 8:
-        signal = "🎯 TOP SWING"
 
     final_output.append([
         rank,
@@ -2628,22 +2592,15 @@ for rank, item in enumerate(final_candidates, start=1):
         confirmation_text,
         row[23],
         item["score"],
-        signal
+        item["signal"]
     ])
 
 
 # =========================================================
-# CLEAR FINAL LIST
+# CLEAR + WRITE FINAL LIST
 # =========================================================
 
-sheet_final.batch_clear(
-    ["A1:N1000"]
-)
-
-
-# =========================================================
-# WRITE HEADER
-# =========================================================
+sheet_final.batch_clear(["A1:N1000"])
 
 sheet_final.update(
     range_name="A1:N1",
@@ -2651,13 +2608,7 @@ sheet_final.update(
     value_input_option="RAW"
 )
 
-
-# =========================================================
-# WRITE DATA
-# =========================================================
-
 if final_output:
-
     sheet_final.update(
         range_name="A2",
         values=final_output,
@@ -2666,12 +2617,11 @@ if final_output:
 
 
 # =========================================================
-# FINAL LIST — CLEAN / COMPACT / VISUAL FORMATTING
+# FINAL LIST V7 — CLEAN COMPACT FORMATTING
 # =========================================================
 
 try:
 
-    # Header
     sheet_final.format(
         "A1:N1",
         {
@@ -2699,7 +2649,6 @@ try:
 
         last_row = len(final_output) + 1
 
-        # Compact body
         sheet_final.format(
             f"A2:N{last_row}",
             {
@@ -2712,7 +2661,6 @@ try:
             }
         )
 
-        # Stock names
         sheet_final.format(
             f"B2:B{last_row}",
             {
@@ -2724,7 +2672,6 @@ try:
             }
         )
 
-        # Confirmation and setup
         sheet_final.format(
             f"K2:L{last_row}",
             {
@@ -2736,7 +2683,6 @@ try:
             }
         )
 
-        # Score
         sheet_final.format(
             f"M2:M{last_row}",
             {
@@ -2747,7 +2693,6 @@ try:
             }
         )
 
-        # Signal
         sheet_final.format(
             f"N2:N{last_row}",
             {
@@ -2759,24 +2704,22 @@ try:
             }
         )
 
-        # Highlight the first candidate.
-        if final_output[0][0] == 1:
-            sheet_final.format(
-                "A2:N2",
-                {
-                    "backgroundColor": {
-                        "red": 0.90,
-                        "green": 0.97,
-                        "blue": 0.90
-                    },
-                    "textFormat": {
-                        "bold": True,
-                        "fontSize": 9
-                    }
+        # Make Rank #1 visually stand out.
+        sheet_final.format(
+            "A2:N2",
+            {
+                "backgroundColor": {
+                    "red": 0.90,
+                    "green": 0.97,
+                    "blue": 0.90
+                },
+                "textFormat": {
+                    "bold": True,
+                    "fontSize": 9
                 }
-            )
+            }
+        )
 
-    # Compact widths
     widths = {
         "A:A": 42,
         "B:B": 95,
@@ -2794,8 +2737,6 @@ try:
         "N:N": 105
     }
 
-    # Use Sheets column dimension formatting through repeated calls.
-    # The compact ranges are intentionally kept narrow.
     for col_range, width in widths.items():
         try:
             sheet_final.format(
@@ -2815,120 +2756,51 @@ try:
     sheet_final.freeze(rows=1)
 
 except Exception as e:
-
     print(
         f"Final List Formatting Warning : {e}"
     )
 
 
 # =========================================================
-# FINAL LIST SUMMARY
+# V7 SUMMARY
 # =========================================================
 
-print(
-    "----------------------------------------"
-)
+print("----------------------------------------")
+print("FINAL LIST V7 : TOP 3 + ONE TOP SWING")
+print(f"Qualified Stocks : {len(final_output)}")
 
-print(
-    "FINAL LIST V6 : STRICT SWING QUALITY FILTER"
-)
-
-print(
-    f"Qualified Stocks : {len(final_output)}"
-)
-
-for item in final_candidates:
-
+for rank, item in enumerate(final_candidates, start=1):
     row = item["row"]
-
     print(
+        rank,
+        "|",
         row[0],
-        "| Score:",
-        row[25],
+        "| Swing Score:",
+        item["score"],
         "| Gain:",
-        row[10],
+        item["gain"],
         "| Turnover Rank:",
-        row[24],
-        "| Setup:",
-        row[23]
+        item["turnover_rank"],
+        "| Confirmations:",
+        item["price_confirmations"],
+        "| Signal:",
+        item["signal"]
     )
 
-# =========================================================
-# FINAL REPORT
-# =========================================================
+print("========================================")
+print("NIFTY200 V7 SWING SCREENER UPDATED")
+print(f"Trading Date : {latest_date.strftime('%d-%b-%Y')}")
+print(f"Previous Date : {previous_date.strftime('%d-%b-%Y')}")
+print(f"Stocks Scanned : {len(output_rows)}")
+print(f"Final Candidates : {len(final_output)}")
+print("----------------------------------------")
+print("TOP 200 BY TURNOVER : YES")
+print("BOLLINGER : 20, 1.5")
+print("RSI : 14")
+print("SETUPS : BB REVERSAL / ENGULFING / OVERSOLD + RSI RECOVERY")
+print("V7 : FRESH MOVE + PRICE CONFIRMATION + TURNOVER")
+print("V7 : TOP 3 ONLY")
+print("V7 : ONLY RANK #1 CAN BE TOP SWING")
+print("MACD : REMOVED")
+print("========================================")
 
-print(
-    "========================================"
-)
-
-print(
-    "NIFTY200 MULTI-REVERSAL SCREENER UPDATED"
-)
-
-print(
-    f"Trading Date : "
-    f"{latest_date.strftime('%d-%b-%Y')}"
-)
-
-print(
-    f"Previous Date : "
-    f"{previous_date.strftime('%d-%b-%Y')}"
-)
-
-print(
-    f"Stocks Scanned : "
-    f"{len(output_rows)}"
-)
-
-print(
-    f"Final Candidates : "
-    f"{len(final_output)}"
-)
-
-print(
-    "----------------------------------------"
-)
-
-print(
-    "TOP 200 BY TURNOVER : YES"
-)
-
-print(
-    "BOLLINGER : 20, 1.5"
-)
-
-print(
-    "RSI : 14"
-)
-
-print(
-    "SETUP 1 : LOWER BB REVERSAL"
-)
-
-print(
-    "SETUP 2 : BULLISH ENGULFING"
-)
-
-print(
-    "SETUP 3 : OVERSOLD + RSI RECOVERY"
-)
-
-print(
-    "TURNOVER : SCORE FACTOR"
-)
-
-print(
-    "STRICT FINAL FILTER : POSITIVE GAIN + LOW HOLD + PRICE CONFIRMATION"
-)
-
-print(
-    "MAX FINAL STOCKS : 10 (FEWER IS OK)"
-)
-
-print(
-    "MACD : REMOVED"
-)
-
-print(
-    "========================================"
-)
