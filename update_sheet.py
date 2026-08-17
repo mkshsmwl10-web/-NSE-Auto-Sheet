@@ -2813,4 +2813,3 @@ print("V8 : ALL QUALIFIED STOCKS — NO TOP-3 LIMIT")
 print("V8 : RANK #1 IS TOP SWING WHEN SCORE >= 85")
 print("MACD : DAILY BEND/POSITIVE TURN + WEEKLY DOWN/BEND | LOWER BB HIGHEST PRIORITY")
 print("========================================")
-
