@@ -2729,7 +2729,7 @@ for rank, item in enumerate(final_candidates, start=1):
         row[23],
         item["score"],
         item["signal"],
-        f'=HYPERLINK("https://www.tradingview.com/chart/?symbol=NSE%3A{row[0]}","📈 CHART")'
+        f'=HYPERLINK("https://in.tradingview.com/chart/?symbol=NSE%3A{row[0]}&interval=D","📈 CHART")'
     ])
 
 safe_batch_clear(sheet_final, ["A1:AZ1000"])
