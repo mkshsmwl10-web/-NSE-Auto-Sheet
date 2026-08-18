@@ -30,7 +30,6 @@ import zipfile
 import requests
 import gspread
 import pandas as pd
-import numpy as np
 import time
 
 from datetime import datetime, timedelta
@@ -1775,6 +1774,66 @@ def detect_daily_patterns(candles):
     score=max(dict(found).get(x,0) for x in names)
     return ' + '.join(names), score
 
+
+def calculate_pattern_strength(row):
+    """100-point pattern/reversal strength. BB + Daily MACD have highest weight."""
+    def yes(i):
+        return i < len(row) and str(row[i]).startswith("YES")
+
+    # Output indexes from NIFTY200 row
+    bb_touch = yes(16)
+    bb_rejection = yes(17)
+    prev_red_lower_bb = yes(37)
+    gapup_after_bb = yes(38)
+
+    macd_bend = yes(27)
+    macd_strong = yes(28)
+    macd_cross = yes(29)
+    macd_positive = yes(35)
+
+    try:
+        pattern_score = float(row[41]) if str(row[41]).strip() else 0.0
+    except (TypeError, ValueError, IndexError):
+        pattern_score = 0.0
+
+    # LOWER BB REVERSAL = 40 points
+    bb_score = 0
+    if bb_touch:
+        bb_score += 5
+    if bb_rejection:
+        bb_score += 20
+    if prev_red_lower_bb:
+        bb_score += 10
+    if gapup_after_bb:
+        bb_score += 5
+
+    # DAILY MACD REVERSAL = 40 points
+    macd_score = 0
+    if macd_bend:
+        macd_score += 15
+    if macd_strong:
+        macd_score += 10
+    if macd_positive:
+        macd_score += 10
+    if macd_cross:
+        macd_score += 5
+
+    # DAILY CHART PATTERN = 20 points
+    pattern_component = min(20, max(0, pattern_score) * 2)
+
+    total = min(100, bb_score + macd_score + pattern_component)
+
+    if total >= 85:
+        label = "💎 PRIME REVERSAL"
+    elif total >= 70:
+        label = "🔥 STRONG PATTERN"
+    elif total >= 55:
+        label = "👀 WATCH"
+    else:
+        label = "—"
+
+    return round(total, 1), label
+
 # OUTPUT
 # =========================================================
 
@@ -2770,13 +2829,17 @@ for row in output_rows:
     else:
         signal = "👀 WATCH"
 
+    pattern_strength, pattern_signal = calculate_pattern_strength(row)
+
     final_candidates.append({
         "row": row,
         "score": score,
         "gain": gain,
         "turnover_rank": turnover_rank_value,
         "confirmations": confirmations,
-        "signal": signal
+        "signal": signal,
+        "pattern_strength": pattern_strength,
+        "pattern_signal": pattern_signal
     })
 
 
@@ -2809,7 +2872,8 @@ for rank, item in enumerate(final_candidates, start=1):
 # =========================================================
 final_headers = [
     "Rank", "NSE Code", "CMP", "Gain %", "Lower BB", "RSI",
-    "Daily MACD", "Weekly MACD", "Confirmation", "Setup", "Pattern", "Score", "Signal", "Chart"
+    "Daily MACD", "Weekly MACD", "Confirmation", "Setup", "Pattern",
+    "Pattern Strength", "Pattern Signal", "Score", "Signal", "Chart"
 ]
 
 final_output = []
@@ -2827,6 +2891,7 @@ for rank, item in enumerate(final_candidates, start=1):
 
     macd_text = "MACD+" if str(row[35]).startswith("YES") else ("BEND ↑" if str(row[27]).startswith("YES") else "—")
     weekly_text = "BEND ↑" if str(row[33]).startswith("YES") else ("DOWN 📉" if str(row[34]).startswith("YES") else "—")
+    pattern_name = str(row[40]).strip() if len(row) > 40 and str(row[40]).strip() else "—"
     final_output.append([
         rank,
         row[0],
@@ -2838,14 +2903,16 @@ for rank, item in enumerate(final_candidates, start=1):
         weekly_text,
         " + ".join(confirmations),
         row[23],
-        daily_pattern,
+        pattern_name,
+        item["pattern_strength"],
+        item["pattern_signal"],
         item["score"],
         item["signal"],
         f'=HYPERLINK("https://www.tradingview.com/chart/?symbol=NSE%3A{row[0]}","📈 CHART")'
     ])
 
 safe_batch_clear(sheet_final, ["A1:AZ1000"])
-safe_update(sheet_final, "A1:N1", [final_headers], value_input_option="RAW")
+safe_update(sheet_final, "A1:P1", [final_headers], value_input_option="RAW")
 if final_output:
     safe_update(sheet_final, "A2", final_output, value_input_option="USER_ENTERED")
 
@@ -2853,27 +2920,28 @@ if final_output:
 # CLEAN V8 FORMATTING
 # =========================================================
 try:
-    safe_format(sheet_final, "A1:N1", {
+    safe_format(sheet_final, "A1:P1", {
         "backgroundColor": {"red": 0.05, "green": 0.12, "blue": 0.20},
         "textFormat": {"bold": True, "fontSize": 9, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
         "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP"
     })
     if final_output:
         last_row = len(final_output) + 1
-        safe_format(sheet_final, f"A2:N{last_row}", {
+        safe_format(sheet_final, f"A2:P{last_row}", {
             "textFormat": {"fontSize": 8},
             "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP"
         })
         safe_format(sheet_final, f"B2:B{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "horizontalAlignment": "LEFT"})
         safe_format(sheet_final, f"I2:J{last_row}", {"textFormat": {"bold": True, "fontSize": 8}, "wrapStrategy": "WRAP"})
-        safe_format(sheet_final, f"K2:M{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "wrapStrategy": "WRAP"})
-        safe_format(sheet_final, f"N2:N{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "horizontalAlignment": "CENTER"})
+        safe_format(sheet_final, f"K2:O{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "wrapStrategy": "WRAP"})
+        safe_format(sheet_final, f"P2:P{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "horizontalAlignment": "CENTER"})
         safe_format(sheet_final, "A2:M2", {
             "backgroundColor": {"red": 0.90, "green": 0.97, "blue": 0.90},
             "textFormat": {"bold": True, "fontSize": 9}
         })
     widths = {"A:A": 38, "B:B": 100, "C:C": 75, "D:D": 55, "E:E": 75, "F:F": 50,
-              "G:G": 70, "H:H": 70, "I:I": 180, "J:J": 180, "K:K": 150, "L:L": 50, "M:M": 105, "N:N": 90}
+              "G:G": 70, "H:H": 70, "I:I": 180, "J:J": 180, "K:K": 150, "L:L": 70,
+              "M:M": 125, "N:N": 55, "O:O": 105, "P:P": 90}
     for col_range, width in widths.items():
         try:
             safe_format(sheet_final, col_range, {"padding": {"top": 2, "bottom": 2, "left": 2, "right": 2}})
@@ -2921,8 +2989,9 @@ print("BOLLINGER : 20, 1.5")
 print("RSI : 14")
 print("SETUPS : BB REVERSAL / ENGULFING / OVERSOLD + RSI RECOVERY")
 print("V8 : WEEKLY MACD DOWN-TREND + BEND + DAILY MACD POSITIVE TURN + LOWER BB REVERSAL")
-print("V8 : ALL QUALIFIED STOCKS — NO TOP-3 LIMIT")
+print("V8.2 : ALL QUALIFIED STOCKS — NO TOP-3 LIMIT")
 print("V8 : RANK #1 IS TOP SWING WHEN SCORE >= 85")
 print("MACD : DAILY BEND/POSITIVE TURN + WEEKLY DOWN/BEND | LOWER BB HIGHEST PRIORITY")
+print("V8.2 PATTERN STRENGTH : LOWER BB 40 + DAILY MACD 40 + CHART PATTERN 20")
 print("PATTERN : DAILY DOUBLE BOTTOM / CUP & HANDLE / BULL FLAG / TRIANGLES / WEDGES / RANGE")
 print("========================================")
