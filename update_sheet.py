@@ -1678,6 +1678,102 @@ def detect_weekly_macd_reversal(candles, fast=12, slow=26, signal=9):
 
 
 # =========================================================
+
+# =========================================================
+# DAILY CHART PATTERN ENGINE V8.1
+# =========================================================
+def _pct_diff(a, b):
+    return 999.0 if b == 0 else abs(a-b)/abs(b)*100.0
+
+def _extrema(vals, order=2):
+    highs, lows = [], []
+    for i in range(order, len(vals)-order):
+        w = vals[i-order:i+order+1]
+        if vals[i] == max(w): highs.append(i)
+        if vals[i] == min(w): lows.append(i)
+    return highs, lows
+
+def detect_daily_patterns(candles):
+    if len(candles) < 30:
+        return '—', 0
+    df = pd.DataFrame(candles).sort_values('date').reset_index(drop=True)
+    for c in ['open','high','low','close']:
+        df[c] = pd.to_numeric(df[c], errors='coerce')
+    df = df.dropna(subset=['open','high','low','close']).reset_index(drop=True)
+    if len(df) < 30: return '—', 0
+    h, l, c = df['high'].tolist(), df['low'].tolist(), df['close'].tolist()
+    n=len(df); found=[]
+
+    # Double bottom: two similar lows, meaningful neckline, recent breakout.
+    off=max(0,n-70); _, lows=_extrema(l[off:],2); lows=[x+off for x in lows]
+    for i in range(len(lows)):
+        for j in range(i+1,len(lows)):
+            a,b=lows[i],lows[j]
+            if b-a<6 or b<n-18 or _pct_diff(l[a],l[b])>4: continue
+            neckline=max(h[a:b+1])
+            if neckline>max(l[a],l[b])*1.04 and c[-1]>=neckline*0.985:
+                found.append(('DOUBLE BOTTOM',9)); break
+        if any(x[0]=='DOUBLE BOTTOM' for x in found): break
+
+    # Cup & handle: broad U-shaped recovery with similar rims and shallow handle.
+    if n>=80:
+        start=max(0,n-140); end=n-12
+        if end-start>=50:
+            left=max(h[start:end]); li=start+h[start:end].index(left)
+            ti=start+l[start:end].index(min(l[start:end]))
+            rw=h[max(ti+5,start):end]
+            if rw:
+                ri=max(ti+5,start)+rw.index(max(rw)); right=h[ri]; trough=l[ti]
+                depth=(min(left,right)-trough)/min(left,right)*100 if min(left,right)>0 else 0
+                handle=c[-12:-2]
+                if li<ti<ri and _pct_diff(left,right)<=10 and 8<=depth<=40 and handle:
+                    hd=(right-min(handle))/right*100 if right else 999
+                    if 2<=hd<=18 and c[-1]>=max(handle)*0.985:
+                        found.append(('CUP & HANDLE',10))
+
+    # Bull flag: strong prior impulse, controlled downward/flat consolidation, breakout.
+    if n>=25:
+        imp=c[-25:-10]; flag=c[-10:]
+        if len(imp)>=8 and len(flag)>=6:
+            impulse_gain=(max(imp)-min(imp))/max(min(imp),1e-9)*100
+            slope=np.polyfit(range(len(flag)),flag,1)[0]
+            fr=(max(flag)-min(flag))/max(max(flag),1e-9)*100
+            if impulse_gain>=10 and slope<=0 and fr<=12 and c[-1]>=max(flag[:-1]):
+                found.append(('BULL FLAG',8))
+
+    # Triangles: converging upper/lower boundaries.
+    if n>=25:
+        hh=np.array(h[-25:],float); ll=np.array(l[-25:],float); x=np.arange(25)
+        hs=np.polyfit(x,hh,1)[0]; ls=np.polyfit(x,ll,1)[0]
+        hspan=(max(hh)-min(hh))/max(np.mean(hh),1e-9)*100
+        lspan=(max(ll)-min(ll))/max(np.mean(ll),1e-9)*100
+        if hs<0 and ls>0 and hspan>=2 and lspan>=2: found.append(('SYMMETRICAL TRIANGLE',8))
+        elif ls>0 and abs(hs)<=abs(ls)*0.25 and hspan>=2: found.append(('ASCENDING TRIANGLE',8))
+        elif hs<0 and abs(ls)<=abs(hs)*0.25 and lspan>=2: found.append(('DESCENDING TRIANGLE',5))
+
+    # Wedges.
+    if n>=25:
+        hh=np.array(h[-25:],float); ll=np.array(l[-25:],float); x=np.arange(25)
+        hs=np.polyfit(x,hh,1)[0]; ls=np.polyfit(x,ll,1)[0]
+        if hs>0 and ls>0 and ls>hs*1.15: found.append(('RISING WEDGE',5))
+        elif hs<0 and ls<0 and abs(hs)>abs(ls)*1.15: found.append(('FALLING WEDGE',7))
+
+    # Rectangle/range.
+    if n>=20:
+        seg=c[-20:]; rng=(max(seg)-min(seg))/max(np.mean(seg),1e-9)*100
+        slope=np.polyfit(range(len(seg)),seg,1)[0]
+        if rng<=10 and abs(slope)/max(np.mean(seg),1e-9)*100<0.08: found.append(('RECTANGLE / RANGE',4))
+
+    if not found: return '—',0
+    found.sort(key=lambda x:x[1], reverse=True)
+    seen=set(); names=[]
+    for name,_ in found:
+        if name not in seen:
+            names.append(name); seen.add(name)
+        if len(names)>=3: break
+    score=max(dict(found).get(x,0) for x in names)
+    return ' + '.join(names), score
+
 # OUTPUT
 # =========================================================
 
@@ -1757,6 +1853,9 @@ for _, row in top200.iterrows():
         history_data.get(symbol, []),
         key=lambda x: x["date"]
     )
+
+    pattern_candles = hist + [{"date": latest_date, "open": today_open, "high": today_high, "low": today_low, "close": today_close}]
+    daily_pattern, pattern_score = detect_daily_patterns(pattern_candles)
 
     macd_closes = [x["close"] for x in hist] + [today_close]
     (
@@ -2364,7 +2463,9 @@ for _, row in top200.iterrows():
         (round(current_rsi, 2) if current_rsi is not None else ""),
         "YES 💎" if previous_red_lower_bb else "NO",
         "YES 🚀" if gapup_after_red_bb else "NO",
-        "YES 🔄" if current_rsi_recovery else "NO"
+        "YES 🔄" if current_rsi_recovery else "NO",
+        daily_pattern,
+        pattern_score
     ])
 
 
@@ -2419,7 +2520,9 @@ nifty_headers = [
     "Current RSI",
     "Prev Red + Lower BB",
     "Gap-Up After BB",
-    "Current RSI Recovery"
+    "Current RSI Recovery",
+    "Daily Chart Pattern",
+    "Pattern Score"
 ]
 
 
@@ -2427,10 +2530,10 @@ nifty_headers = [
 # WRITE NIFTY200
 # =========================================================
 
-safe_batch_clear(sheet_nifty, ["A1:AN1000"])
+safe_batch_clear(sheet_nifty, ["A1:AP1000"])
 
 sheet_nifty.update(
-    range_name="A1:AN1",
+    range_name="A1:AP1",
     values=[nifty_headers],
     value_input_option="RAW"
 )
@@ -2492,6 +2595,8 @@ for row in output_rows:
     previous_red_lower_bb = str(row[37]).startswith("YES")
     gapup_after_red_bb = str(row[38]).startswith("YES") if len(row) > 38 else False
     current_rsi_recovery = str(row[39]).startswith("YES") if len(row) > 39 else False
+    daily_pattern = str(row[40]) if len(row) > 40 and str(row[40]).strip() else "—"
+    pattern_score = float(row[41]) if len(row) > 41 and str(row[41]).strip() else 0.0
 
     try:
         gap_pct = float(row[8])
@@ -2650,6 +2755,11 @@ for row in output_rows:
     elif 3 < gain <= 5:
         score += 2
 
+    # Chart pattern is confirmation only; BB + Daily MACD remain primary.
+    if pattern_score >= 9: score += 5
+    elif pattern_score >= 7: score += 4
+    elif pattern_score >= 5: score += 2
+
     score = min(100, score)
 
     if score >= 82:
@@ -2698,7 +2808,7 @@ for rank, item in enumerate(final_candidates, start=1):
 # =========================================================
 final_headers = [
     "Rank", "NSE Code", "CMP", "Gain %", "Lower BB", "RSI",
-    "Daily MACD", "Weekly MACD", "Confirmation", "Setup", "Score", "Signal", "Chart"
+    "Daily MACD", "Weekly MACD", "Confirmation", "Setup", "Pattern", "Score", "Signal", "Chart"
 ]
 
 final_output = []
@@ -2727,13 +2837,14 @@ for rank, item in enumerate(final_candidates, start=1):
         weekly_text,
         " + ".join(confirmations),
         row[23],
+        daily_pattern,
         item["score"],
         item["signal"],
-        f'=HYPERLINK("https://in.tradingview.com/chart/?symbol=NSE%3A{row[0]}&interval=D","📈 CHART")'
+        f'=HYPERLINK("https://www.tradingview.com/chart/?symbol=NSE%3A{row[0]}","📈 CHART")'
     ])
 
 safe_batch_clear(sheet_final, ["A1:AZ1000"])
-safe_update(sheet_final, "A1:M1", [final_headers], value_input_option="RAW")
+safe_update(sheet_final, "A1:N1", [final_headers], value_input_option="RAW")
 if final_output:
     safe_update(sheet_final, "A2", final_output, value_input_option="USER_ENTERED")
 
@@ -2741,27 +2852,27 @@ if final_output:
 # CLEAN V8 FORMATTING
 # =========================================================
 try:
-    safe_format(sheet_final, "A1:M1", {
+    safe_format(sheet_final, "A1:N1", {
         "backgroundColor": {"red": 0.05, "green": 0.12, "blue": 0.20},
         "textFormat": {"bold": True, "fontSize": 9, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
         "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP"
     })
     if final_output:
         last_row = len(final_output) + 1
-        safe_format(sheet_final, f"A2:M{last_row}", {
+        safe_format(sheet_final, f"A2:N{last_row}", {
             "textFormat": {"fontSize": 8},
             "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE", "wrapStrategy": "WRAP"
         })
         safe_format(sheet_final, f"B2:B{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "horizontalAlignment": "LEFT"})
         safe_format(sheet_final, f"I2:J{last_row}", {"textFormat": {"bold": True, "fontSize": 8}, "wrapStrategy": "WRAP"})
-        safe_format(sheet_final, f"K2:L{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "wrapStrategy": "WRAP"})
-        safe_format(sheet_final, f"M2:M{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "horizontalAlignment": "CENTER"})
+        safe_format(sheet_final, f"K2:M{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "wrapStrategy": "WRAP"})
+        safe_format(sheet_final, f"N2:N{last_row}", {"textFormat": {"bold": True, "fontSize": 9}, "horizontalAlignment": "CENTER"})
         safe_format(sheet_final, "A2:M2", {
             "backgroundColor": {"red": 0.90, "green": 0.97, "blue": 0.90},
             "textFormat": {"bold": True, "fontSize": 9}
         })
     widths = {"A:A": 38, "B:B": 100, "C:C": 75, "D:D": 55, "E:E": 75, "F:F": 50,
-              "G:G": 70, "H:H": 70, "I:I": 180, "J:J": 180, "K:K": 50, "L:L": 105, "M:M": 90}
+              "G:G": 70, "H:H": 70, "I:I": 180, "J:J": 180, "K:K": 150, "L:L": 50, "M:M": 105, "N:N": 90}
     for col_range, width in widths.items():
         try:
             safe_format(sheet_final, col_range, {"padding": {"top": 2, "bottom": 2, "left": 2, "right": 2}})
@@ -2812,4 +2923,5 @@ print("V8 : WEEKLY MACD DOWN-TREND + BEND + DAILY MACD POSITIVE TURN + LOWER BB 
 print("V8 : ALL QUALIFIED STOCKS — NO TOP-3 LIMIT")
 print("V8 : RANK #1 IS TOP SWING WHEN SCORE >= 85")
 print("MACD : DAILY BEND/POSITIVE TURN + WEEKLY DOWN/BEND | LOWER BB HIGHEST PRIORITY")
+print("PATTERN : DAILY DOUBLE BOTTOM / CUP & HANDLE / BULL FLAG / TRIANGLES / WEDGES / RANGE")
 print("========================================")
