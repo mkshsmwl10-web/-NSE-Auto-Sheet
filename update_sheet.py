@@ -20,6 +20,9 @@
 #   Today's range is the smallest range of the latest 7 trading days.
 #
 # A stock can qualify for more than one setup.
+#
+# CHART:
+#   Final List includes a clickable TradingView Daily Chart link.
 # =========================================================
 
 import os
@@ -563,6 +566,15 @@ for _, latest_row in top200.iterrows():
     else:
         today_change_pct = 0.0
 
+    # TradingView Daily chart formula.
+    # The formula is written directly into Google Sheets so
+    # the user gets a clickable "Daily Chart" link.
+    chart_formula = (
+        '=HYPERLINK('
+        f'"https://www.tradingview.com/chart/?symbol=NSE%3A{symbol}&interval=D",'
+        '"Daily Chart")'
+    )
+
     final_rows.append([
         symbol,
         turnover_rank.get(symbol, 999),
@@ -579,7 +591,8 @@ for _, latest_row in top200.iterrows():
         "YES" if inside_bar else "NO",
         "YES" if nr4 else "NO",
         "YES" if nr7 else "NO",
-        setup_text
+        setup_text,
+        chart_formula
     ])
 
 
@@ -638,7 +651,8 @@ final_headers = [
     "Inside Bar?",
     "NR4?",
     "NR7?",
-    "Setup"
+    "Setup",
+    "Chart"
 ]
 
 
@@ -663,7 +677,7 @@ safe_batch_clear(
 
 safe_update(
     sheet_final,
-    "A1:P1",
+    "A1:Q1",
     [final_headers],
     value_input_option="RAW"
 )
@@ -722,7 +736,7 @@ if nifty_rows:
 try:
     safe_format(
         sheet_final,
-        "A1:P1",
+        "A1:Q1",
         {
             "textFormat": {
                 "bold": True,
@@ -739,7 +753,7 @@ try:
 
         safe_format(
             sheet_final,
-            f"A2:P{last_row}",
+            f"A2:Q{last_row}",
             {
                 "fontSize": 9,
                 "horizontalAlignment": "CENTER",
@@ -799,4 +813,5 @@ print(
 print("========================================")
 print("BB / RSI / MACD / EMA / PATTERN LOGIC: REMOVED")
 print("SETUPS: INSIDE BAR / NR4 / NR7")
+print("CHART: CLICKABLE TRADINGVIEW DAILY CHART")
 print("========================================")
