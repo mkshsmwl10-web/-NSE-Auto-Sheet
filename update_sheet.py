@@ -1,50 +1,41 @@
-python
 # ============================================================
-# NIFTY 200 SWING SNIPER V2.1.1
+# NIFTY 200 SWING SNIPER V2.1.2
 # ============================================================
 #
-# FULLY CORRECTED FINAL VERSION
+# FINAL CORRECTED VERSION
 #
-# FINAL LIST:
-#   1. RETEST + HOLD
-#   2. FRESH BREAKOUT
-#   3. BREAKOUT WATCH
-#
-# CORE FILTERS:
-#   EMA20 > EMA50
-#   Close > EMA20
-#   RSI
-#   Volume Ratio
-#   20-Day Breakout
-#   True Retest
-#   Risk <= 5%
-#   Previous 20-Day Range <= 18%
-#   Extension <= 3%
+# FIXES:
+# 1. GitHub Actions GCP_CREDENTIALS secret supported
+# 2. No credentials.json local-file dependency
+# 3. Correct Turnover Rank
+# 4. Exact 22 Final List columns
+# 5. Strict BUY filters
+# 6. True Retest + Hold
+# 7. Fresh Breakout
+# 8. Breakout Watch
+# 9. Risk <= 5%
+# 10. Previous 20-Day Range <= 18%
+# 11. Extension <= 3%
+# 12. TradingView chart links
 #
 # NO:
-#   BB
-#   MACD
-#   SuperTrend
-#   Intraday logic
-#   Random candlestick patterns
-#
-# GOOGLE AUTH:
-#   GitHub Actions -> GCP_CREDENTIALS secret
-#   Local PC       -> credentials.json fallback
+# BB
+# MACD
+# SuperTrend
+# Intraday logic
+# Random candlestick patterns
 #
 # ============================================================
 
-import io
 import os
 import json
-import math
 import time
-import requests
-import numpy as np
-import pandas as pd
+import math
 import gspread
 
-from datetime import datetime, timedelta
+import numpy as np
+import pandas as pd
+
 from oauth2client.service_account import ServiceAccountCredentials
 
 
@@ -52,9 +43,7 @@ from oauth2client.service_account import ServiceAccountCredentials
 # CONFIG
 # ============================================================
 
-SPREADSHEET_ID = (
-    "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E"
-)
+SPREADSHEET_ID = "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E"
 
 NIFTY_SHEET = "NIFTY200"
 FINAL_SHEET = "Final List"
@@ -62,25 +51,10 @@ FINAL_SHEET = "Final List"
 TOP_STOCKS = 200
 HISTORY_TRADING_DAYS = 120
 
-
-# ============================================================
-# BREAKOUT
-# ============================================================
-
 BREAKOUT_LOOKBACK = 20
-
-
-# ============================================================
-# EMA
-# ============================================================
 
 EMA_FAST = 20
 EMA_SLOW = 50
-
-
-# ============================================================
-# RSI
-# ============================================================
 
 RSI_LENGTH = 14
 
@@ -90,71 +64,30 @@ RSI_BUY_MAX = 68
 RSI_WATCH_MAX = 70
 RSI_HARD_REJECT = 80
 
-
-# ============================================================
-# VOLUME
-# ============================================================
-
 VOLUME_LENGTH = 20
 MIN_VOLUME_RATIO = 1.50
 
-
-# ============================================================
-# BREAKOUT EXTENSION
-# ============================================================
-
 MAX_BREAKOUT_EXTENSION_PCT = 3.0
-
-
-# ============================================================
-# BREAKOUT WATCH
-# ============================================================
 
 WATCH_DISTANCE_PCT = 2.0
 
-
-# ============================================================
-# RETEST
-# ============================================================
-
 RETEST_LOOKBACK_DAYS = 5
-
 RETEST_MAX_ABOVE_PCT = 1.0
 RETEST_MAX_BELOW_PCT = 3.0
 
-
-# ============================================================
-# RISK
-# ============================================================
-
 MAX_RISK_PCT = 5.0
-
-
-# ============================================================
-# TARGETS
-# ============================================================
 
 TARGET1_R = 1.5
 TARGET2_R = 3.0
 
-
-# ============================================================
-# QUALITY
-# ============================================================
-
 MIN_BUY_SCORE = 70
 MIN_WATCH_SCORE = 60
-
-
-# ============================================================
-# FINAL LIST SIZE
-# ============================================================
 
 MAX_FINAL_STOCKS = 12
 
 
 # ============================================================
-# GOOGLE AUTH SCOPES
+# GOOGLE API SCOPES
 # ============================================================
 
 SCOPES = [
@@ -164,26 +97,26 @@ SCOPES = [
 
 
 # ============================================================
-# HELPER
+# SAFE FLOAT
 # ============================================================
 
-def safe_float(x, default=np.nan):
+def safe_float(value, default=np.nan):
 
     try:
 
-        if x is None:
+        if value is None:
             return default
 
-        if isinstance(x, str):
+        if isinstance(value, str):
 
-            x = (
-                x
+            value = (
+                value
                 .replace(",", "")
                 .replace("%", "")
                 .strip()
             )
 
-        return float(x)
+        return float(value)
 
     except Exception:
 
@@ -215,31 +148,21 @@ def tradingview_url(symbol):
 
     symbol = clean_symbol(symbol)
 
-    # TradingView URL-safe symbol
-    symbol = symbol.replace("&", "%26")
+    symbol = (
+        symbol
+        .replace("&", "%26")
+        .replace(" ", "%20")
+    )
 
     return (
-        f'=HYPERLINK('
+        '=HYPERLINK('
         f'"https://www.tradingview.com/chart/?symbol=NSE%3A{symbol}",'
-        f'"Chart")'
+        '"Chart")'
     )
 
 
 # ============================================================
-# GOOGLE SHEETS CONNECTION
-# ============================================================
-#
-# IMPORTANT:
-#
-# GitHub Actions:
-#   Uses environment variable:
-#   GCP_CREDENTIALS
-#
-# Local PC:
-#   Uses credentials.json
-#
-# This removes the GitHub FileNotFoundError problem.
-#
+# GOOGLE SHEETS AUTH
 # ============================================================
 
 def connect_google_sheet():
@@ -247,8 +170,9 @@ def connect_google_sheet():
     print("\nConnecting to Google Sheets...")
 
     # --------------------------------------------------------
-    # FIRST:
-    # Try GCP_CREDENTIALS environment variable
+    # METHOD 1:
+    # GitHub Actions secret
+    # GCP_CREDENTIALS
     # --------------------------------------------------------
 
     credentials_json = os.environ.get(
@@ -256,6 +180,10 @@ def connect_google_sheet():
     )
 
     if credentials_json:
+
+        print(
+            "Using GCP_CREDENTIALS environment secret."
+        )
 
         try:
 
@@ -266,64 +194,22 @@ def connect_google_sheet():
         except json.JSONDecodeError as e:
 
             raise ValueError(
-                "GCP_CREDENTIALS contains invalid JSON.\n"
-                "Please check the GitHub Secret."
+                "GCP_CREDENTIALS secret is not valid JSON."
             ) from e
 
-        try:
-
-            print(
-                "Google credentials loaded from "
-                "GCP_CREDENTIALS."
+        creds = (
+            ServiceAccountCredentials
+            .from_json_keyfile_dict(
+                credentials_data,
+                SCOPES
             )
-
-            client_email = credentials_data.get(
-                "client_email",
-                ""
-            )
-
-            project_id = credentials_data.get(
-                "project_id",
-                ""
-            )
-
-            if not client_email:
-
-                raise ValueError(
-                    "client_email missing from "
-                    "GCP_CREDENTIALS."
-                )
-
-            print(
-                f"Service account: {client_email}"
-            )
-
-            if project_id:
-
-                print(
-                    f"Project ID: {project_id}"
-                )
-
-            creds = (
-                ServiceAccountCredentials
-                .from_json_keyfile_dict(
-                    credentials_data,
-                    SCOPES
-                )
-            )
-
-        except Exception as e:
-
-            raise RuntimeError(
-                "Unable to create Google credentials "
-                f"from GCP_CREDENTIALS: {e}"
-            ) from e
+        )
 
     else:
 
         # ----------------------------------------------------
-        # SECOND:
-        # Local fallback
+        # METHOD 2:
+        # Local credentials.json
         # ----------------------------------------------------
 
         credentials_file = "credentials.json"
@@ -334,17 +220,14 @@ def connect_google_sheet():
 
             raise FileNotFoundError(
                 "\nGoogle credentials not found.\n\n"
-                "For GitHub Actions:\n"
-                "Create repository secret:\n"
+                "For GitHub Actions, add repository secret:\n"
                 "GCP_CREDENTIALS\n\n"
-                "For local PC:\n"
-                "Put credentials.json in the "
-                "same folder as update_sheet.py."
+                "The secret must contain the complete "
+                "Google service-account JSON."
             )
 
         print(
-            "Google credentials loaded from "
-            "credentials.json."
+            "Using local credentials.json."
         )
 
         creds = (
@@ -355,17 +238,9 @@ def connect_google_sheet():
             )
         )
 
-    # --------------------------------------------------------
-    # Authorize
-    # --------------------------------------------------------
-
     client = gspread.authorize(
         creds
     )
-
-    # --------------------------------------------------------
-    # Open spreadsheet
-    # --------------------------------------------------------
 
     spreadsheet = client.open_by_key(
         SPREADSHEET_ID
@@ -379,7 +254,7 @@ def connect_google_sheet():
 
 
 # ============================================================
-# READ NIFTY200 SHEET
+# READ NIFTY200
 # ============================================================
 
 def read_nifty200_sheet(spreadsheet):
@@ -400,18 +275,27 @@ def read_nifty200_sheet(spreadsheet):
             f"{NIFTY_SHEET} sheet is empty."
         )
 
-    df = pd.DataFrame(records)
+    df = pd.DataFrame(
+        records
+    )
 
     print(
-        f"Rows loaded from {NIFTY_SHEET}: "
-        f"{len(df)}"
+        f"Rows loaded: {len(df)}"
+    )
+
+    print(
+        "Columns found:"
+    )
+
+    print(
+        list(df.columns)
     )
 
     return df
 
 
 # ============================================================
-# NORMALIZE COLUMN NAMES
+# NORMALIZE COLUMNS
 # ============================================================
 
 def normalize_columns(df):
@@ -428,49 +312,47 @@ def normalize_columns(df):
     for col in df.columns:
 
         c = (
-            col
+            str(col)
             .lower()
             .replace(" ", "")
             .replace("_", "")
+            .replace("-", "")
         )
 
         if c in [
             "symbol",
             "nsecode",
             "nse",
-            "ticker"
+            "ticker",
+            "code"
         ]:
 
             rename_map[col] = "Symbol"
 
         elif c in [
             "date",
-            "tradingdate"
+            "tradingdate",
+            "tradedate"
         ]:
 
             rename_map[col] = "Date"
 
-        elif c in [
-            "open"
-        ]:
+        elif c == "open":
 
             rename_map[col] = "Open"
 
-        elif c in [
-            "high"
-        ]:
+        elif c == "high":
 
             rename_map[col] = "High"
 
-        elif c in [
-            "low"
-        ]:
+        elif c == "low":
 
             rename_map[col] = "Low"
 
         elif c in [
             "close",
-            "ltp"
+            "ltp",
+            "closingprice"
         ]:
 
             rename_map[col] = "Close"
@@ -479,7 +361,8 @@ def normalize_columns(df):
             "turnover",
             "value",
             "tradedvalue",
-            "totalturnover"
+            "totalturnover",
+            "turnovervalue"
         ]:
 
             rename_map[col] = "Turnover"
@@ -489,7 +372,8 @@ def normalize_columns(df):
             "qty",
             "quantity",
             "tradedqty",
-            "shares"
+            "shares",
+            "volumeqty"
         ]:
 
             rename_map[col] = "Volume"
@@ -516,8 +400,11 @@ def normalize_columns(df):
     if missing:
 
         raise ValueError(
-            f"Missing required columns: {missing}\n"
-            f"Available columns: {list(df.columns)}"
+            "\nMissing required columns: "
+            f"{missing}\n\n"
+            "NIFTY200 sheet must contain:\n"
+            "Symbol, Date, Open, High, Low, Close\n"
+            "and preferably Turnover, Volume."
         )
 
     return df
@@ -529,13 +416,11 @@ def normalize_columns(df):
 
 def prepare_history(df):
 
-    df = normalize_columns(df)
+    df = normalize_columns(
+        df
+    )
 
     df = df.copy()
-
-    # --------------------------------------------------------
-    # Symbol
-    # --------------------------------------------------------
 
     df["Symbol"] = (
         df["Symbol"]
@@ -543,20 +428,12 @@ def prepare_history(df):
         .map(clean_symbol)
     )
 
-    # --------------------------------------------------------
-    # Date
-    # --------------------------------------------------------
-
     df["Date"] = pd.to_datetime(
         df["Date"],
         errors="coerce"
     )
 
-    # --------------------------------------------------------
-    # Numeric columns
-    # --------------------------------------------------------
-
-    numeric_cols = [
+    numeric_columns = [
         "Open",
         "High",
         "Low",
@@ -565,22 +442,18 @@ def prepare_history(df):
         "Volume"
     ]
 
-    for col in numeric_cols:
+    for col in numeric_columns:
 
-        if col in df.columns:
+        if col not in df.columns:
+
+            df[col] = np.nan
+
+        else:
 
             df[col] = (
                 df[col]
                 .map(safe_float)
             )
-
-        else:
-
-            df[col] = np.nan
-
-    # --------------------------------------------------------
-    # Required data
-    # --------------------------------------------------------
 
     df = df.dropna(
         subset=[
@@ -593,9 +466,10 @@ def prepare_history(df):
         ]
     )
 
-    # --------------------------------------------------------
-    # Sort
-    # --------------------------------------------------------
+    df = df[
+        (df["High"] >= df["Low"]) &
+        (df["Close"] > 0)
+    ]
 
     df = df.sort_values(
         [
@@ -603,10 +477,6 @@ def prepare_history(df):
             "Date"
         ]
     )
-
-    # --------------------------------------------------------
-    # Remove duplicate symbol/date
-    # --------------------------------------------------------
 
     df = df.drop_duplicates(
         subset=[
@@ -625,7 +495,9 @@ def prepare_history(df):
 
 def is_valid_symbol(symbol):
 
-    symbol = clean_symbol(symbol)
+    symbol = clean_symbol(
+        symbol
+    )
 
     if not symbol:
         return False
@@ -643,43 +515,58 @@ def is_valid_symbol(symbol):
     for word in blocked_words:
 
         if word in symbol:
+
             return False
 
     return True
 
 
 # ============================================================
-# TOP 200 BY TURNOVER
+# TOP 200 TURNOVER
 # ============================================================
 
 def get_top_200_symbols(history):
 
-    latest_date = history["Date"].max()
+    latest_date = history[
+        "Date"
+    ].max()
 
     latest = history[
         history["Date"] == latest_date
     ].copy()
 
     latest = latest[
-        latest["Symbol"].map(
-            is_valid_symbol
-        )
+        latest["Symbol"]
+        .map(is_valid_symbol)
     ].copy()
+
+    if latest.empty:
+
+        raise ValueError(
+            "No valid stocks found on latest trading date."
+        )
 
     latest["Turnover"] = pd.to_numeric(
         latest["Turnover"],
         errors="coerce"
     )
 
-    latest = latest.dropna(
-        subset=[
-            "Turnover"
-        ]
-    )
+    # --------------------------------------------------------
+    # IMPORTANT
+    # Turnover must exist
+    # --------------------------------------------------------
 
-    # --------------------------------------------------------
-    # One row per symbol
-    # --------------------------------------------------------
+    if latest["Turnover"].notna().sum() == 0:
+
+        raise ValueError(
+            "\nTurnover data is missing from NIFTY200 sheet.\n\n"
+            "The V2.1.2 screener needs historical Turnover "
+            "to rank the NIFTY 200 stocks."
+        )
+
+    latest = latest.dropna(
+        subset=["Turnover"]
+    )
 
     latest = (
         latest
@@ -688,52 +575,18 @@ def get_top_200_symbols(history):
             ascending=False
         )
         .drop_duplicates(
-            subset=[
-                "Symbol"
-            ],
+            subset=["Symbol"],
             keep="first"
         )
         .reset_index(drop=True)
     )
 
-    if latest.empty:
-
-        raise ValueError(
-            "No stocks found with valid Turnover "
-            f"on latest date {latest_date.date()}.\n"
-            "Check that NIFTY200 contains Turnover data."
-        )
+    latest = latest.head(
+        TOP_STOCKS
+    ).copy()
 
     # --------------------------------------------------------
-    # Robust ranking
-    # --------------------------------------------------------
-
-    latest["Turnover Rank"] = (
-        latest["Turnover"]
-        .rank(
-            method="first",
-            ascending=False
-        )
-        .astype(int)
-    )
-
-    # --------------------------------------------------------
-    # Top 200
-    # --------------------------------------------------------
-
-    latest = (
-        latest
-        .sort_values(
-            "Turnover Rank"
-        )
-        .head(
-            TOP_STOCKS
-        )
-        .reset_index(drop=True)
-    )
-
-    # --------------------------------------------------------
-    # Re-number after TOP 200
+    # CORRECT UNIQUE RANK
     # --------------------------------------------------------
 
     latest["Turnover Rank"] = (
@@ -743,27 +596,18 @@ def get_top_200_symbols(history):
         )
     )
 
-    # --------------------------------------------------------
-    # Safety
-    # --------------------------------------------------------
-
     if not latest[
         "Turnover Rank"
     ].is_unique:
 
         raise ValueError(
-            "ERROR: Turnover Rank is not unique."
+            "Turnover Rank is not unique."
         )
 
-    print(
-        "\n================================================"
-    )
-    print(
-        "TOP 200 TURNOVER CHECK"
-    )
-    print(
-        "================================================"
-    )
+    print("\n")
+    print("=" * 70)
+    print("TOP 200 TURNOVER CHECK")
+    print("=" * 70)
 
     print(
         f"Latest trading date : "
@@ -790,9 +634,7 @@ def get_top_200_symbols(history):
         f"{latest['Turnover Rank'].nunique()}"
     )
 
-    print(
-        "\nTop 10 by turnover:"
-    )
+    print("\nTop 10:")
 
     print(
         latest[
@@ -803,9 +645,7 @@ def get_top_200_symbols(history):
             ]
         ]
         .head(10)
-        .to_string(
-            index=False
-        )
+        .to_string(index=False)
     )
 
     return latest
@@ -862,14 +702,9 @@ def calculate_rsi(
         100 -
         (
             100 /
-            (
-                1 + rs
-            )
+            (1 + rs)
         )
     )
-
-    # If average loss is zero,
-    # RSI is effectively 100.
 
     rsi = rsi.where(
         avg_loss != 0,
@@ -888,9 +723,10 @@ def calculate_atr(
     length=14
 ):
 
-    prev_close = df[
-        "Close"
-    ].shift(1)
+    previous_close = (
+        df["Close"]
+        .shift(1)
+    )
 
     tr1 = (
         df["High"] -
@@ -899,12 +735,12 @@ def calculate_atr(
 
     tr2 = (
         df["High"] -
-        prev_close
+        previous_close
     ).abs()
 
     tr3 = (
         df["Low"] -
-        prev_close
+        previous_close
     ).abs()
 
     tr = pd.concat(
@@ -914,9 +750,7 @@ def calculate_atr(
             tr3
         ],
         axis=1
-    ).max(
-        axis=1
-    )
+    ).max(axis=1)
 
     atr = (
         tr
@@ -939,10 +773,6 @@ def add_indicators(df):
 
     df = df.copy()
 
-    # --------------------------------------------------------
-    # EMA20
-    # --------------------------------------------------------
-
     df["EMA20"] = (
         df["Close"]
         .ewm(
@@ -951,10 +781,6 @@ def add_indicators(df):
         )
         .mean()
     )
-
-    # --------------------------------------------------------
-    # EMA50
-    # --------------------------------------------------------
 
     df["EMA50"] = (
         df["Close"]
@@ -965,29 +791,18 @@ def add_indicators(df):
         .mean()
     )
 
-    # --------------------------------------------------------
-    # RSI14
-    # --------------------------------------------------------
-
     df["RSI14"] = calculate_rsi(
         df["Close"],
         RSI_LENGTH
     )
 
-    # --------------------------------------------------------
-    # ATR14
-    # --------------------------------------------------------
-
     df["ATR14"] = calculate_atr(
         df,
-        ATR_LENGTH
+        14
     )
 
     # --------------------------------------------------------
-    # Previous 20 completed sessions
-    #
-    # shift(1) ensures today's candle
-    # is NOT included.
+    # PREVIOUS 20 COMPLETED DAYS
     # --------------------------------------------------------
 
     df["Prev20High"] = (
@@ -1009,7 +824,7 @@ def add_indicators(df):
     )
 
     # --------------------------------------------------------
-    # Previous 20-day range
+    # RANGE
     # --------------------------------------------------------
 
     df["Range20Pct"] = (
@@ -1024,9 +839,8 @@ def add_indicators(df):
     )
 
     # --------------------------------------------------------
-    # Previous 20-day average volume
-    #
-    # Today's volume excluded.
+    # VOLUME
+    # Previous 20 days only
     # --------------------------------------------------------
 
     df["AvgVolume20"] = (
@@ -1044,7 +858,7 @@ def add_indicators(df):
     )
 
     # --------------------------------------------------------
-    # EMA20 slope
+    # EMA SLOPE
     # --------------------------------------------------------
 
     df["EMA20SlopePct"] = (
@@ -1059,7 +873,7 @@ def add_indicators(df):
     )
 
     # --------------------------------------------------------
-    # Daily change
+    # TODAY CHANGE
     # --------------------------------------------------------
 
     df["TodayChangePct"] = (
@@ -1078,13 +892,11 @@ def add_indicators(df):
 
 def find_previous_breakout(df):
 
-    minimum_length = (
+    if len(df) < (
         BREAKOUT_LOOKBACK +
         RETEST_LOOKBACK_DAYS +
         10
-    )
-
-    if len(df) < minimum_length:
+    ):
 
         return None
 
@@ -1098,10 +910,6 @@ def find_previous_breakout(df):
         RETEST_LOOKBACK_DAYS
     )
 
-    # --------------------------------------------------------
-    # Search last 1-5 sessions
-    # --------------------------------------------------------
-
     for idx in range(
         start_idx,
         today_idx
@@ -1111,17 +919,20 @@ def find_previous_breakout(df):
 
         close = row["Close"]
 
-        prev_high = row[
-            "Prev20High"
-        ]
+        prev_high = (
+            row["Prev20High"]
+        )
 
-        volume_ratio = row[
-            "VolumeRatio"
-        ]
+        volume_ratio = (
+            row["VolumeRatio"]
+        )
 
-        rsi = row[
-            "RSI14"
-        ]
+        rsi = row["RSI14"]
+
+        ema20 = row["EMA20"]
+        ema50 = row["EMA50"]
+
+        range20 = row["Range20Pct"]
 
         if pd.isna(prev_high):
             continue
@@ -1132,49 +943,28 @@ def find_previous_breakout(df):
         if pd.isna(rsi):
             continue
 
-        ema20 = row[
-            "EMA20"
-        ]
-
-        ema50 = row[
-            "EMA50"
-        ]
-
-        if (
-            pd.isna(ema20)
-            or
-            pd.isna(ema50)
-        ):
+        if pd.isna(ema20):
             continue
 
-        # ----------------------------------------------------
-        # Trend
-        # ----------------------------------------------------
+        if pd.isna(ema50):
+            continue
 
+        if pd.isna(range20):
+            continue
+
+        # Trend
         if ema20 <= ema50:
             continue
 
-        # ----------------------------------------------------
         # Breakout
-        # ----------------------------------------------------
-
         if close <= prev_high:
             continue
 
-        # ----------------------------------------------------
-        # Volume confirmation
-        # ----------------------------------------------------
-
-        if (
-            volume_ratio <
-            MIN_VOLUME_RATIO
-        ):
+        # Volume
+        if volume_ratio < MIN_VOLUME_RATIO:
             continue
 
-        # ----------------------------------------------------
-        # RSI confirmation
-        # ----------------------------------------------------
-
+        # RSI
         if not (
             RSI_BUY_MIN <=
             rsi <
@@ -1183,10 +973,7 @@ def find_previous_breakout(df):
 
             continue
 
-        # ----------------------------------------------------
         # Extension
-        # ----------------------------------------------------
-
         extension = (
             (
                 close -
@@ -1198,33 +985,17 @@ def find_previous_breakout(df):
             100
         )
 
-        if (
-            extension >
-            MAX_BREAKOUT_EXTENSION_PCT
-        ):
-
+        if extension > MAX_BREAKOUT_EXTENSION_PCT:
             continue
 
-        # ----------------------------------------------------
-        # Range filter
-        # ----------------------------------------------------
-
-        range20 = row[
-            "Range20Pct"
-        ]
-
-        if pd.isna(range20):
-            continue
-
+        # Range
         if range20 > 18:
             continue
 
         return {
             "index": idx,
             "date": row["Date"],
-            "level": float(
-                prev_high
-            )
+            "level": float(prev_high)
         }
 
     return None
@@ -1244,21 +1015,17 @@ def check_true_retest(
 
     today = df.iloc[-1]
 
-    level = breakout_info[
-        "level"
-    ]
+    level = float(
+        breakout_info["level"]
+    )
 
-    today_low = today[
-        "Low"
-    ]
+    today_low = float(
+        today["Low"]
+    )
 
-    today_close = today[
-        "Close"
-    ]
-
-    # --------------------------------------------------------
-    # Retest zone
-    # --------------------------------------------------------
+    today_close = float(
+        today["Close"]
+    )
 
     upper_level = (
         level *
@@ -1278,24 +1045,27 @@ def check_true_retest(
         )
     )
 
-    touched_level = (
+    # --------------------------------------------------------
+    # LOW MUST ACTUALLY COME BACK TO BREAKOUT ZONE
+    # --------------------------------------------------------
+
+    if not (
         today_low <= upper_level
         and
         today_low >= lower_level
-    )
+    ):
 
-    if not touched_level:
         return False
 
     # --------------------------------------------------------
-    # Close must hold above breakout
+    # CLOSE MUST HOLD ABOVE BREAKOUT
     # --------------------------------------------------------
 
     if today_close <= level:
         return False
 
     # --------------------------------------------------------
-    # Current extension
+    # EXTENSION
     # --------------------------------------------------------
 
     extension = (
@@ -1309,20 +1079,14 @@ def check_true_retest(
         100
     )
 
-    if (
-        extension >
-        MAX_BREAKOUT_EXTENSION_PCT
-    ):
-
+    if extension > MAX_BREAKOUT_EXTENSION_PCT:
         return False
 
     # --------------------------------------------------------
-    # Current RSI
+    # RSI
     # --------------------------------------------------------
 
-    rsi = today[
-        "RSI14"
-    ]
+    rsi = today["RSI14"]
 
     if pd.isna(rsi):
         return False
@@ -1336,31 +1100,21 @@ def check_true_retest(
         return False
 
     # --------------------------------------------------------
-    # Trend
+    # TREND
     # --------------------------------------------------------
 
-    if (
-        today["EMA20"] <=
-        today["EMA50"]
-    ):
-
+    if today["EMA20"] <= today["EMA50"]:
         return False
 
-    if (
-        today["Close"] <=
-        today["EMA20"]
-    ):
-
+    if today["Close"] <= today["EMA20"]:
         return False
 
     # --------------------------------------------------------
-    # Range
+    # RANGE
     # --------------------------------------------------------
 
     if (
-        pd.isna(
-            today["Range20Pct"]
-        )
+        pd.isna(today["Range20Pct"])
         or
         today["Range20Pct"] > 18
     ):
@@ -1378,57 +1132,31 @@ def check_fresh_breakout(df):
 
     today = df.iloc[-1]
 
-    close = today[
-        "Close"
-    ]
+    close = float(
+        today["Close"]
+    )
 
-    breakout_level = today[
-        "Prev20High"
-    ]
+    breakout_level = (
+        today["Prev20High"]
+    )
 
-    if pd.isna(
-        breakout_level
-    ):
-
+    if pd.isna(breakout_level):
         return False
 
-    # --------------------------------------------------------
     # Trend
-    # --------------------------------------------------------
-
-    if (
-        today["EMA20"] <=
-        today["EMA50"]
-    ):
-
+    if today["EMA20"] <= today["EMA50"]:
         return False
 
-    if (
-        close <=
-        today["EMA20"]
-    ):
-
+    if close <= today["EMA20"]:
         return False
 
-    # --------------------------------------------------------
     # Breakout
-    # --------------------------------------------------------
-
-    if (
-        close <=
-        breakout_level
-    ):
-
+    if close <= breakout_level:
         return False
 
-    # --------------------------------------------------------
     # Volume
-    # --------------------------------------------------------
-
     if (
-        pd.isna(
-            today["VolumeRatio"]
-        )
+        pd.isna(today["VolumeRatio"])
         or
         today["VolumeRatio"] <
         MIN_VOLUME_RATIO
@@ -1436,14 +1164,8 @@ def check_fresh_breakout(df):
 
         return False
 
-    # --------------------------------------------------------
     # RSI
-    # --------------------------------------------------------
-
-    if pd.isna(
-        today["RSI14"]
-    ):
-
+    if pd.isna(today["RSI14"]):
         return False
 
     if not (
@@ -1454,10 +1176,7 @@ def check_fresh_breakout(df):
 
         return False
 
-    # --------------------------------------------------------
     # Extension
-    # --------------------------------------------------------
-
     extension = (
         (
             close -
@@ -1469,21 +1188,12 @@ def check_fresh_breakout(df):
         100
     )
 
-    if (
-        extension >
-        MAX_BREAKOUT_EXTENSION_PCT
-    ):
-
+    if extension > MAX_BREAKOUT_EXTENSION_PCT:
         return False
 
-    # --------------------------------------------------------
     # Range
-    # --------------------------------------------------------
-
     if (
-        pd.isna(
-            today["Range20Pct"]
-        )
+        pd.isna(today["Range20Pct"])
         or
         today["Range20Pct"] > 18
     ):
@@ -1501,34 +1211,20 @@ def check_breakout_watch(df):
 
     today = df.iloc[-1]
 
-    close = today[
-        "Close"
-    ]
+    close = float(
+        today["Close"]
+    )
 
-    breakout_level = today[
-        "Prev20High"
-    ]
+    breakout_level = (
+        today["Prev20High"]
+    )
 
-    if pd.isna(
-        breakout_level
-    ):
-
+    if pd.isna(breakout_level):
         return False
 
-    # --------------------------------------------------------
     # Must remain below breakout
-    # --------------------------------------------------------
-
-    if (
-        close >=
-        breakout_level
-    ):
-
+    if close >= breakout_level:
         return False
-
-    # --------------------------------------------------------
-    # Distance from breakout
-    # --------------------------------------------------------
 
     distance_pct = (
         (
@@ -1541,38 +1237,18 @@ def check_breakout_watch(df):
         100
     )
 
-    if (
-        distance_pct >
-        WATCH_DISTANCE_PCT
-    ):
-
+    if distance_pct > WATCH_DISTANCE_PCT:
         return False
 
-    # --------------------------------------------------------
     # Trend
-    # --------------------------------------------------------
-
-    if (
-        today["EMA20"] <=
-        today["EMA50"]
-    ):
-
+    if today["EMA20"] <= today["EMA50"]:
         return False
 
-    if (
-        close <=
-        today["EMA20"]
-    ):
-
+    if close <= today["EMA20"]:
         return False
 
-    # --------------------------------------------------------
     # RSI
-    # --------------------------------------------------------
-
-    rsi = today[
-        "RSI14"
-    ]
+    rsi = today["RSI14"]
 
     if pd.isna(rsi):
         return False
@@ -1585,14 +1261,9 @@ def check_breakout_watch(df):
 
         return False
 
-    # --------------------------------------------------------
     # Range
-    # --------------------------------------------------------
-
     if (
-        pd.isna(
-            today["Range20Pct"]
-        )
+        pd.isna(today["Range20Pct"])
         or
         today["Range20Pct"] > 18
     ):
@@ -1603,7 +1274,7 @@ def check_breakout_watch(df):
 
 
 # ============================================================
-# CALCULATE TRADE LEVELS
+# TRADE LEVELS
 # ============================================================
 
 def calculate_trade_levels(
@@ -1631,10 +1302,6 @@ def calculate_trade_levels(
         .min()
     )
 
-    # --------------------------------------------------------
-    # ATR fallback
-    # --------------------------------------------------------
-
     if (
         not np.isfinite(atr)
         or
@@ -1643,10 +1310,7 @@ def calculate_trade_levels(
 
         atr = close * 0.02
 
-    # --------------------------------------------------------
-    # ENTRY
-    # --------------------------------------------------------
-
+    # Entry
     if setup == "BREAKOUT WATCH":
 
         entry = breakout_level
@@ -1655,36 +1319,22 @@ def calculate_trade_levels(
 
         entry = close
 
-    # --------------------------------------------------------
-    # STRUCTURAL STOP
-    # --------------------------------------------------------
-
+    # Structural stop
     structural_stop = (
         recent_low -
         0.25 * atr
     )
 
-    # --------------------------------------------------------
-    # ATR STOP
-    # --------------------------------------------------------
-
+    # ATR stop
     atr_stop = (
         entry -
         1.0 * atr
     )
 
-    # --------------------------------------------------------
-    # Conservative stop
-    # --------------------------------------------------------
-
     stop = max(
         structural_stop,
         atr_stop
     )
-
-    # --------------------------------------------------------
-    # Stop cannot be above entry
-    # --------------------------------------------------------
 
     if stop >= entry:
 
@@ -1692,10 +1342,6 @@ def calculate_trade_levels(
             entry -
             0.75 * atr
         )
-
-    # --------------------------------------------------------
-    # Risk %
-    # --------------------------------------------------------
 
     risk_pct = (
         (
@@ -1708,14 +1354,8 @@ def calculate_trade_levels(
         100
     )
 
-    # --------------------------------------------------------
-    # Cap risk at 5%
-    # --------------------------------------------------------
-
-    if (
-        risk_pct >
-        MAX_RISK_PCT
-    ):
+    # Hard cap
+    if risk_pct > MAX_RISK_PCT:
 
         stop = (
             entry *
@@ -1728,18 +1368,10 @@ def calculate_trade_levels(
 
         risk_pct = MAX_RISK_PCT
 
-    # --------------------------------------------------------
-    # Risk amount
-    # --------------------------------------------------------
-
     risk_amount = (
         entry -
         stop
     )
-
-    # --------------------------------------------------------
-    # Targets
-    # --------------------------------------------------------
 
     target1 = (
         entry +
@@ -1754,17 +1386,11 @@ def calculate_trade_levels(
     )
 
     return {
-
         "Entry": entry,
-
         "Stop Loss": stop,
-
         "Target 1": target1,
-
         "Target 2": target2,
-
         "Risk %": risk_pct
-
     }
 
 
@@ -1781,119 +1407,59 @@ def calculate_score(
 
     score = 0
 
-    close = today[
-        "Close"
-    ]
+    close = today["Close"]
+    ema20 = today["EMA20"]
+    ema50 = today["EMA50"]
+    rsi = today["RSI14"]
+    volume_ratio = today["VolumeRatio"]
+    range20 = today["Range20Pct"]
+    ema_slope = today["EMA20SlopePct"]
 
-    ema20 = today[
-        "EMA20"
-    ]
-
-    ema50 = today[
-        "EMA50"
-    ]
-
-    rsi = today[
-        "RSI14"
-    ]
-
-    volume_ratio = today[
-        "VolumeRatio"
-    ]
-
-    range20 = today[
-        "Range20Pct"
-    ]
-
-    ema_slope = today[
-        "EMA20SlopePct"
-    ]
-
-    # --------------------------------------------------------
     # EMA trend
-    # --------------------------------------------------------
-
     if ema20 > ema50:
-
         score += 20
 
-    # --------------------------------------------------------
-    # Close above EMA20
-    # --------------------------------------------------------
-
+    # Close > EMA20
     if close > ema20:
-
         score += 15
 
-    # --------------------------------------------------------
-    # EMA20 rising
-    # --------------------------------------------------------
-
+    # Rising EMA
     if (
-        not pd.isna(
-            ema_slope
-        )
+        not pd.isna(ema_slope)
         and
         ema_slope > 0
     ):
 
         score += 10
 
-    # --------------------------------------------------------
     # RSI
-    # --------------------------------------------------------
-
     if not pd.isna(rsi):
 
-        if (
-            55 <=
-            rsi <
-            68
-        ):
+        if 55 <= rsi < 68:
 
             score += 15
 
-        elif (
-            68 <=
-            rsi <=
-            70
-        ):
+        elif 68 <= rsi <= 70:
 
             score += 8
 
-    # --------------------------------------------------------
     # Volume
-    # --------------------------------------------------------
+    if not pd.isna(volume_ratio):
 
-    if not pd.isna(
-        volume_ratio
-    ):
-
-        if (
-            volume_ratio >= 2.0
-        ):
+        if volume_ratio >= 2.0:
 
             score += 15
 
-        elif (
-            volume_ratio >= 1.5
-        ):
+        elif volume_ratio >= 1.5:
 
             score += 10
 
-        elif (
-            volume_ratio >= 1.2
-        ):
+        elif volume_ratio >= 1.2:
 
             score += 5
 
-    # --------------------------------------------------------
-    # Range quality
-    # --------------------------------------------------------
-
-    if not pd.isna(
-        range20
-    ):
+    # Range
+    if not pd.isna(range20):
 
         if range20 <= 12:
 
@@ -1903,10 +1469,7 @@ def calculate_score(
 
             score += 7
 
-    # --------------------------------------------------------
-    # Setup bonus
-    # --------------------------------------------------------
-
+    # Setup
     if setup == "RETEST + HOLD":
 
         score += 10
@@ -1920,15 +1483,12 @@ def calculate_score(
         score += 5
 
     return int(
-        min(
-            score,
-            100
-        )
+        min(score, 100)
     )
 
 
 # ============================================================
-# ANALYZE ONE STOCK
+# ANALYZE STOCK
 # ============================================================
 
 def analyze_stock(
@@ -1940,40 +1500,28 @@ def analyze_stock(
 
     df = stock_df.copy()
 
-    # --------------------------------------------------------
-    # Minimum history
-    # --------------------------------------------------------
-
     if len(df) < 70:
-
         return None
-
-    # --------------------------------------------------------
-    # Indicators
-    # --------------------------------------------------------
 
     df = add_indicators(
         df
     )
 
-    # --------------------------------------------------------
-    # Remove rows without indicators
-    # --------------------------------------------------------
+    required_indicators = [
+        "EMA20",
+        "EMA50",
+        "RSI14",
+        "ATR14",
+        "Prev20High",
+        "Prev20Low",
+        "Range20Pct"
+    ]
 
     df = df.dropna(
-        subset=[
-            "EMA20",
-            "EMA50",
-            "RSI14",
-            "ATR14",
-            "Prev20High",
-            "Prev20Low",
-            "Range20Pct"
-        ]
+        subset=required_indicators
     ).copy()
 
     if len(df) < 30:
-
         return None
 
     today = df.iloc[-1]
@@ -1982,73 +1530,40 @@ def analyze_stock(
         today["Close"]
     )
 
-    # --------------------------------------------------------
-    # Hard reject
-    # --------------------------------------------------------
-
     if close <= 0:
-
         return None
 
+    # --------------------------------------------------------
+    # HARD REJECT
+    # --------------------------------------------------------
+
+    rsi = today["RSI14"]
+
     if (
-        pd.isna(
-            today["RSI14"]
-        )
+        pd.isna(rsi)
         or
-        today["RSI14"] <
-        RSI_REJECT
+        rsi < RSI_REJECT
         or
-        today["RSI14"] >=
-        RSI_HARD_REJECT
+        rsi >= RSI_HARD_REJECT
     ):
 
         return None
 
-    # --------------------------------------------------------
-    # Trend
-    # --------------------------------------------------------
-
-    if (
-        today["EMA20"] <=
-        today["EMA50"]
-    ):
-
+    if today["EMA20"] <= today["EMA50"]:
         return None
 
-    if (
-        close <=
-        today["EMA20"]
-    ):
-
+    if close <= today["EMA20"]:
         return None
 
-    # --------------------------------------------------------
-    # Range filter
-    # --------------------------------------------------------
-
-    if (
-        today["Range20Pct"] >
-        18
-    ):
-
+    if today["Range20Pct"] > 18:
         return None
 
     # --------------------------------------------------------
     # SETUP
-    #
-    # Priority:
-    #   1. RETEST + HOLD
-    #   2. FRESH BREAKOUT
-    #   3. BREAKOUT WATCH
     # --------------------------------------------------------
 
     setup = None
-
     breakout_date = ""
-
-    # --------------------------------------------------------
-    # Previous breakout
-    # --------------------------------------------------------
 
     previous_breakout = (
         find_previous_breakout(
@@ -2057,7 +1572,7 @@ def analyze_stock(
     )
 
     # --------------------------------------------------------
-    # 1. RETEST + HOLD
+    # RETEST
     # --------------------------------------------------------
 
     if check_true_retest(
@@ -2065,49 +1580,37 @@ def analyze_stock(
         previous_breakout
     ):
 
-        setup = (
-            "RETEST + HOLD"
-        )
+        setup = "RETEST + HOLD"
 
         breakout_date = (
-            previous_breakout[
-                "date"
-            ]
-            .strftime(
-                "%Y-%m-%d"
-            )
+            previous_breakout["date"]
+            .strftime("%Y-%m-%d")
         )
 
     # --------------------------------------------------------
-    # 2. FRESH BREAKOUT
+    # FRESH BREAKOUT
     # --------------------------------------------------------
 
     elif check_fresh_breakout(
         df
     ):
 
-        setup = (
-            "FRESH BREAKOUT"
-        )
+        setup = "FRESH BREAKOUT"
 
         breakout_date = (
             today["Date"]
-            .strftime(
-                "%Y-%m-%d"
-            )
+            .strftime("%Y-%m-%d")
         )
 
     # --------------------------------------------------------
-    # 3. BREAKOUT WATCH
+    # WATCH
     # --------------------------------------------------------
 
     elif check_breakout_watch(
         df
     ):
 
-        setup = (
-            "BREAKOUT WATCH"
-        )
+        setup = "BREAKOUT WATCH"
 
         breakout_date = ""
 
@@ -2124,33 +1627,21 @@ def analyze_stock(
         setup
     )
 
-    # --------------------------------------------------------
-    # Minimum score
-    # --------------------------------------------------------
-
     if setup in [
         "RETEST + HOLD",
         "FRESH BREAKOUT"
     ]:
 
-        if (
-            score <
-            MIN_BUY_SCORE
-        ):
-
+        if score < MIN_BUY_SCORE:
             return None
 
     else:
 
-        if (
-            score <
-            MIN_WATCH_SCORE
-        ):
-
+        if score < MIN_WATCH_SCORE:
             return None
 
     # --------------------------------------------------------
-    # Trade levels
+    # LEVELS
     # --------------------------------------------------------
 
     levels = calculate_trade_levels(
@@ -2158,28 +1649,18 @@ def analyze_stock(
         setup
     )
 
-    risk_pct = levels[
-        "Risk %"
-    ]
+    risk_pct = levels["Risk %"]
 
-    if (
-        risk_pct >
-        MAX_RISK_PCT
-    ):
-
+    if risk_pct > MAX_RISK_PCT:
         return None
 
     # --------------------------------------------------------
-    # Breakout level
+    # EXTENSION
     # --------------------------------------------------------
 
     breakout_level = float(
         today["Prev20High"]
     )
-
-    # --------------------------------------------------------
-    # Extension
-    # --------------------------------------------------------
 
     extension_pct = (
         (
@@ -2192,137 +1673,95 @@ def analyze_stock(
         100
     )
 
-    # --------------------------------------------------------
-    # Fresh / Retest extension
-    # --------------------------------------------------------
-
     if setup in [
         "RETEST + HOLD",
         "FRESH BREAKOUT"
     ]:
 
-        if (
-            extension_pct >
-            MAX_BREAKOUT_EXTENSION_PCT
-        ):
-
+        if extension_pct > MAX_BREAKOUT_EXTENSION_PCT:
             return None
 
     # --------------------------------------------------------
     # RESULT
-    # EXACT 22 COLUMNS
     # --------------------------------------------------------
 
-    result = {
+    return {
 
-        "NSE Code": symbol,
+        "NSE Code":
+            symbol,
 
-        "Turnover Rank": int(
-            turnover_rank
-        ),
+        "Turnover Rank":
+            int(turnover_rank),
 
-        "Turnover": float(
-            turnover
-        ),
+        "Turnover":
+            float(turnover),
 
-        "Close": round(
-            close,
-            2
-        ),
+        "Close":
+            round(close, 2),
 
-        "EMA20": round(
-            today["EMA20"],
-            2
-        ),
+        "EMA20":
+            round(today["EMA20"], 2),
 
-        "EMA50": round(
-            today["EMA50"],
-            2
-        ),
+        "EMA50":
+            round(today["EMA50"], 2),
 
-        "RSI14": round(
-            today["RSI14"],
-            2
-        ),
+        "RSI14":
+            round(today["RSI14"], 2),
 
-        "Volume Ratio": round(
-            today["VolumeRatio"],
-            2
-        ),
+        "Volume Ratio":
+            round(today["VolumeRatio"], 2),
 
-        "20-Day High": round(
-            today["Prev20High"],
-            2
-        ),
+        "20-Day High":
+            round(today["Prev20High"], 2),
 
-        "Breakout Level": round(
-            breakout_level,
-            2
-        ),
+        "Breakout Level":
+            round(breakout_level, 2),
 
-        "Entry": round(
-            levels["Entry"],
-            2
-        ),
+        "Entry":
+            round(levels["Entry"], 2),
 
-        "Stop Loss": round(
-            levels["Stop Loss"],
-            2
-        ),
+        "Stop Loss":
+            round(levels["Stop Loss"], 2),
 
-        "Target 1": round(
-            levels["Target 1"],
-            2
-        ),
+        "Target 1":
+            round(levels["Target 1"], 2),
 
-        "Target 2": round(
-            levels["Target 2"],
-            2
-        ),
+        "Target 2":
+            round(levels["Target 2"], 2),
 
-        "Risk %": round(
-            risk_pct,
-            2
-        ),
+        "Risk %":
+            round(risk_pct, 2),
 
-        "Today Change %": round(
-            today["TodayChangePct"],
-            2
-        ),
+        "Today Change %":
+            round(today["TodayChangePct"], 2),
 
-        "Setup": setup,
+        "Setup":
+            setup,
 
-        "Strength Score": score,
+        "Strength Score":
+            score,
 
-        "20-Day Range %": round(
-            today["Range20Pct"],
-            2
-        ),
+        "20-Day Range %":
+            round(today["Range20Pct"], 2),
 
-        "ATR14": round(
-            today["ATR14"],
-            2
-        ),
+        "ATR14":
+            round(today["ATR14"], 2),
 
-        "Breakout Date": breakout_date,
+        "Breakout Date":
+            breakout_date,
 
-        "Chart": tradingview_url(
-            symbol
-        )
-
+        "Chart":
+            tradingview_url(symbol)
     }
-
-    return result
 
 
 # ============================================================
-# SORT FINAL RESULTS
+# SORT RESULTS
 # ============================================================
 
 def sort_final_results(results):
 
     if not results:
-
         return []
 
     df = pd.DataFrame(
@@ -2336,23 +1775,13 @@ def sort_final_results(results):
         "FRESH BREAKOUT": 2,
 
         "BREAKOUT WATCH": 3
-
     }
 
     df["_SetupPriority"] = (
         df["Setup"]
-        .map(
-            setup_priority
-        )
+        .map(setup_priority)
         .fillna(99)
     )
-
-    # --------------------------------------------------------
-    # Priority:
-    # Setup
-    # Score
-    # Turnover Rank
-    # --------------------------------------------------------
 
     df = df.sort_values(
         [
@@ -2397,24 +1826,28 @@ def write_final_sheet(
 ):
 
     print(
-        f"\nUpdating sheet: "
-        f"{FINAL_SHEET}"
+        f"\nUpdating sheet: {FINAL_SHEET}"
     )
-
-    # --------------------------------------------------------
-    # Get / Create sheet
-    # --------------------------------------------------------
 
     try:
 
-        worksheet = spreadsheet.worksheet(
-            FINAL_SHEET
+        worksheet = (
+            spreadsheet
+            .worksheet(
+                FINAL_SHEET
+            )
         )
 
     except Exception:
 
+        print(
+            "Final List sheet not found. "
+            "Creating it."
+        )
+
         worksheet = (
-            spreadsheet.add_worksheet(
+            spreadsheet
+            .add_worksheet(
                 title=FINAL_SHEET,
                 rows=100,
                 cols=30
@@ -2428,59 +1861,38 @@ def write_final_sheet(
     headers = [
 
         "NSE Code",
-
         "Turnover Rank",
-
         "Turnover",
-
         "Close",
-
         "EMA20",
-
         "EMA50",
-
         "RSI14",
-
         "Volume Ratio",
-
         "20-Day High",
-
         "Breakout Level",
-
         "Entry",
-
         "Stop Loss",
-
         "Target 1",
-
         "Target 2",
-
         "Risk %",
-
         "Today Change %",
-
         "Setup",
-
         "Strength Score",
-
         "20-Day Range %",
-
         "ATR14",
-
         "Breakout Date",
-
         "Chart"
 
     ]
 
     # ========================================================
-    # CLEAR OLD DATA
+    # CLEAR
     # ========================================================
 
     worksheet.clear()
 
     # ========================================================
-    # PREPARE VALUES
+    # VALUES
     # ========================================================
 
     values = [
@@ -2505,23 +1917,24 @@ def write_final_sheet(
         )
 
     # ========================================================
-    # COLUMN LETTER
+    # RANGE
     # ========================================================
 
-    def col_letter(n):
+    def col_letter(number):
 
         result = ""
 
-        while n:
+        while number:
 
-            n, remainder = divmod(
-                n - 1,
+            number, remainder = divmod(
+                number - 1,
                 26
             )
 
             result = (
                 chr(
-                    65 + remainder
+                    65 +
+                    remainder
                 )
                 +
                 result
@@ -2529,17 +1942,9 @@ def write_final_sheet(
 
         return result
 
-    # ========================================================
-    # RANGE
-    # ========================================================
+    end_row = len(values)
 
-    end_row = len(
-        values
-    )
-
-    end_col = len(
-        headers
-    )
+    end_col = len(headers)
 
     end_col_letter = (
         col_letter(
@@ -2548,58 +1953,45 @@ def write_final_sheet(
     )
 
     cell_range = (
-        f"A1:"
-        f"{end_col_letter}"
-        f"{end_row}"
+        f"A1:{end_col_letter}{end_row}"
     )
 
     # ========================================================
     # WRITE
+    # Compatible with current gspread
     # ========================================================
 
     worksheet.update(
-        cell_range,
-        values,
+        range_name=cell_range,
+        values=values,
         value_input_option="USER_ENTERED"
     )
 
     print(
-        f"Written range: "
-        f"{cell_range}"
+        f"Written range: {cell_range}"
     )
 
     print(
-        f"Columns written: "
-        f"{end_col}"
+        f"Columns written: {end_col}"
     )
 
     print(
-        f"Rows written: "
-        f"{len(results)}"
+        f"Rows written: {len(results)}"
     )
 
 
 # ============================================================
-# PRINT FINAL TABLE
+# PRINT FINAL RESULTS
 # ============================================================
 
-def print_final_results(
-    results
-):
+def print_final_results(results):
 
     print("\n")
-
+    print("=" * 150)
     print(
-        "=" * 140
+        "V2.1.2 FINAL SWING SNIPER LIST"
     )
-
-    print(
-        "V2.1.1 FINAL SWING SNIPER LIST"
-    )
-
-    print(
-        "=" * 140
-    )
+    print("=" * 150)
 
     if not results:
 
@@ -2608,8 +2000,7 @@ def print_final_results(
         )
 
         print(
-            "This is okay — the screener "
-            "is intentionally strict."
+            "The screener is intentionally strict."
         )
 
         return
@@ -2621,37 +2012,21 @@ def print_final_results(
     display_cols = [
 
         "NSE Code",
-
         "Turnover Rank",
-
         "Close",
-
         "EMA20",
-
         "EMA50",
-
         "RSI14",
-
         "Volume Ratio",
-
         "20-Day High",
-
         "Entry",
-
         "Stop Loss",
-
         "Target 1",
-
         "Target 2",
-
         "Risk %",
-
         "Setup",
-
         "Strength Score",
-
         "20-Day Range %",
-
         "ATR14"
 
     ]
@@ -2665,30 +2040,31 @@ def print_final_results(
     )
 
     print("\n")
+    print("=" * 150)
 
     print(
-        "=" * 140
+        f"FINAL STOCK COUNT: {len(df)}"
     )
 
-    print(
-        f"FINAL STOCK COUNT: "
-        f"{len(df)}"
-    )
-
-    print(
-        "=" * 140
-    )
+    print("=" * 150)
 
 
 # ============================================================
-# VALIDATE FINAL RESULTS
+# VALIDATE
 # ============================================================
 
-def validate_results(
-    results
-):
+def validate_results(results):
+
+    print("\n")
+    print("=" * 80)
+    print("FINAL VALIDATION")
+    print("=" * 80)
 
     if not results:
+
+        print(
+            "No results to validate."
+        )
 
         return
 
@@ -2696,66 +2072,19 @@ def validate_results(
         results
     )
 
-    print("\n")
-
-    print(
-        "FINAL VALIDATION"
-    )
-
-    print(
-        "-" * 80
-    )
-
-    # --------------------------------------------------------
-    # Turnover Rank
-    # --------------------------------------------------------
-
     duplicate_ranks = (
-        df[
-            "Turnover Rank"
-        ]
+        df["Turnover Rank"]
         .duplicated()
         .sum()
     )
 
-    print(
-        f"Duplicate turnover ranks : "
-        f"{duplicate_ranks}"
-    )
-
-    # --------------------------------------------------------
-    # Range
-    # --------------------------------------------------------
-
     bad_range = (
-        df[
-            "20-Day Range %"
-        ] > 18
+        df["20-Day Range %"] > 18
     ).sum()
-
-    print(
-        f"Range > 18%              : "
-        f"{bad_range}"
-    )
-
-    # --------------------------------------------------------
-    # Risk
-    # --------------------------------------------------------
 
     bad_risk = (
-        df[
-            "Risk %"
-        ] > MAX_RISK_PCT
+        df["Risk %"] > 5
     ).sum()
-
-    print(
-        f"Risk > 5%                : "
-        f"{bad_risk}"
-    )
-
-    # --------------------------------------------------------
-    # BUY RSI
-    # --------------------------------------------------------
 
     buy_mask = df[
         "Setup"
@@ -2766,23 +2095,21 @@ def validate_results(
         ]
     )
 
-    buy_df = df.loc[
+    buy_rows = df.loc[
         buy_mask
     ]
 
-    if len(buy_df) > 0:
+    if len(buy_rows) > 0:
 
         bad_buy_rsi = (
             (
-                buy_df[
-                    "RSI14"
-                ] < RSI_BUY_MIN
+                buy_rows["RSI14"] <
+                RSI_BUY_MIN
             )
             |
             (
-                buy_df[
-                    "RSI14"
-                ] >= RSI_BUY_MAX
+                buy_rows["RSI14"] >=
+                RSI_BUY_MAX
             )
         ).sum()
 
@@ -2791,127 +2118,90 @@ def validate_results(
         bad_buy_rsi = 0
 
     print(
+        f"Duplicate turnover ranks : "
+        f"{duplicate_ranks}"
+    )
+
+    print(
+        f"Range > 18%              : "
+        f"{bad_range}"
+    )
+
+    print(
+        f"Risk > 5%                : "
+        f"{bad_risk}"
+    )
+
+    print(
         f"Invalid BUY RSI          : "
         f"{bad_buy_rsi}"
     )
 
-    # --------------------------------------------------------
-    # Setup count
-    # --------------------------------------------------------
+    print("\nSetup count:")
 
     print(
-        "\nSetup count:"
-    )
-
-    print(
-        df[
-            "Setup"
-        ]
+        df["Setup"]
         .value_counts()
         .to_string()
     )
 
-    print(
-        "-" * 80
-    )
+    # --------------------------------------------------------
+    # FINAL PASS / FAIL
+    # --------------------------------------------------------
+
+    if (
+        duplicate_ranks == 0
+        and
+        bad_range == 0
+        and
+        bad_risk == 0
+        and
+        bad_buy_rsi == 0
+    ):
+
+        print(
+            "\nVALIDATION: PASS"
+        )
+
+    else:
+
+        print(
+            "\nVALIDATION: FAIL"
+        )
+
+        raise ValueError(
+            "Final validation failed."
+        )
+
+    print("=" * 80)
 
 
 # ============================================================
-# EXTRA DIAGNOSTICS
-# ============================================================
-
-def print_data_diagnostics(
-    history,
-    top_symbols
-):
-
-    print("\n")
-
-    print(
-        "=" * 80
-    )
-
-    print(
-        "DATA DIAGNOSTICS"
-    )
-
-    print(
-        "=" * 80
-    )
-
-    print(
-        f"History rows       : "
-        f"{len(history)}"
-    )
-
-    print(
-        f"Unique symbols     : "
-        f"{history['Symbol'].nunique()}"
-    )
-
-    print(
-        f"History start      : "
-        f"{history['Date'].min().date()}"
-    )
-
-    print(
-        f"History end        : "
-        f"{history['Date'].max().date()}"
-    )
-
-    print(
-        f"Top symbols        : "
-        f"{len(top_symbols)}"
-    )
-
-    print(
-        f"Turnover available : "
-        f"{history['Turnover'].notna().sum()}"
-    )
-
-    print(
-        f"Volume available   : "
-        f"{history['Volume'].notna().sum()}"
-    )
-
-    print(
-        "=" * 80
-    )
-
-
-# ============================================================
-# MAIN SCREENER
+# MAIN
 # ============================================================
 
 def run_screener():
 
     print("\n")
-
+    print("=" * 80)
     print(
-        "=" * 80
+        "NIFTY 200 SWING SNIPER V2.1.2"
     )
-
-    print(
-        "NIFTY 200 SWING SNIPER V2.1.1"
-    )
-
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
 
     start_time = time.time()
 
-    # ========================================================
+    # --------------------------------------------------------
     # GOOGLE
-    # ========================================================
+    # --------------------------------------------------------
 
     spreadsheet = (
         connect_google_sheet()
     )
 
-    # ========================================================
-    # READ DATA
-    # ========================================================
+    # --------------------------------------------------------
+    # READ
+    # --------------------------------------------------------
 
     raw_df = (
         read_nifty200_sheet(
@@ -2919,9 +2209,9 @@ def run_screener():
         )
     )
 
-    # ========================================================
-    # PREPARE HISTORY
-    # ========================================================
+    # --------------------------------------------------------
+    # PREPARE
+    # --------------------------------------------------------
 
     history = (
         prepare_history(
@@ -2934,15 +2224,9 @@ def run_screener():
         f"{len(history)}"
     )
 
-    if history.empty:
-
-        raise ValueError(
-            "Prepared history is empty."
-        )
-
-    # ========================================================
+    # --------------------------------------------------------
     # TOP 200
-    # ========================================================
+    # --------------------------------------------------------
 
     top_symbols = (
         get_top_200_symbols(
@@ -2950,44 +2234,17 @@ def run_screener():
         )
     )
 
-    # ========================================================
-    # DIAGNOSTICS
-    # ========================================================
-
-    print_data_diagnostics(
-        history,
-        top_symbols
-    )
-
-    # ========================================================
-    # RANK MAP
-    # ========================================================
-    #
-    # IMPORTANT:
-    # Direct dictionary mapping prevents
-    # old Rank=1 mapping issue.
-    #
-    # ========================================================
-
     rank_map = dict(
         zip(
-            top_symbols[
-                "Symbol"
-            ],
-            top_symbols[
-                "Turnover Rank"
-            ]
+            top_symbols["Symbol"],
+            top_symbols["Turnover Rank"]
         )
     )
 
     turnover_map = dict(
         zip(
-            top_symbols[
-                "Symbol"
-            ],
-            top_symbols[
-                "Turnover"
-            ]
+            top_symbols["Symbol"],
+            top_symbols["Turnover"]
         )
     )
 
@@ -2996,26 +2253,20 @@ def run_screener():
         f"{len(rank_map)} symbols"
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # ANALYZE
-    # ========================================================
+    # --------------------------------------------------------
 
     results = []
 
     symbols = list(
-        top_symbols[
-            "Symbol"
-        ]
+        top_symbols["Symbol"]
     )
 
     print(
         f"\nAnalyzing "
         f"{len(symbols)} stocks..."
     )
-
-    # ========================================================
-    # STOCK LOOP
-    # ========================================================
 
     for count, symbol in enumerate(
         symbols,
@@ -3025,26 +2276,15 @@ def run_screener():
         try:
 
             stock_df = history[
-                history[
-                    "Symbol"
-                ] == symbol
+                history["Symbol"] ==
+                symbol
             ].copy()
 
-            stock_df = (
-                stock_df
-                .sort_values(
-                    "Date"
-                )
+            stock_df = stock_df.sort_values(
+                "Date"
             )
 
-            # ------------------------------------------------
-            # Keep enough history
-            # ------------------------------------------------
-
-            if (
-                len(stock_df) >
-                HISTORY_TRADING_DAYS
-            ):
+            if len(stock_df) > HISTORY_TRADING_DAYS:
 
                 stock_df = (
                     stock_df
@@ -3053,29 +2293,18 @@ def run_screener():
                     )
                 )
 
-            # ------------------------------------------------
-            # Analyze
-            # ------------------------------------------------
-
             result = analyze_stock(
 
                 symbol=symbol,
 
                 stock_df=stock_df,
 
-                turnover_rank=(
-                    rank_map[symbol]
-                ),
+                turnover_rank=
+                    rank_map[symbol],
 
-                turnover=(
+                turnover=
                     turnover_map[symbol]
-                )
-
             )
-
-            # ------------------------------------------------
-            # Qualified
-            # ------------------------------------------------
 
             if result is not None:
 
@@ -3095,6 +2324,14 @@ def run_screener():
                     f"{result['Setup']}"
                 )
 
+            if count % 25 == 0:
+
+                print(
+                    f"Processed "
+                    f"{count}/"
+                    f"{len(symbols)}"
+                )
+
         except Exception as e:
 
             print(
@@ -3102,9 +2339,9 @@ def run_screener():
                 f"{symbol}: {e}"
             )
 
-    # ========================================================
-    # SORT + LIMIT
-    # ========================================================
+    # --------------------------------------------------------
+    # SORT
+    # --------------------------------------------------------
 
     results = (
         sort_final_results(
@@ -3112,34 +2349,30 @@ def run_screener():
         )
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # VALIDATE
-    # ========================================================
+    # --------------------------------------------------------
 
     validate_results(
         results
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # PRINT
-    # ========================================================
+    # --------------------------------------------------------
 
     print_final_results(
         results
     )
 
-    # ========================================================
-    # WRITE GOOGLE SHEET
-    # ========================================================
+    # --------------------------------------------------------
+    # WRITE
+    # --------------------------------------------------------
 
     write_final_sheet(
         spreadsheet,
         results
     )
-
-    # ========================================================
-    # FINISH
-    # ========================================================
 
     elapsed = (
         time.time() -
@@ -3147,13 +2380,10 @@ def run_screener():
     )
 
     print("\n")
+    print("=" * 80)
 
     print(
-        "=" * 80
-    )
-
-    print(
-        "V2.1.1 COMPLETED"
+        "V2.1.2 COMPLETED"
     )
 
     print(
@@ -3166,9 +2396,7 @@ def run_screener():
         f"{elapsed:.1f} seconds"
     )
 
-    print(
-        "=" * 80
-    )
+    print("=" * 80)
 
 
 # ============================================================
