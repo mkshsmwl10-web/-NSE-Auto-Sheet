@@ -1,30 +1,92 @@
+```yaml
 name: Update NSE Sheet
 
 on:
+
   schedule:
     - cron: '45 14 * * 1-5'
+
   workflow_dispatch:
 
 jobs:
+
   update-sheet:
+
     runs-on: ubuntu-latest
 
     steps:
+
+      # --------------------------------------------------
+      # 1. Checkout Repository
+      # --------------------------------------------------
       - name: Checkout Repo
         uses: actions/checkout@v4
 
+
+      # --------------------------------------------------
+      # 2. Setup Python
+      # --------------------------------------------------
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
+
+      # --------------------------------------------------
+      # 3. Install Required Libraries
+      # --------------------------------------------------
       - name: Install Libraries
         run: |
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          pip install gspread
+          pip install oauth2client
+          pip install pandas
+          pip install requests
+          pip install numpy
 
-      - name: Run Python Scripts
+
+      # --------------------------------------------------
+      # 4. Create Google Service Account Credentials
+      # --------------------------------------------------
+      - name: Create Google Credentials
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
         run: |
+          if [ -z "$GCP_CREDENTIALS" ]; then
+            echo "ERROR: GCP_CREDENTIALS secret is empty or missing."
+            exit 1
+          fi
+
+          printf '%s' "$GCP_CREDENTIALS" > credentials.json
+
+          echo "Google credentials file created."
+
+          python - <<'PY'
+          import json
+
+          with open("credentials.json", "r") as f:
+              data = json.load(f)
+
+          print("Credentials JSON is valid.")
+          print("Project:", data.get("project_id", "Not found"))
+          print("Client email:", data.get("client_email", "Not found"))
+          PY
+
+
+      # --------------------------------------------------
+      # 5. Run NSE Screener
+      # --------------------------------------------------
+      - name: Run Python Script
+        run: |
           python update_sheet.py
-          python etf_weekly_sip.py
+
+
+      # --------------------------------------------------
+      # 6. Delete Credentials After Run
+      # --------------------------------------------------
+      - name: Remove Credentials
+        if: always()
+        run: |
+          rm -f credentials.json
+          echo "Temporary credentials removed."
+```
