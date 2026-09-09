@@ -3,29 +3,58 @@ name: Update NSE Sheet
 on:
   schedule:
     - cron: '45 14 * * 1-5'
+
   workflow_dispatch:
 
 jobs:
+
   update-sheet:
+
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout Repo
         uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
       - name: Install Libraries
         run: |
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          pip install gspread
+          pip install oauth2client
+          pip install pandas
+          pip install requests
+          pip install numpy
 
-      - name: Run Python Scripts
+      - name: Check Google Credentials
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+        run: |
+          if [ -z "$GCP_CREDENTIALS" ]; then
+            echo "ERROR: GCP_CREDENTIALS secret is missing."
+            exit 1
+          fi
+
+          python - <<'PY'
+          import os
+          import json
+
+          data = json.loads(
+              os.environ["GCP_CREDENTIALS"]
+          )
+
+          print("Google credentials JSON: VALID")
+          print("Service account:", data.get("client_email"))
+          print("Project ID:", data.get("project_id"))
+          PY
+
+      - name: Run Python Script
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
         run: |
           python update_sheet.py
-          python signal_engine.py
-          python etf_weekly_sip.py
