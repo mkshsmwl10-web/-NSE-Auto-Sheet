@@ -1,33 +1,45 @@
 # =========================================================
-# NIFTY 200 DAILY INSIDE BAR + NR4 + NR7 SCREENER
+# NIFTY 200 SWING SNIPER V1
 # =========================================================
 #
-# FINAL LIST = ONLY:
-#   1. INSIDE BAR
-#   2. NR4
-#   3. NR7
+# PURPOSE:
+#   2–10 DAY SWING TRADING
 #
-# No BB / RSI / MACD / EMA / reversal / chart-pattern logic.
+# FINAL LIST PRIORITY:
 #
-# INSIDE BAR:
-#   Today's High <= Previous High
-#   Today's Low  >= Previous Low
+#   1. RETEST + HOLD        = Highest
+#   2. FRESH BREAKOUT       = High
+#   3. BREAKOUT WATCH       = Medium
 #
-# NR4:
-#   Today's range is the smallest range of latest 4 trading days.
+# CORE LOGIC:
 #
-# NR7:
-#   Today's range is the smallest range of latest 7 trading days.
+#   NIFTY 200
+#   EMA 20 > EMA 50
+#   Close > EMA 20
+#   10-Day High Breakout
+#   Volume Expansion
+#   RSI 55–70
+#   Consolidation / Base
+#   Breakout Retest
 #
-# NEW:
-#   Setup High       = Previous Candle High
-#   Setup Low        = Previous Candle Low
-#   Breakout Above   = Today's High > Setup High
-#   Breakdown Below  = Today's Low < Setup Low
+# NO:
+#   NR4
+#   NR7
+#   Inside Bar
+#   Bollinger Band
+#   MACD
 #
-# CHART:
-#   Final List includes clickable TradingView Daily Chart.
+# OUTPUT:
+#   Entry
+#   Stop Loss
+#   Target 1
+#   Target 2
+#   Risk %
+#   Setup
+#   Strength Score
+#   TradingView Chart
 # =========================================================
+
 
 import os
 import json
@@ -36,6 +48,7 @@ import zipfile
 import requests
 import gspread
 import pandas as pd
+import numpy as np
 import time
 
 from datetime import datetime, timedelta
@@ -53,7 +66,24 @@ NIFTY_SHEET = "NIFTY200"
 FINAL_SHEET = "Final List"
 
 TOP_STOCKS = 200
-HISTORY_TRADING_DAYS = 10
+
+# Need enough history for EMA50 + RSI + ATR + breakout
+HISTORY_TRADING_DAYS = 70
+
+BREAKOUT_LOOKBACK = 10
+
+VOLUME_LOOKBACK = 20
+
+VOLUME_MULTIPLIER = 1.5
+
+RSI_MIN = 55
+RSI_MAX = 70
+
+# Retest can happen within last few sessions
+RETEST_LOOKBACK = 5
+
+# How close today's low can come to breakout level
+RETEST_TOLERANCE = 0.015
 
 
 # =========================================================
@@ -85,6 +115,7 @@ client = gspread.authorize(creds)
 # =========================================================
 
 def _is_retryable_google_error(exc):
+
     text = str(exc)
 
     return any(
@@ -125,6 +156,7 @@ def safe_google_call(func, *args, retries=6, **kwargs):
 
 
 def safe_batch_clear(sheet, ranges):
+
     return safe_google_call(
         sheet.batch_clear,
         ranges
@@ -132,6 +164,7 @@ def safe_batch_clear(sheet, ranges):
 
 
 def safe_update(sheet, *args, **kwargs):
+
     return safe_google_call(
         sheet.update,
         *args,
@@ -140,6 +173,7 @@ def safe_update(sheet, *args, **kwargs):
 
 
 def safe_format(sheet, *args, **kwargs):
+
     return safe_google_call(
         sheet.format,
         *args,
@@ -202,13 +236,16 @@ def fetch_bhavcopy(date_obj):
     )
 
     headers = {
+
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 "
             "(KHTML, like Gecko) "
             "Chrome/151.0 Safari/537.36"
         ),
+
         "Accept": "*/*",
+
         "Referer": "https://www.nseindia.com/"
     }
 
@@ -233,129 +270,84 @@ def fetch_bhavcopy(date_obj):
 
                 df = pd.read_csv(f)
 
+
         df.columns = [
             str(c).strip()
             for c in df.columns
         ]
 
-        # -------------------------------------------------
-        # SYMBOL
-        # -------------------------------------------------
 
-        symbol_col = next(
-            (
-                c
-                for c in [
-                    "TckrSymb",
-                    "SYMBOL"
-                ]
-                if c in df.columns
-            ),
-            None
-        )
+        # =================================================
+        # COLUMN FINDER
+        # =================================================
 
-        # -------------------------------------------------
-        # OPEN
-        # -------------------------------------------------
+        def find_column(names):
 
-        open_col = next(
-            (
-                c
-                for c in [
-                    "OpnPric",
-                    "OPEN",
-                    "Open"
-                ]
-                if c in df.columns
-            ),
-            None
-        )
+            for name in names:
 
-        # -------------------------------------------------
-        # HIGH
-        # -------------------------------------------------
+                if name in df.columns:
+                    return name
 
-        high_col = next(
-            (
-                c
-                for c in [
-                    "HghPric",
-                    "HIGH",
-                    "High"
-                ]
-                if c in df.columns
-            ),
-            None
-        )
+            return None
 
-        # -------------------------------------------------
-        # LOW
-        # -------------------------------------------------
 
-        low_col = next(
-            (
-                c
-                for c in [
-                    "LwPric",
-                    "LOW",
-                    "Low"
-                ]
-                if c in df.columns
-            ),
-            None
-        )
+        symbol_col = find_column([
+            "TckrSymb",
+            "SYMBOL"
+        ])
 
-        # -------------------------------------------------
-        # CLOSE
-        # -------------------------------------------------
 
-        close_col = next(
-            (
-                c
-                for c in [
-                    "ClsPric",
-                    "CLOSE",
-                    "Close"
-                ]
-                if c in df.columns
-            ),
-            None
-        )
+        open_col = find_column([
+            "OpnPric",
+            "OPEN",
+            "Open"
+        ])
 
-        # -------------------------------------------------
-        # TURNOVER
-        # -------------------------------------------------
 
-        turnover_col = next(
-            (
-                c
-                for c in [
-                    "TtlTrfVal",
-                    "TOTTRDVAL",
-                    "Turnover",
-                    "TURNOVER"
-                ]
-                if c in df.columns
-            ),
-            None
-        )
+        high_col = find_column([
+            "HghPric",
+            "HIGH",
+            "High"
+        ])
 
-        # -------------------------------------------------
-        # SERIES
-        # -------------------------------------------------
 
-        series_col = next(
-            (
-                c
-                for c in [
-                    "SctySrs",
-                    "SERIES",
-                    "Series"
-                ]
-                if c in df.columns
-            ),
-            None
-        )
+        low_col = find_column([
+            "LwPric",
+            "LOW",
+            "Low"
+        ])
+
+
+        close_col = find_column([
+            "ClsPric",
+            "CLOSE",
+            "Close"
+        ])
+
+
+        turnover_col = find_column([
+            "TtlTrfVal",
+            "TOTTRDVAL",
+            "Turnover",
+            "TURNOVER"
+        ])
+
+
+        # Volume / Quantity
+        volume_col = find_column([
+            "TtlTradgVol",
+            "TOTTRDQTY",
+            "TotalTradedQuantity",
+            "TOTTRDVAL"
+        ])
+
+
+        series_col = find_column([
+            "SctySrs",
+            "SERIES",
+            "Series"
+        ])
+
 
         required = {
 
@@ -369,9 +361,12 @@ def fetch_bhavcopy(date_obj):
 
             "Close": close_col,
 
-            "Turnover": turnover_col
+            "Turnover": turnover_col,
+
+            "Volume": volume_col
 
         }
+
 
         if any(
             value is None
@@ -385,9 +380,10 @@ def fetch_bhavcopy(date_obj):
 
             return None
 
-        # -------------------------------------------------
+
+        # =================================================
         # ONLY EQUITY
-        # -------------------------------------------------
+        # =================================================
 
         if series_col:
 
@@ -399,16 +395,20 @@ def fetch_bhavcopy(date_obj):
                 == "EQ"
             ]
 
-        # -------------------------------------------------
-        # NUMERIC CONVERSION
-        # -------------------------------------------------
+
+        # =================================================
+        # NUMERIC
+        # =================================================
 
         for col in [
+
             open_col,
             high_col,
             low_col,
             close_col,
-            turnover_col
+            turnover_col,
+            volume_col
+
         ]:
 
             df[col] = pd.to_numeric(
@@ -416,15 +416,20 @@ def fetch_bhavcopy(date_obj):
                 errors="coerce"
             )
 
+
         df = df.dropna(
             subset=[
+
                 open_col,
                 high_col,
                 low_col,
                 close_col,
-                turnover_col
+                turnover_col,
+                volume_col
+
             ]
         )
+
 
         return {
 
@@ -440,9 +445,12 @@ def fetch_bhavcopy(date_obj):
 
             "close_col": close_col,
 
-            "turnover_col": turnover_col
+            "turnover_col": turnover_col,
+
+            "volume_col": volume_col
 
         }
+
 
     except Exception as e:
 
@@ -462,6 +470,7 @@ now = datetime.now()
 latest_data = None
 latest_date = None
 
+
 for i in range(10):
 
     check_date = now - timedelta(days=i)
@@ -469,9 +478,11 @@ for i in range(10):
     if check_date.weekday() >= 5:
         continue
 
+
     result = fetch_bhavcopy(
         check_date
     )
+
 
     if result is not None:
 
@@ -492,14 +503,6 @@ if latest_data is None:
 latest_df = latest_data["df"]
 
 symbol_col = latest_data["symbol_col"]
-
-open_col = latest_data["open_col"]
-
-high_col = latest_data["high_col"]
-
-low_col = latest_data["low_col"]
-
-close_col = latest_data["close_col"]
 
 turnover_col = latest_data["turnover_col"]
 
@@ -574,7 +577,7 @@ print(
 
 
 # =========================================================
-# FETCH RECENT TRADING DAYS
+# FETCH HISTORY
 # =========================================================
 
 history_by_date = {}
@@ -596,12 +599,13 @@ while len(history_by_date) < HISTORY_TRADING_DAYS:
                 check_date.strftime("%Y-%m-%d")
             ] = result
 
+
     check_date -= timedelta(days=1)
 
-    # Safety stop
+
     if (
         latest_date - check_date
-    ).days > 30:
+    ).days > 110:
 
         break
 
@@ -611,11 +615,11 @@ history_dates = sorted(
 )
 
 
-if len(history_dates) < 7:
+if len(history_dates) < 55:
 
     raise Exception(
         f"Only {len(history_dates)} trading days "
-        "available. At least 7 are required for NR7."
+        "available. At least 55 are required."
     )
 
 
@@ -648,6 +652,8 @@ for date_key in history_dates:
 
     c_col = data["close_col"]
 
+    v_col = data["volume_col"]
+
 
     for _, row in df.iterrows():
 
@@ -655,8 +661,10 @@ for date_key in history_dates:
             row[s_col]
         ).strip()
 
+
         if symbol not in top200_symbols:
             continue
+
 
         item = {
 
@@ -676,9 +684,14 @@ for date_key in history_dates:
 
             "close": float(
                 row[c_col]
+            ),
+
+            "volume": float(
+                row[v_col]
             )
 
         }
+
 
         symbol_history.setdefault(
             symbol,
@@ -687,7 +700,7 @@ for date_key in history_dates:
 
 
 # =========================================================
-# SORT HISTORY
+# SORT
 # =========================================================
 
 for symbol in symbol_history:
@@ -698,7 +711,85 @@ for symbol in symbol_history:
 
 
 # =========================================================
-# DETECT INSIDE BAR / NR4 / NR7
+# INDICATOR FUNCTIONS
+# =========================================================
+
+def calculate_rsi(close_series, period=14):
+
+    delta = close_series.diff()
+
+    gain = delta.clip(
+        lower=0
+    )
+
+    loss = -delta.clip(
+        upper=0
+    )
+
+
+    avg_gain = gain.rolling(
+        period
+    ).mean()
+
+
+    avg_loss = loss.rolling(
+        period
+    ).mean()
+
+
+    rs = avg_gain / avg_loss.replace(
+        0,
+        np.nan
+    )
+
+
+    rsi = 100 - (
+        100 / (1 + rs)
+    )
+
+
+    return rsi
+
+
+def calculate_atr(df, period=14):
+
+    previous_close = df["close"].shift(1)
+
+
+    tr1 = (
+        df["high"]
+        - df["low"]
+    )
+
+
+    tr2 = (
+        df["high"]
+        - previous_close
+    ).abs()
+
+
+    tr3 = (
+        df["low"]
+        - previous_close
+    ).abs()
+
+
+    true_range = pd.concat(
+        [tr1, tr2, tr3],
+        axis=1
+    ).max(axis=1)
+
+
+    atr = true_range.rolling(
+        period
+    ).mean()
+
+
+    return atr
+
+
+# =========================================================
+# SWING SCAN
 # =========================================================
 
 final_rows = []
@@ -717,190 +808,589 @@ for _, latest_row in top200.iterrows():
     )
 
 
-    if len(hist) < 7:
+    if len(hist) < 55:
         continue
 
 
-    today = hist[-1]
-
-    previous = hist[-2]
-
-
-    # -----------------------------------------------------
-    # TODAY RANGE
-    # -----------------------------------------------------
-
-    today_range = (
-        today["high"]
-        - today["low"]
+    df = pd.DataFrame(
+        hist
     )
 
 
-    # Avoid invalid candles
-    if today_range <= 0:
-        continue
+    # =====================================================
+    # INDICATORS
+    # =====================================================
 
-
-    # -----------------------------------------------------
-    # PREVIOUS RANGE
-    # -----------------------------------------------------
-
-    previous_range = (
-        previous["high"]
-        - previous["low"]
+    df["EMA20"] = (
+        df["close"]
+        .ewm(
+            span=20,
+            adjust=False
+        )
+        .mean()
     )
 
 
-    # -----------------------------------------------------
-    # LAST 4 RANGES
-    # -----------------------------------------------------
-
-    ranges_4 = [
-
-        bar["high"] - bar["low"]
-
-        for bar in hist[-4:]
-
-    ]
+    df["EMA50"] = (
+        df["close"]
+        .ewm(
+            span=50,
+            adjust=False
+        )
+        .mean()
+    )
 
 
-    # -----------------------------------------------------
-    # LAST 7 RANGES
-    # -----------------------------------------------------
+    df["RSI14"] = calculate_rsi(
+        df["close"],
+        14
+    )
 
-    ranges_7 = [
 
-        bar["high"] - bar["low"]
+    df["ATR14"] = calculate_atr(
+        df,
+        14
+    )
 
-        for bar in hist[-7:]
 
-    ]
+    df["Volume20"] = (
+        df["volume"]
+        .rolling(20)
+        .mean()
+    )
 
 
     # =====================================================
-    # INSIDE BAR
+    # TODAY
     # =====================================================
 
-    inside_bar = (
+    today = df.iloc[-1]
 
+    previous = df.iloc[-2]
+
+
+    close = float(
+        today["close"]
+    )
+
+
+    high = float(
         today["high"]
-        <= previous["high"]
+    )
 
-        and
 
+    low = float(
         today["low"]
-        >= previous["low"]
-
     )
 
 
-    # =====================================================
-    # NR4
-    # =====================================================
-
-    nr4 = (
-
-        today_range
-        == min(ranges_4)
-
+    ema20 = float(
+        today["EMA20"]
     )
 
 
-    # =====================================================
-    # NR7
-    # =====================================================
-
-    nr7 = (
-
-        today_range
-        == min(ranges_7)
-
+    ema50 = float(
+        today["EMA50"]
     )
 
 
-    # -----------------------------------------------------
-    # ONLY STOCKS WITH A SETUP
-    # -----------------------------------------------------
+    rsi = float(
+        today["RSI14"]
+    )
 
-    if not (
-        inside_bar
-        or nr4
-        or nr7
+
+    atr = float(
+        today["ATR14"]
+    )
+
+
+    volume = float(
+        today["volume"]
+    )
+
+
+    avg_volume = float(
+        today["Volume20"]
+    )
+
+
+    if any(
+        pd.isna(x)
+        for x in [
+            ema20,
+            ema50,
+            rsi,
+            atr,
+            avg_volume
+        ]
     ):
 
         continue
 
 
     # =====================================================
-    # SETUP TEXT
+    # TREND
     # =====================================================
 
-    setups = []
+    trend_ok = (
 
+        ema20 > ema50
 
-    if inside_bar:
-        setups.append(
-            "INSIDE BAR"
-        )
+        and
 
+        close > ema20
 
-    if nr4:
-        setups.append(
-            "NR4"
-        )
-
-
-    if nr7:
-        setups.append(
-            "NR7"
-        )
-
-
-    setup_text = " + ".join(
-        setups
     )
 
 
+    if not trend_ok:
+        continue
+
+
     # =====================================================
-    # SETUP HIGH / LOW
-    # =====================================================
+    # 10-DAY BREAKOUT LEVEL
     #
-    # Setup candle = Previous candle
+    # IMPORTANT:
+    # Today's candle is NOT included.
     #
-    # This gives us a clean breakout/breakdown
-    # reference for today's compressed candle.
+    # This prevents self-comparison.
     # =====================================================
 
-    setup_high = previous["high"]
-
-    setup_low = previous["low"]
-
-
-    # =====================================================
-    # BREAKOUT / BREAKDOWN
-    # =====================================================
-
-    breakout_above = (
-
-        today["high"]
-        > setup_high
-
+    previous_10_high = (
+        df["high"]
+        .iloc[-11:-1]
+        .max()
     )
 
 
-    breakdown_below = (
-
-        today["low"]
-        < setup_low
-
+    previous_10_low = (
+        df["low"]
+        .iloc[-11:-1]
+        .min()
     )
 
 
     # =====================================================
-    # TODAY CHANGE %
+    # BREAKOUT
+    #
+    # CLOSE must break the 10-day high.
+    # Intraday wick alone is NOT enough.
     # =====================================================
 
-    previous_close = previous["close"]
+    fresh_breakout = (
+
+        close
+        > previous_10_high
+
+    )
+
+
+    # =====================================================
+    # VOLUME CONFIRMATION
+    # =====================================================
+
+    volume_ratio = (
+
+        volume
+        / avg_volume
+
+    )
+
+
+    volume_ok = (
+
+        volume_ratio
+        >= VOLUME_MULTIPLIER
+
+    )
+
+
+    # =====================================================
+    # RSI
+    # =====================================================
+
+    rsi_ok = (
+
+        RSI_MIN
+        <= rsi
+        <= RSI_MAX
+
+    )
+
+
+    # =====================================================
+    # CONSOLIDATION
+    #
+    # Previous 10-day range relative to price
+    # =====================================================
+
+    recent_10 = df.iloc[-11:-1]
+
+
+    range_high = (
+        recent_10["high"].max()
+    )
+
+
+    range_low = (
+        recent_10["low"].min()
+    )
+
+
+    consolidation_range_pct = (
+
+        (
+            range_high
+            - range_low
+        )
+        /
+        close
+        *
+        100
+
+    )
+
+
+    # =====================================================
+    # RETEST DETECTION
+    #
+    # Search last 5 sessions for a genuine
+    # closing breakout.
+    #
+    # Then today's candle comes back near the
+    # breakout level but closes above it.
+    # =====================================================
+
+    retest = False
+
+    breakout_level = np.nan
+
+    breakout_date = ""
+
+
+    if len(df) >= 17:
+
+        start_index = max(
+            10,
+            len(df)
+            - RETEST_LOOKBACK
+            - 1
+        )
+
+
+        for idx in range(
+            start_index,
+            len(df) - 1
+        ):
+
+            candidate = df.iloc[idx]
+
+
+            prior_10_high = (
+                df["high"]
+                .iloc[
+                    idx - 10:
+                    idx
+                ]
+                .max()
+            )
+
+
+            candidate_close = float(
+                candidate["close"]
+            )
+
+
+            # Previous session must have
+            # closed above its 10-day high
+            candidate_breakout = (
+
+                candidate_close
+                > prior_10_high
+
+            )
+
+
+            if not candidate_breakout:
+                continue
+
+
+            level = float(
+                prior_10_high
+            )
+
+
+            # Today's low comes back near
+            # the breakout level
+            retest_zone_low = (
+                level
+                * (1 - RETEST_TOLERANCE)
+            )
+
+
+            retest_zone_high = (
+                level
+                * (1 + RETEST_TOLERANCE)
+            )
+
+
+            today_retested = (
+
+                low
+                <= retest_zone_high
+
+                and
+
+                low
+                >= retest_zone_low
+
+                and
+
+                close
+                > level
+
+            )
+
+
+            if today_retested:
+
+                retest = True
+
+                breakout_level = level
+
+                breakout_date = str(
+                    candidate["date"]
+                )
+
+                break
+
+
+    # =====================================================
+    # WATCH SETUP
+    #
+    # Stock is close to breakout but has not yet
+    # produced a confirmed closing breakout.
+    # =====================================================
+
+    near_breakout = (
+
+        close
+        >= previous_10_high * 0.985
+
+        and
+
+        close
+        <= previous_10_high * 1.015
+
+    )
+
+
+    # =====================================================
+    # FINAL SETUP
+    # =====================================================
+
+    setup = None
+
+
+    if retest:
+
+        setup = "RETEST + HOLD"
+
+
+    elif fresh_breakout and volume_ok and rsi_ok:
+
+        setup = "FRESH BREAKOUT"
+
+
+    elif near_breakout and rsi_ok:
+
+        setup = "BREAKOUT WATCH"
+
+
+    else:
+
+        continue
+
+
+    # =====================================================
+    # BREAKOUT LEVEL
+    # =====================================================
+
+    if retest:
+
+        entry_level = float(
+            breakout_level
+        )
+
+    else:
+
+        entry_level = float(
+            previous_10_high
+        )
+
+
+    # =====================================================
+    # ENTRY
+    # =====================================================
+
+    if setup == "RETEST + HOLD":
+
+        entry = close
+
+    elif setup == "FRESH BREAKOUT":
+
+        entry = close
+
+    else:
+
+        # Planned entry only
+        entry = entry_level
+
+
+    # =====================================================
+    # STOP LOSS
+    #
+    # Use recent 5-day low minus ATR buffer.
+    # =====================================================
+
+    recent_5_low = float(
+        df["low"]
+        .iloc[-5:]
+        .min()
+    )
+
+
+    stop_loss = (
+        recent_5_low
+        - (atr * 0.25)
+    )
+
+
+    # Make sure SL is below entry
+
+    if stop_loss >= entry:
+
+        stop_loss = (
+            entry
+            - atr
+        )
+
+
+    risk = (
+        entry
+        - stop_loss
+    )
+
+
+    if risk <= 0:
+        continue
+
+
+    risk_pct = (
+        risk
+        /
+        entry
+        *
+        100
+    )
+
+
+    # =====================================================
+    # TARGETS
+    # =====================================================
+
+    target_1 = (
+        entry
+        + (risk * 1.5)
+    )
+
+
+    target_2 = (
+        entry
+        + (risk * 3.0)
+    )
+
+
+    # =====================================================
+    # STRENGTH SCORE
+    # =====================================================
+
+    score = 0
+
+
+    # Trend
+    score += 20
+
+
+    # Price above EMA20
+    if close > ema20:
+        score += 10
+
+
+    # EMA20 vs EMA50 distance
+    ema_distance_pct = (
+
+        (
+            ema20
+            - ema50
+        )
+        /
+        ema50
+        *
+        100
+
+    )
+
+
+    if ema_distance_pct > 2:
+        score += 10
+
+
+    # RSI
+    if 55 <= rsi <= 65:
+        score += 15
+
+    elif 65 < rsi <= 70:
+        score += 10
+
+
+    # Volume
+    if volume_ratio >= 2:
+        score += 20
+
+    elif volume_ratio >= 1.5:
+        score += 15
+
+
+    # Breakout
+    if fresh_breakout:
+        score += 15
+
+
+    # Retest bonus
+    if retest:
+        score += 15
+
+
+    # Consolidation bonus
+    if consolidation_range_pct <= 12:
+        score += 5
+
+
+    # Cap
+    score = min(
+        score,
+        100
+    )
+
+
+    # =====================================================
+    # TODAY CHANGE
+    # =====================================================
+
+    previous_close = float(
+        previous["close"]
+    )
 
 
     if previous_close != 0:
@@ -908,36 +1398,23 @@ for _, latest_row in top200.iterrows():
         today_change_pct = (
 
             (
-                today["close"]
+                close
                 - previous_close
             )
-
-            / previous_close
-
-            * 100
+            /
+            previous_close
+            *
+            100
 
         )
 
     else:
 
-        today_change_pct = 0.0
+        today_change_pct = 0
 
 
     # =====================================================
-    # TRADINGVIEW CHART
-    # =====================================================
-    #
-    # quote(..., safe="") makes symbols such as:
-    #
-    # M&M
-    #
-    # safe for URL.
-    #
-    # Example:
-    # NSE:M&M
-    #
-    # becomes:
-    # NSE%3AM%26M
+    # TRADINGVIEW
     # =====================================================
 
     chart_symbol = quote(
@@ -977,70 +1454,63 @@ for _, latest_row in top200.iterrows():
         latest_row[turnover_col],
 
         # D
-        today["open"],
+        round(close, 2),
 
         # E
-        today["high"],
+        round(ema20, 2),
 
         # F
-        today["low"],
+        round(ema50, 2),
 
         # G
-        today["close"],
+        round(rsi, 2),
 
         # H
-        today_range,
+        round(volume_ratio, 2),
 
         # I
-        previous["high"],
+        round(previous_10_high, 2),
 
         # J
-        previous["low"],
+        round(entry_level, 2),
 
         # K
-        previous_range,
+        round(entry, 2),
 
         # L
-        round(
-            today_change_pct,
-            2
-        ),
+        round(stop_loss, 2),
 
         # M
-        "YES"
-        if inside_bar
-        else "NO",
+        round(target_1, 2),
 
         # N
-        "YES"
-        if nr4
-        else "NO",
+        round(target_2, 2),
 
         # O
-        "YES"
-        if nr7
-        else "NO",
+        round(risk_pct, 2),
 
         # P
-        setup_text,
+        round(today_change_pct, 2),
 
         # Q
-        setup_high,
+        setup,
 
         # R
-        setup_low,
+        score,
 
         # S
-        "YES"
-        if breakout_above
-        else "NO",
+        round(consolidation_range_pct, 2),
 
         # T
-        "YES"
-        if breakdown_below
-        else "NO",
+        round(volume_ratio, 2),
 
         # U
+        round(atr, 2),
+
+        # V
+        breakout_date,
+
+        # W
         chart_formula
 
     ])
@@ -1051,32 +1521,24 @@ for _, latest_row in top200.iterrows():
 # =========================================================
 #
 # Priority:
-#   1. NR7
-#   2. NR4
-#   3. Inside Bar
-#   4. Turnover rank
 #
-# More compressed setups get higher priority.
+#   RETEST + HOLD
+#   FRESH BREAKOUT
+#   BREAKOUT WATCH
+#
+# Then score.
 # =========================================================
 
-def setup_priority(row):
+def setup_priority(setup):
 
-    setup_text = str(
-        row[15]
-    )
-
-
-    if "NR7" in setup_text:
+    if setup == "RETEST + HOLD":
         return 3
 
-
-    if "NR4" in setup_text:
+    if setup == "FRESH BREAKOUT":
         return 2
 
-
-    if "INSIDE BAR" in setup_text:
+    if setup == "BREAKOUT WATCH":
         return 1
-
 
     return 0
 
@@ -1085,7 +1547,11 @@ final_rows.sort(
 
     key=lambda row: (
 
-        setup_priority(row),
+        setup_priority(
+            row[16]
+        ),
+
+        int(row[17]),
 
         -int(row[1])
 
@@ -1097,7 +1563,7 @@ final_rows.sort(
 
 
 # =========================================================
-# FINAL LIST HEADERS
+# HEADERS
 # =========================================================
 
 final_headers = [
@@ -1108,39 +1574,43 @@ final_headers = [
 
     "Turnover",
 
-    "Today Open",
+    "Close",
 
-    "Today High",
+    "EMA 20",
 
-    "Today Low",
+    "EMA 50",
 
-    "Today Close",
+    "RSI 14",
 
-    "Today Range",
+    "Volume x Avg",
 
-    "Previous High",
+    "10-Day High",
 
-    "Previous Low",
+    "Breakout Level",
 
-    "Previous Range",
+    "Entry",
+
+    "Stop Loss",
+
+    "Target 1",
+
+    "Target 2",
+
+    "Risk %",
 
     "Today Change %",
 
-    "Inside Bar?",
-
-    "NR4?",
-
-    "NR7?",
-
     "Setup",
 
-    "Setup High",
+    "Strength Score",
 
-    "Setup Low",
+    "10-Day Range %",
 
-    "Breakout Above?",
+    "Volume Ratio",
 
-    "Breakdown Below?",
+    "ATR 14",
+
+    "Breakout Date",
 
     "Chart"
 
@@ -1171,7 +1641,7 @@ safe_update(
 
     sheet_final,
 
-    "A1:U1",
+    "A1:W1",
 
     [final_headers],
 
@@ -1196,7 +1666,7 @@ if final_rows:
 
 
 # =========================================================
-# WRITE SIMPLE NIFTY200 DATA
+# WRITE NIFTY200
 # =========================================================
 
 nifty_headers = [
@@ -1268,15 +1738,11 @@ if nifty_rows:
 
 try:
 
-    # -----------------------------------------------------
-    # HEADER
-    # -----------------------------------------------------
-
     safe_format(
 
         sheet_final,
 
-        "A1:U1",
+        "A1:W1",
 
         {
 
@@ -1288,20 +1754,19 @@ try:
 
             },
 
-            "horizontalAlignment": "CENTER",
+            "horizontalAlignment":
+                "CENTER",
 
-            "verticalAlignment": "MIDDLE",
+            "verticalAlignment":
+                "MIDDLE",
 
-            "wrapStrategy": "WRAP"
+            "wrapStrategy":
+                "WRAP"
 
         }
 
     )
 
-
-    # -----------------------------------------------------
-    # DATA
-    # -----------------------------------------------------
 
     if final_rows:
 
@@ -1315,7 +1780,7 @@ try:
 
             sheet_final,
 
-            f"A2:U{last_row}",
+            f"A2:W{last_row}",
 
             {
 
@@ -1331,10 +1796,6 @@ try:
 
         )
 
-
-    # -----------------------------------------------------
-    # FREEZE HEADER
-    # -----------------------------------------------------
 
     sheet_final.freeze(
         rows=1
@@ -1352,35 +1813,14 @@ except Exception as e:
 # SUMMARY
 # =========================================================
 
-inside_count = sum(
+retest_count = sum(
 
     1
 
     for row in final_rows
 
-    if row[12] == "YES"
-
-)
-
-
-nr4_count = sum(
-
-    1
-
-    for row in final_rows
-
-    if row[13] == "YES"
-
-)
-
-
-nr7_count = sum(
-
-    1
-
-    for row in final_rows
-
-    if row[14] == "YES"
+    if row[16]
+    == "RETEST + HOLD"
 
 )
 
@@ -1391,18 +1831,20 @@ breakout_count = sum(
 
     for row in final_rows
 
-    if row[18] == "YES"
+    if row[16]
+    == "FRESH BREAKOUT"
 
 )
 
 
-breakdown_count = sum(
+watch_count = sum(
 
     1
 
     for row in final_rows
 
-    if row[19] == "YES"
+    if row[16]
+    == "BREAKOUT WATCH"
 
 )
 
@@ -1412,7 +1854,7 @@ print(
 )
 
 print(
-    "DAILY INSIDE BAR + NR4 + NR7 SCREENER"
+    "NIFTY 200 SWING SNIPER V1"
 )
 
 print(
@@ -1438,36 +1880,22 @@ print(
 
 print(
 
-    f"Inside Bar: "
-    f"{inside_count}"
+    f"Retest + Hold: "
+    f"{retest_count}"
 
 )
 
 print(
 
-    f"NR4: "
-    f"{nr4_count}"
-
-)
-
-print(
-
-    f"NR7: "
-    f"{nr7_count}"
-
-)
-
-print(
-
-    f"Breakout Above: "
+    f"Fresh Breakout: "
     f"{breakout_count}"
 
 )
 
 print(
 
-    f"Breakdown Below: "
-    f"{breakdown_count}"
+    f"Breakout Watch: "
+    f"{watch_count}"
 
 )
 
@@ -1483,27 +1911,31 @@ print(
 )
 
 print(
-    "BB / RSI / MACD / EMA / PATTERN LOGIC: REMOVED"
+    "TREND: EMA20 > EMA50 + CLOSE > EMA20"
 )
 
 print(
-    "SETUPS: INSIDE BAR / NR4 / NR7"
+    "BREAKOUT: DAILY CLOSE > PREVIOUS 10-DAY HIGH"
 )
 
 print(
-    "SETUP HIGH/LOW: PREVIOUS CANDLE"
+    "VOLUME: >= 1.5X 20-DAY AVERAGE"
 )
 
 print(
-    "BREAKOUT: TODAY HIGH > SETUP HIGH"
+    "RSI: 55–70"
 )
 
 print(
-    "BREAKDOWN: TODAY LOW < SETUP LOW"
+    "RETEST: BREAKOUT LEVEL RECLAIM + HOLD"
 )
 
 print(
-    "CHART: CLICKABLE TRADINGVIEW DAILY CHART"
+    "TARGETS: 1.5R / 3R"
+)
+
+print(
+    "NR4 / NR7 / INSIDE BAR: REMOVED"
 )
 
 print(
