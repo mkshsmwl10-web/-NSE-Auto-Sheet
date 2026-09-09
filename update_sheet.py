@@ -1,16 +1,3 @@
-import os
-import io
-import json
-import zipfile
-import time
-import requests
-import gspread
-import pandas as pd
-import numpy as np
-
-from datetime import datetime, timedelta
-from urllib.parse import quote
-from oauth2client.service_account import ServiceAccountCredentials
 # ============================================================
 # NIFTY 200 SWING SNIPER V2.1.1
 # ============================================================
