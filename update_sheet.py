@@ -1,38 +1,31 @@
-# =========================================================
+# ============================================================
 # NIFTY 200 POSITIVE DIVERGENCE SCANNER V1.0
-# =========================================================
+# ============================================================
+#
 # FINAL LIST:
 #   1. RSI POSITIVE DIVERGENCE
 #   2. CLASSIC POSITIVE DIVERGENCE
 #
-# DATA:
-#   - NIFTY200 sheet = universe + turnover
-#   - Yahoo Finance = 1 year daily OHLCV
+# OLD BREAKOUT / RETEST LOGIC REMOVED
 #
-# IMPORTANT:
-#   - Completed daily candles only
-#   - No intraday signal
-#   - Old breakout/retest logic removed
-#   - Final List rewritten completely every run
-# =========================================================
-
-import os
-import json
-import warnings
-from datetime import datetime
+# DATA:
+#   - NIFTY200 Google Sheet
+#   - Yahoo Finance daily OHLCV
+#
+# ============================================================
 
 import gspread
 import numpy as np
 import pandas as pd
 import yfinance as yf
+
 from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime, timedelta
 
-warnings.filterwarnings("ignore")
 
-
-# =========================================================
+# ============================================================
 # SETTINGS
-# =========================================================
+# ============================================================
 
 SPREADSHEET_ID = "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E"
 
@@ -46,18 +39,18 @@ RSI_LENGTH = 14
 ATR_LENGTH = 14
 VOLUME_LENGTH = 20
 
-# Swing detection
+# Swing low detection
 SWING_LEFT = 3
 SWING_RIGHT = 3
 
-# Divergence quality
+# Divergence filters
 MIN_PRICE_LOWER_LOW_PCT = 0.50
 MIN_RSI_HIGHER_LOW = 2.0
 
 # Maximum distance between two swing lows
 MAX_SWING_GAP = 60
 
-# Signal should not be too old
+# Signal freshness
 MAX_SIGNAL_AGE = 15
 
 # Volume
@@ -66,249 +59,524 @@ MIN_VOLUME_RATIO = 0.80
 # Risk
 MAX_RISK_PCT = 7.0
 
+# Targets
 TARGET1_R = 1.5
 TARGET2_R = 3.0
 
+# Maximum stocks in Final List
 MAX_FINAL_STOCKS = 30
 
 
-# =========================================================
-# FINAL LIST COLUMNS
-# =========================================================
+# ============================================================
+# OUTPUT COLUMNS
+# ============================================================
 
 OUTPUT_COLUMNS = [
-
     "NSE Code",
     "Turnover Rank",
     "Turnover",
-
     "Close",
     "Today Change %",
-
     "Setup",
     "Divergence Strength",
     "Strength Score",
-
     "Price Low 1",
     "Price Low 2",
-
     "RSI Low 1",
     "RSI Low 2",
     "RSI14",
     "RSI Improvement %",
-
     "Volume Ratio",
-
     "EMA20",
     "EMA50",
     "ATR14",
-
     "Support",
-
     "Entry",
     "Stop Loss",
     "Target 1",
     "Target 2",
     "Risk %",
-
     "Signal Date",
     "Days Since Signal",
-
     "Chart",
-
 ]
 
 
-# =========================================================
-# EXCLUDED SYMBOLS
-# =========================================================
+# ============================================================
+# GOOGLE AUTH
+# ============================================================
 
-EXCLUDE_WORDS = [
-    "ETF",
-    "BEES",
-    "GOLD",
-    "LIQUID",
-    "SILVER",
-    "INDEX",
-]
+def connect_google_sheet():
 
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
 
-# =========================================================
-# GOOGLE CREDENTIALS
-# =========================================================
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Apni existing credentials JSON ka naam/path yahan rakho
+    # --------------------------------------------------------
 
-def get_credentials():
-
-    secret = os.getenv("GCP_CREDENTIALS")
-
-    if secret:
-
-        try:
-
-            info = json.loads(secret)
-
-            return ServiceAccountCredentials.from_json_keyfile_dict(
-                info,
-                [
-                    "https://spreadsheets.google.com/feeds",
-                    "https://www.googleapis.com/auth/drive",
-                ],
-            )
-
-        except Exception as e:
-
-            raise RuntimeError(
-                f"GCP_CREDENTIALS is invalid JSON: {e}"
-            )
-
-    local_file = "credentials.json"
-
-    if os.path.exists(local_file):
-
-        return ServiceAccountCredentials.from_json_keyfile_name(
-            local_file,
-            [
-                "https://spreadsheets.google.com/feeds",
-                "https://www.googleapis.com/auth/drive",
-            ],
-        )
-
-    raise FileNotFoundError(
-        "GCP_CREDENTIALS secret not found and credentials.json is missing."
+    creds = ServiceAccountCredentials.from_json_keyfile_name(
+        "credentials.json",
+        scope
     )
 
+    client = gspread.authorize(creds)
 
-# =========================================================
-# HELPERS
-# =========================================================
+    sh = client.open_by_key(SPREADSHEET_ID)
 
-def clean_symbol(value):
-
-    s = str(value).strip().upper()
-
-    for suffix in [".NS", ".NSE"]:
-
-        if s.endswith(suffix):
-
-            s = s[:-len(suffix)]
-
-    return s
+    return sh
 
 
-def is_allowed_symbol(symbol):
-
-    s = symbol.upper()
-
-    return not any(
-        word in s
-        for word in EXCLUDE_WORDS
-    )
-
-
-def to_float(value, default=np.nan):
-
-    try:
-
-        if value is None or value == "":
-
-            return default
-
-        return float(
-            str(value)
-            .replace(",", "")
-            .strip()
-        )
-
-    except Exception:
-
-        return default
-
-
-# =========================================================
+# ============================================================
 # RSI
-# =========================================================
+# ============================================================
 
-def rsi(series, length=14):
+def calculate_rsi(series, period=14):
 
     delta = series.diff()
 
     gain = delta.clip(lower=0)
-
     loss = -delta.clip(upper=0)
 
     avg_gain = gain.ewm(
-        alpha=1 / length,
-        adjust=False,
-        min_periods=length
+        alpha=1 / period,
+        min_periods=period,
+        adjust=False
     ).mean()
 
     avg_loss = loss.ewm(
-        alpha=1 / length,
-        adjust=False,
-        min_periods=length
+        alpha=1 / period,
+        min_periods=period,
+        adjust=False
     ).mean()
 
-    rs = (
-        avg_gain /
-        avg_loss.replace(0, np.nan)
-    )
+    rs = avg_gain / avg_loss.replace(0, np.nan)
 
-    result = 100 - (
-        100 / (1 + rs)
-    )
+    rsi = 100 - (100 / (1 + rs))
 
-    return result.fillna(50)
+    return rsi
 
 
-# =========================================================
+# ============================================================
 # ATR
-# =========================================================
+# ============================================================
 
-def atr(df, length=14):
+def calculate_atr(df, period=14):
 
-    prev_close = df["Close"].shift(1)
+    high = df["High"]
+    low = df["Low"]
+    close = df["Close"]
 
-    tr1 = df["High"] - df["Low"]
+    prev_close = close.shift(1)
 
-    tr2 = (
-        df["High"] -
-        prev_close
-    ).abs()
-
-    tr3 = (
-        df["Low"] -
-        prev_close
-    ).abs()
+    tr1 = high - low
+    tr2 = (high - prev_close).abs()
+    tr3 = (low - prev_close).abs()
 
     true_range = pd.concat(
         [tr1, tr2, tr3],
         axis=1
     ).max(axis=1)
 
-    return true_range.ewm(
-        alpha=1 / length,
-        adjust=False,
-        min_periods=length
+    atr = true_range.ewm(
+        alpha=1 / period,
+        min_periods=period,
+        adjust=False
     ).mean()
 
+    return atr
 
-# =========================================================
-# PREPARE HISTORY
-# =========================================================
 
-def prepare_history(hist):
+# ============================================================
+# SWING LOW DETECTION
+# ============================================================
 
-    hist = hist.copy()
+def find_swing_lows(series, left=3, right=3):
 
-    if isinstance(
-        hist.columns,
-        pd.MultiIndex
+    swing_lows = []
+
+    values = series.values
+
+    for i in range(left, len(series) - right):
+
+        current = values[i]
+
+        left_values = values[i-left:i]
+        right_values = values[i+1:i+right+1]
+
+        if (
+            current < np.min(left_values)
+            and
+            current <= np.min(right_values)
+        ):
+            swing_lows.append(i)
+
+    return swing_lows
+
+
+# ============================================================
+# GET DIVERGENCE
+# ============================================================
+
+def detect_positive_divergence(df):
+
+    if len(df) < 100:
+        return None
+
+    swing_lows = find_swing_lows(
+        df["Low"],
+        SWING_LEFT,
+        SWING_RIGHT
+    )
+
+    if len(swing_lows) < 2:
+        return None
+
+    # Search latest valid pair first
+    for x in range(len(swing_lows) - 1, 0, -1):
+
+        i2 = swing_lows[x]
+
+        for y in range(x - 1, -1, -1):
+
+            i1 = swing_lows[y]
+
+            gap = i2 - i1
+
+            if gap <= 0:
+                continue
+
+            if gap > MAX_SWING_GAP:
+                break
+
+            price1 = float(df["Low"].iloc[i1])
+            price2 = float(df["Low"].iloc[i2])
+
+            rsi1 = float(df["RSI"].iloc[i1])
+            rsi2 = float(df["RSI"].iloc[i2])
+
+            if np.isnan(rsi1) or np.isnan(rsi2):
+                continue
+
+            # Price must make lower low
+            price_lower_low_pct = (
+                (price1 - price2) / price1
+            ) * 100
+
+            # RSI must make higher low
+            rsi_improvement = rsi2 - rsi1
+
+            if price_lower_low_pct < MIN_PRICE_LOWER_LOW_PCT:
+                continue
+
+            if rsi_improvement < MIN_RSI_HIGHER_LOW:
+                continue
+
+            return {
+                "i1": i1,
+                "i2": i2,
+                "price1": price1,
+                "price2": price2,
+                "rsi1": rsi1,
+                "rsi2": rsi2,
+                "price_lower_low_pct": price_lower_low_pct,
+                "rsi_improvement": rsi_improvement,
+                "date1": df.index[i1],
+                "date2": df.index[i2],
+            }
+
+    return None
+
+
+# ============================================================
+# DIVERGENCE STRENGTH
+# ============================================================
+
+def get_divergence_strength(
+    price_lower_low_pct,
+    rsi_improvement
+):
+
+    if (
+        price_lower_low_pct >= 3
+        and
+        rsi_improvement >= 8
     ):
+        return "VERY STRONG"
 
-        hist.columns = (
-            hist.columns
-            .get_level_values(0)
+    if (
+        price_lower_low_pct >= 2
+        and
+        rsi_improvement >= 5
+    ):
+        return "STRONG"
+
+    if (
+        price_lower_low_pct >= 1
+        and
+        rsi_improvement >= 3
+    ):
+        return "GOOD"
+
+    return "MEDIUM"
+
+
+# ============================================================
+# SCORE
+# ============================================================
+
+def calculate_score(
+    price_lower_low_pct,
+    rsi_improvement,
+    current_rsi,
+    volume_ratio,
+    close,
+    ema20,
+    ema50,
+    days_since_signal
+):
+
+    score = 0
+
+    # --------------------------------------------------------
+    # RSI improvement
+    # --------------------------------------------------------
+
+    if rsi_improvement >= 10:
+        score += 25
+
+    elif rsi_improvement >= 7:
+        score += 20
+
+    elif rsi_improvement >= 5:
+        score += 15
+
+    elif rsi_improvement >= 3:
+        score += 10
+
+    else:
+        score += 5
+
+    # --------------------------------------------------------
+    # Price lower low
+    # --------------------------------------------------------
+
+    if price_lower_low_pct >= 5:
+        score += 20
+
+    elif price_lower_low_pct >= 3:
+        score += 15
+
+    elif price_lower_low_pct >= 2:
+        score += 12
+
+    elif price_lower_low_pct >= 1:
+        score += 8
+
+    else:
+        score += 5
+
+    # --------------------------------------------------------
+    # Current RSI
+    # --------------------------------------------------------
+
+    if 35 <= current_rsi <= 50:
+        score += 15
+
+    elif 30 <= current_rsi < 35:
+        score += 12
+
+    elif 50 < current_rsi <= 60:
+        score += 10
+
+    else:
+        score += 5
+
+    # --------------------------------------------------------
+    # Volume
+    # --------------------------------------------------------
+
+    if volume_ratio >= 1.5:
+        score += 15
+
+    elif volume_ratio >= 1.2:
+        score += 12
+
+    elif volume_ratio >= 1:
+        score += 9
+
+    elif volume_ratio >= 0.8:
+        score += 6
+
+    else:
+        score += 2
+
+    # --------------------------------------------------------
+    # Trend
+    # --------------------------------------------------------
+
+    if close > ema20 and ema20 > ema50:
+        score += 15
+
+    elif close > ema20:
+        score += 10
+
+    elif close > ema50:
+        score += 7
+
+    else:
+        score += 3
+
+    # --------------------------------------------------------
+    # Freshness
+    # --------------------------------------------------------
+
+    if days_since_signal <= 3:
+        score += 10
+
+    elif days_since_signal <= 7:
+        score += 8
+
+    elif days_since_signal <= 10:
+        score += 6
+
+    else:
+        score += 3
+
+    return min(score, 100)
+
+
+# ============================================================
+# LOAD NIFTY200
+# ============================================================
+
+def load_nifty200(sh):
+
+    ws = sh.worksheet(NIFTY_SHEET)
+
+    data = ws.get_all_records()
+
+    df = pd.DataFrame(data)
+
+    if df.empty:
+        raise ValueError("NIFTY200 sheet is empty.")
+
+    # --------------------------------------------------------
+    # Find NSE Code column
+    # --------------------------------------------------------
+
+    possible_code_columns = [
+        "NSE Code",
+        "Symbol",
+        "SYMBOL",
+        "Code",
+        "Ticker"
+    ]
+
+    code_column = None
+
+    for col in possible_code_columns:
+
+        if col in df.columns:
+            code_column = col
+            break
+
+    if code_column is None:
+        raise ValueError(
+            "NSE Code/Symbol column not found in NIFTY200 sheet."
         )
+
+    df["NSE Code"] = (
+        df[code_column]
+        .astype(str)
+        .str.strip()
+        .str.upper()
+    )
+
+    # --------------------------------------------------------
+    # Turnover
+    # --------------------------------------------------------
+
+    if "Turnover" in df.columns:
+
+        df["Turnover"] = pd.to_numeric(
+            df["Turnover"],
+            errors="coerce"
+        ).fillna(0)
+
+    else:
+
+        df["Turnover"] = 0
+
+    df = df[
+        df["NSE Code"].notna()
+        &
+        (df["NSE Code"] != "")
+    ]
+
+    # --------------------------------------------------------
+    # Turnover Rank
+    # --------------------------------------------------------
+
+    df["Turnover Rank"] = (
+        df["Turnover"]
+        .rank(
+            ascending=False,
+            method="min"
+        )
+        .astype(int)
+    )
+
+    return df[
+        [
+            "NSE Code",
+            "Turnover Rank",
+            "Turnover"
+        ]
+    ].drop_duplicates(
+        subset=["NSE Code"]
+    )
+
+
+# ============================================================
+# DOWNLOAD STOCK DATA
+# ============================================================
+
+def download_stock_data(symbol):
+
+    ticker = symbol + ".NS"
+
+    try:
+
+        df = yf.download(
+            ticker,
+            period=HISTORY_PERIOD,
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+            threads=False
+        )
+
+    except Exception:
+
+        return None
+
+    if df is None or df.empty:
+        return None
+
+    # --------------------------------------------------------
+    # Handle Yahoo multi-index
+    # --------------------------------------------------------
+
+    if isinstance(df.columns, pd.MultiIndex):
+
+        try:
+            df.columns = df.columns.get_level_values(0)
+        except Exception:
+            return None
 
     required = [
         "Open",
@@ -318,1522 +586,982 @@ def prepare_history(hist):
         "Volume"
     ]
 
-    missing = [
-        c for c in required
-        if c not in hist.columns
-    ]
+    for col in required:
 
-    if missing:
+        if col not in df.columns:
+            return None
 
-        raise ValueError(
-            f"Missing history columns: {missing}"
-        )
+    df = df[required].copy()
 
-    hist = hist[
-        required
-    ].copy()
+    # --------------------------------------------------------
+    # Convert numeric
+    # --------------------------------------------------------
 
     for col in required:
 
-        hist[col] = pd.to_numeric(
-            hist[col],
+        df[col] = pd.to_numeric(
+            df[col],
             errors="coerce"
         )
 
-    hist = hist.dropna(
-        subset=[
-            "High",
-            "Low",
-            "Close"
-        ]
-    ).copy()
+    df = df.dropna()
 
-    if len(hist) < MIN_HISTORY_ROWS:
-
+    if len(df) < MIN_HISTORY_ROWS:
         return None
 
-    # Indicators
-    hist["EMA20"] = (
-        hist["Close"]
-        .ewm(
-            span=20,
-            adjust=False,
-            min_periods=20
-        )
-        .mean()
-    )
+    return df
 
-    hist["EMA50"] = (
-        hist["Close"]
-        .ewm(
-            span=50,
-            adjust=False,
-            min_periods=50
-        )
-        .mean()
-    )
 
-    hist["RSI14"] = rsi(
-        hist["Close"],
-        RSI_LENGTH
-    )
-
-    hist["ATR14"] = atr(
-        hist,
-        ATR_LENGTH
-    )
-
-    hist["AvgVolume20"] = (
-        hist["Volume"]
-        .rolling(
-            VOLUME_LENGTH,
-            min_periods=VOLUME_LENGTH
-        )
-        .mean()
-    )
-
-    hist["VolumeRatio"] = (
-        hist["Volume"] /
-        hist["AvgVolume20"]
-        .replace(0, np.nan)
-    )
-
-    hist["DailyChangePct"] = (
-        hist["Close"].pct_change() * 100
-    )
-
-    return hist.dropna(
-        subset=[
-            "EMA20",
-            "EMA50",
-            "RSI14",
-            "ATR14"
-        ]
-    )
-
-
-# =========================================================
-# SWING LOW DETECTION
-# =========================================================
-
-def find_swing_lows(series, left=3, right=3):
-
-    values = series.values
-
-    swing_indices = []
-
-    for i in range(
-        left,
-        len(values) - right
-    ):
-
-        left_values = values[
-            i-left:i
-        ]
-
-        right_values = values[
-            i+1:i+right+1
-        ]
-
-        current = values[i]
-
-        if (
-            current <= left_values.min()
-            and
-            current <= right_values.min()
-        ):
-
-            swing_indices.append(i)
-
-    return swing_indices
-
-
-# =========================================================
-# FIND DIVERGENCE
-# =========================================================
-
-def find_divergence(hist):
-
-    lows = find_swing_lows(
-        hist["Low"],
-        SWING_LEFT,
-        SWING_RIGHT
-    )
-
-    if len(lows) < 2:
-
-        return None
-
-    latest_index = len(hist) - 1
-
-    # Only use swings that are confirmed
-    confirmed_lows = [
-        i for i in lows
-        if i + SWING_RIGHT <= latest_index
-    ]
-
-    if len(confirmed_lows) < 2:
-
-        return None
-
-    # Search newest valid pair first
-    for j in range(
-        len(confirmed_lows) - 1,
-        0,
-        -1
-    ):
-
-        i2 = confirmed_lows[j]
-        i1 = confirmed_lows[j - 1]
-
-        gap = i2 - i1
-
-        if gap > MAX_SWING_GAP:
-
-            continue
-
-        price1 = float(
-            hist["Low"].iloc[i1]
-        )
-
-        price2 = float(
-            hist["Low"].iloc[i2]
-        )
-
-        rsi1 = float(
-            hist["RSI14"].iloc[i1]
-        )
-
-        rsi2 = float(
-            hist["RSI14"].iloc[i2]
-        )
-
-        if not all(
-            np.isfinite(x)
-            for x in [
-                price1,
-                price2,
-                rsi1,
-                rsi2
-            ]
-        ):
-
-            continue
-
-        price_lower_low_pct = (
-            (price1 - price2)
-            / price1
-        ) * 100
-
-        rsi_improvement = rsi2 - rsi1
-
-        # Price must make lower low
-        if price_lower_low_pct < MIN_PRICE_LOWER_LOW_PCT:
-
-            continue
-
-        # RSI must make higher low
-        if rsi_improvement < MIN_RSI_HIGHER_LOW:
-
-            continue
-
-        # Signal age
-        signal_age = (
-            latest_index - i2
-        )
-
-        if signal_age > MAX_SIGNAL_AGE:
-
-            continue
-
-        signal_date = hist.index[i2]
-
-        return {
-            "i1": i1,
-            "i2": i2,
-            "price1": price1,
-            "price2": price2,
-            "rsi1": rsi1,
-            "rsi2": rsi2,
-            "rsi_improvement": rsi_improvement,
-            "price_lower_low_pct": price_lower_low_pct,
-            "signal_date": signal_date,
-            "signal_age": signal_age,
-        }
-
-    return None
-
-
-# =========================================================
-# CLASSIC DIVERGENCE QUALITY
-# =========================================================
-
-def classify_divergence(div):
-
-    rsi_imp = div["rsi_improvement"]
-
-    price_drop = div[
-        "price_lower_low_pct"
-    ]
-
-    if (
-        rsi_imp >= 8
-        and price_drop >= 2
-    ):
-
-        return "STRONG"
-
-    if (
-        rsi_imp >= 5
-        and price_drop >= 1
-    ):
-
-        return "GOOD"
-
-    return "MEDIUM"
-
-
-# =========================================================
-# SCORE
-# =========================================================
-
-def calculate_score(
-    latest,
-    div
-):
-
-    score = 0
-
-    # -----------------------------------------
-    # RSI divergence strength
-    # -----------------------------------------
-
-    rsi_imp = div[
-        "rsi_improvement"
-    ]
-
-    if rsi_imp >= 10:
-
-        score += 30
-
-    elif rsi_imp >= 7:
-
-        score += 25
-
-    elif rsi_imp >= 5:
-
-        score += 20
-
-    else:
-
-        score += 15
-
-    # -----------------------------------------
-    # Price lower low
-    # -----------------------------------------
-
-    price_drop = div[
-        "price_lower_low_pct"
-    ]
-
-    if price_drop >= 5:
-
-        score += 20
-
-    elif price_drop >= 3:
-
-        score += 15
-
-    elif price_drop >= 1:
-
-        score += 10
-
-    else:
-
-        score += 5
-
-    # -----------------------------------------
-    # Current RSI
-    # -----------------------------------------
-
-    current_rsi = float(
-        latest["RSI14"]
-    )
-
-    if 30 <= current_rsi <= 45:
-
-        score += 15
-
-    elif 45 < current_rsi <= 55:
-
-        score += 12
-
-    elif current_rsi < 30:
-
-        score += 10
-
-    else:
-
-        score += 5
-
-    # -----------------------------------------
-    # Volume
-    # -----------------------------------------
-
-    volume_ratio = float(
-        latest["VolumeRatio"]
-    )
-
-    if volume_ratio >= 1.5:
-
-        score += 15
-
-    elif volume_ratio >= 1.0:
-
-        score += 10
-
-    elif volume_ratio >= 0.8:
-
-        score += 5
-
-    # -----------------------------------------
-    # Trend improvement
-    # -----------------------------------------
-
-    if latest["Close"] > latest["EMA20"]:
-
-        score += 5
-
-    if latest["EMA20"] > latest["EMA50"]:
-
-        score += 5
-
-    # -----------------------------------------
-    # Freshness
-    # -----------------------------------------
-
-    age = div["signal_age"]
-
-    if age <= 3:
-
-        score += 5
-
-    elif age <= 7:
-
-        score += 3
-
-    return int(
-        min(score, 100)
-    )
-
-
-# =========================================================
-# TRADE LEVELS
-# =========================================================
-
-def calculate_levels(
-    hist,
-    div
-):
-
-    latest = hist.iloc[-1]
-
-    close = float(
-        latest["Close"]
-    )
-
-    atr14 = float(
-        latest["ATR14"]
-    )
-
-    # Recent structural support
-    support = float(
-        min(
-            div["price2"],
-            hist["Low"].tail(10).min()
-        )
-    )
-
-    # Entry = close confirmation
-    entry = close
-
-    # ATR + structure stop
-    atr_stop = (
-        entry -
-        1.5 * atr14
-    )
-
-    structure_stop = (
-        support * 0.995
-    )
-
-    stop = max(
-        atr_stop,
-        structure_stop
-    )
-
-    risk_points = (
-        entry - stop
-    )
-
-    if risk_points <= 0:
-
-        return None
-
-    risk_pct = (
-        risk_points /
-        entry
-    ) * 100
-
-    if risk_pct > MAX_RISK_PCT:
-
-        return None
-
-    target1 = (
-        entry +
-        TARGET1_R * risk_points
-    )
-
-    target2 = (
-        entry +
-        TARGET2_R * risk_points
-    )
-
-    return {
-        "support": support,
-        "entry": entry,
-        "stop": stop,
-        "target1": target1,
-        "target2": target2,
-        "risk_pct": risk_pct,
-    }
-
-
-# =========================================================
+# ============================================================
 # ANALYZE STOCK
-# =========================================================
+# ============================================================
 
 def analyze_stock(
     symbol,
-    hist,
     turnover_rank,
     turnover
 ):
 
-    latest = hist.iloc[-1]
+    df = download_stock_data(symbol)
 
-    close = float(
-        latest["Close"]
-    )
-
-    if not np.isfinite(close):
-
+    if df is None:
         return None
 
-    # -----------------------------------------
+    # --------------------------------------------------------
+    # Indicators
+    # --------------------------------------------------------
+
+    df["RSI"] = calculate_rsi(
+        df["Close"],
+        RSI_LENGTH
+    )
+
+    df["ATR"] = calculate_atr(
+        df,
+        ATR_LENGTH
+    )
+
+    df["EMA20"] = (
+        df["Close"]
+        .ewm(
+            span=20,
+            adjust=False
+        )
+        .mean()
+    )
+
+    df["EMA50"] = (
+        df["Close"]
+        .ewm(
+            span=50,
+            adjust=False
+        )
+        .mean()
+    )
+
+    df["AvgVolume"] = (
+        df["Volume"]
+        .rolling(VOLUME_LENGTH)
+        .mean()
+    )
+
+    df["VolumeRatio"] = (
+        df["Volume"] /
+        df["AvgVolume"]
+    )
+
+    # --------------------------------------------------------
     # Divergence
-    # -----------------------------------------
+    # --------------------------------------------------------
 
-    div = find_divergence(hist)
+    divergence = detect_positive_divergence(df)
 
-    if div is None:
-
+    if divergence is None:
         return None
 
-    # -----------------------------------------
+    # --------------------------------------------------------
+    # Latest data
+    # --------------------------------------------------------
+
+    last = df.iloc[-1]
+
+    close = float(last["Close"])
+    current_rsi = float(last["RSI"])
+    atr = float(last["ATR"])
+    ema20 = float(last["EMA20"])
+    ema50 = float(last["EMA50"])
+    volume_ratio = float(last["VolumeRatio"])
+
+    if np.isnan(current_rsi):
+        return None
+
+    if np.isnan(atr) or atr <= 0:
+        return None
+
+    if np.isnan(volume_ratio):
+        volume_ratio = 0
+
+    # --------------------------------------------------------
+    # Signal age
+    # --------------------------------------------------------
+
+    signal_date = pd.Timestamp(
+        divergence["date2"]
+    )
+
+    latest_date = pd.Timestamp(
+        df.index[-1]
+    )
+
+    days_since_signal = (
+        latest_date - signal_date
+    ).days
+
+    if days_since_signal > MAX_SIGNAL_AGE:
+        return None
+
+    if days_since_signal < 0:
+        return None
+
+    # --------------------------------------------------------
     # Volume filter
-    # -----------------------------------------
+    # --------------------------------------------------------
 
-    volume_ratio = float(
-        latest["VolumeRatio"]
-    )
-
-    if (
-        not np.isfinite(volume_ratio)
-        or
-        volume_ratio < MIN_VOLUME_RATIO
-    ):
-
+    if volume_ratio < MIN_VOLUME_RATIO:
         return None
 
-    # -----------------------------------------
-    # Divergence classification
-    # -----------------------------------------
+    # --------------------------------------------------------
+    # Divergence metrics
+    # --------------------------------------------------------
 
-    strength = classify_divergence(
-        div
+    price_lower_low_pct = (
+        divergence["price_lower_low_pct"]
     )
 
-    score = calculate_score(
-        latest,
-        div
+    rsi_improvement = (
+        divergence["rsi_improvement"]
     )
 
-    # -----------------------------------------
+    # --------------------------------------------------------
     # Setup classification
-    # -----------------------------------------
-
-    # RSI positive divergence:
-    # RSI itself is the confirming oscillator.
-
-    setup = "RSI POSITIVE DIVERGENCE"
-
-    # Classic positive divergence:
-    # stronger structural lower-low +
-    # meaningful RSI higher-low.
+    # --------------------------------------------------------
 
     if (
-        div["price_lower_low_pct"] >= 2
+        price_lower_low_pct >= 2
         and
-        div["rsi_improvement"] >= 5
+        rsi_improvement >= 5
     ):
 
         setup = "CLASSIC POSITIVE DIVERGENCE"
 
-    # -----------------------------------------
-    # Levels
-    # -----------------------------------------
+    else:
 
-    levels = calculate_levels(
-        hist,
-        div
+        setup = "RSI POSITIVE DIVERGENCE"
+
+    # --------------------------------------------------------
+    # Strength
+    # --------------------------------------------------------
+
+    strength = get_divergence_strength(
+        price_lower_low_pct,
+        rsi_improvement
     )
 
-    if levels is None:
+    # --------------------------------------------------------
+    # Score
+    # --------------------------------------------------------
 
+    score = calculate_score(
+        price_lower_low_pct,
+        rsi_improvement,
+        current_rsi,
+        volume_ratio,
+        close,
+        ema20,
+        ema50,
+        days_since_signal
+    )
+
+    # --------------------------------------------------------
+    # Support
+    # --------------------------------------------------------
+
+    recent_lows = (
+        df["Low"]
+        .tail(10)
+        .min()
+    )
+
+    divergence_support = min(
+        divergence["price1"],
+        divergence["price2"]
+    )
+
+    support = min(
+        float(recent_lows),
+        float(divergence_support)
+    )
+
+    # --------------------------------------------------------
+    # Entry
+    # --------------------------------------------------------
+
+    entry = close
+
+    # --------------------------------------------------------
+    # Stop loss
+    #
+    # ATR based + support based
+    # --------------------------------------------------------
+
+    atr_stop = entry - (1.5 * atr)
+
+    support_stop = support * 0.995
+
+    stop_loss = max(
+        atr_stop,
+        support_stop
+    )
+
+    # Make sure SL remains below entry
+    if stop_loss >= entry:
+
+        stop_loss = entry - atr
+
+    risk = entry - stop_loss
+
+    if risk <= 0:
         return None
 
-    # -----------------------------------------
-    # Chart
-    # -----------------------------------------
+    risk_pct = (
+        risk / entry
+    ) * 100
 
-    chart = (
+    # --------------------------------------------------------
+    # Maximum risk filter
+    # --------------------------------------------------------
+
+    if risk_pct > MAX_RISK_PCT:
+        return None
+
+    # --------------------------------------------------------
+    # Targets
+    # --------------------------------------------------------
+
+    target1 = entry + (
+        risk * TARGET1_R
+    )
+
+    target2 = entry + (
+        risk * TARGET2_R
+    )
+
+    # --------------------------------------------------------
+    # Today's change
+    # --------------------------------------------------------
+
+    if len(df) >= 2:
+
+        previous_close = float(
+            df["Close"].iloc[-2]
+        )
+
+        today_change = (
+            (close - previous_close)
+            /
+            previous_close
+        ) * 100
+
+    else:
+
+        today_change = 0
+
+    # --------------------------------------------------------
+    # Chart
+    # --------------------------------------------------------
+
+    chart_url = (
         "https://www.tradingview.com/chart/"
         "?symbol=NSE%3A"
         + symbol
     )
 
-    signal_date = pd.Timestamp(
-        div["signal_date"]
-    )
-
-    days_since = int(
-        div["signal_age"]
-    )
+    # --------------------------------------------------------
+    # Return
+    # --------------------------------------------------------
 
     return {
 
-        "NSE Code":
-            symbol,
+        "NSE Code": symbol,
 
-        "Turnover Rank":
-            int(turnover_rank),
+        "Turnover Rank": int(
+            turnover_rank
+        ),
 
-        "Turnover":
-            round(
-                float(turnover),
-                2
-            ),
+        "Turnover": float(
+            turnover
+        ),
 
-        "Close":
-            round(close, 2),
+        "Close": round(
+            close,
+            2
+        ),
 
-        "Today Change %":
-            round(
-                float(
-                    latest[
-                        "DailyChangePct"
-                    ]
-                ),
-                2
-            ),
+        "Today Change %": round(
+            today_change,
+            2
+        ),
 
-        "Setup":
-            setup,
+        "Setup": setup,
 
-        "Divergence Strength":
-            strength,
+        "Divergence Strength": strength,
 
-        "Strength Score":
+        "Strength Score": round(
             score,
+            2
+        ),
 
-        "Price Low 1":
-            round(
-                div["price1"],
-                2
-            ),
+        "Price Low 1": round(
+            divergence["price1"],
+            2
+        ),
 
-        "Price Low 2":
-            round(
-                div["price2"],
-                2
-            ),
+        "Price Low 2": round(
+            divergence["price2"],
+            2
+        ),
 
-        "RSI Low 1":
-            round(
-                div["rsi1"],
-                2
-            ),
+        "RSI Low 1": round(
+            divergence["rsi1"],
+            2
+        ),
 
-        "RSI Low 2":
-            round(
-                div["rsi2"],
-                2
-            ),
+        "RSI Low 2": round(
+            divergence["rsi2"],
+            2
+        ),
 
-        "RSI14":
-            round(
-                float(
-                    latest["RSI14"]
-                ),
-                2
-            ),
+        "RSI14": round(
+            current_rsi,
+            2
+        ),
 
-        "RSI Improvement %":
-            round(
-                div[
-                    "rsi_improvement"
-                ],
-                2
-            ),
+        "RSI Improvement %": round(
+            rsi_improvement,
+            2
+        ),
 
-        "Volume Ratio":
-            round(
-                volume_ratio,
-                2
-            ),
+        "Volume Ratio": round(
+            volume_ratio,
+            2
+        ),
 
-        "EMA20":
-            round(
-                float(
-                    latest["EMA20"]
-                ),
-                2
-            ),
+        "EMA20": round(
+            ema20,
+            2
+        ),
 
-        "EMA50":
-            round(
-                float(
-                    latest["EMA50"]
-                ),
-                2
-            ),
+        "EMA50": round(
+            ema50,
+            2
+        ),
 
-        "ATR14":
-            round(
-                float(
-                    latest["ATR14"]
-                ),
-                2
-            ),
+        "ATR14": round(
+            atr,
+            2
+        ),
 
-        "Support":
-            round(
-                levels["support"],
-                2
-            ),
+        "Support": round(
+            support,
+            2
+        ),
 
-        "Entry":
-            round(
-                levels["entry"],
-                2
-            ),
+        "Entry": round(
+            entry,
+            2
+        ),
 
-        "Stop Loss":
-            round(
-                levels["stop"],
-                2
-            ),
+        "Stop Loss": round(
+            stop_loss,
+            2
+        ),
 
-        "Target 1":
-            round(
-                levels["target1"],
-                2
-            ),
+        "Target 1": round(
+            target1,
+            2
+        ),
 
-        "Target 2":
-            round(
-                levels["target2"],
-                2
-            ),
+        "Target 2": round(
+            target2,
+            2
+        ),
 
-        "Risk %":
-            round(
-                levels["risk_pct"],
-                2
-            ),
+        "Risk %": round(
+            risk_pct,
+            2
+        ),
 
-        "Signal Date":
-            signal_date.strftime(
-                "%Y-%m-%d"
-            ),
+        # STRING deliberately
+        "Signal Date": signal_date.strftime(
+            "%Y-%m-%d"
+        ),
 
-        "Days Since Signal":
-            days_since,
+        "Days Since Signal": int(
+            days_since_signal
+        ),
 
-        "Chart":
-            chart,
+        "Chart": chart_url,
     }
 
 
-# =========================================================
-# LOAD NIFTY 200 UNIVERSE
-# =========================================================
-
-def load_universe(ws):
-
-    records = ws.get_all_records()
-
-    if not records:
-
-        raise ValueError(
-            f"{NIFTY_SHEET} sheet is empty."
-        )
-
-    df = pd.DataFrame(
-        records
-    )
-
-    symbol_col = None
-
-    for col in [
-        "NSE Code",
-        "Symbol",
-        "symbol",
-        "NSECODE"
-    ]:
-
-        if col in df.columns:
-
-            symbol_col = col
-
-            break
-
-    if symbol_col is None:
-
-        raise ValueError(
-            "NIFTY200 must contain "
-            "'NSE Code' or 'Symbol'."
-        )
-
-    df["NSE Code"] = (
-        df[symbol_col]
-        .apply(clean_symbol)
-    )
-
-    if "Turnover" not in df.columns:
-
-        raise ValueError(
-            "NIFTY200 must contain "
-            "'Turnover'."
-        )
-
-    df["Turnover"] = (
-        df["Turnover"]
-        .apply(to_float)
-    )
-
-    df = df[
-        df["NSE Code"].notna()
-    ]
-
-    df = df[
-        df["NSE Code"]
-        .astype(str)
-        .str.len() > 0
-    ]
-
-    df = df[
-        df["NSE Code"]
-        .apply(is_allowed_symbol)
-    ]
-
-    df = df[
-        df["Turnover"].notna()
-    ]
-
-    # Highest turnover first
-    df = df.sort_values(
-        "Turnover",
-        ascending=False,
-        kind="mergesort"
-    ).reset_index(
-        drop=True
-    )
-
-    df["Turnover Rank"] = (
-        np.arange(
-            1,
-            len(df) + 1
-        )
-    )
-
-    df = df.head(
-        200
-    ).copy()
-
-    return df
-
-
-# =========================================================
-# DOWNLOAD YAHOO HISTORY
-# =========================================================
-
-def download_history(symbols):
-
-    tickers = [
-        f"{s}.NS"
-        for s in symbols
-    ]
-
-    print(
-        f"Downloading Yahoo Finance "
-        f"history for {len(tickers)} symbols..."
-    )
-
-    try:
-
-        data = yf.download(
-            tickers=tickers,
-            period=HISTORY_PERIOD,
-            interval="1d",
-            auto_adjust=False,
-            group_by="ticker",
-            threads=True,
-            progress=False,
-        )
-
-    except Exception as e:
-
-        print(
-            "Bulk Yahoo download failed:",
-            e
-        )
-
-        return {}
-
-    histories = {}
-
-    if (
-        data is None
-        or
-        data.empty
-    ):
-
-        return histories
-
-    for symbol in symbols:
-
-        ticker = f"{symbol}.NS"
-
-        try:
-
-            if len(symbols) == 1:
-
-                hist = data.copy()
-
-            else:
-
-                if (
-                    ticker
-                    not in
-                    data.columns
-                    .get_level_values(0)
-                ):
-
-                    continue
-
-                hist = data[
-                    ticker
-                ].copy()
-
-            hist = prepare_history(
-                hist
-            )
-
-            if hist is not None:
-
-                histories[
-                    symbol
-                ] = hist
-
-        except Exception as e:
-
-            print(
-                f"History error "
-                f"{symbol}: {e}"
-            )
-
-    return histories
-
-
-# =========================================================
+# ============================================================
 # WRITE FINAL SHEET
-# =========================================================
+# ============================================================
 
 def write_final_sheet(
     ws,
-    rows
+    results
 ):
 
-    # Remove everything old
+    # --------------------------------------------------------
+    # Clear old values
+    # --------------------------------------------------------
+
     ws.clear()
+
+    # --------------------------------------------------------
+    # Prepare data
+    # --------------------------------------------------------
 
     values = [
         OUTPUT_COLUMNS
     ]
 
-    for row in rows:
+    for item in results:
 
-        values.append(
-            [
-                row.get(
-                    col,
-                    ""
-                )
-                for col in OUTPUT_COLUMNS
-            ]
-        )
+        values.append([
+            item.get(col, "")
+            for col in OUTPUT_COLUMNS
+        ])
 
-    end_row = max(
-        len(values),
-        1
-    )
+    last_row = len(values)
+    last_col = "AA"
 
-    end_col = len(
-        OUTPUT_COLUMNS
-    )
-
-    # Convert column number to Excel letter
-    def col_letter(n):
-
-        result = ""
-
-        while n:
-
-            n, remainder = divmod(
-                n - 1,
-                26
-            )
-
-            result = chr(
-                65 + remainder
-            ) + result
-
-        return result
-
-    last_col = col_letter(
-        end_col
-    )
+    # --------------------------------------------------------
+    # Write values
+    # --------------------------------------------------------
 
     ws.update(
-        f"A1:{last_col}{end_row}",
+        f"A1:{last_col}{last_row}",
         values,
-        value_input_option="USER_ENTERED",
+        value_input_option="USER_ENTERED"
     )
 
-    # -----------------------------------------------------
+    # ========================================================
     # HEADER
-    # -----------------------------------------------------
+    # ========================================================
+
+    ws.format(
+        f"A1:{last_col}1",
+        {
+            "backgroundColor": {
+                "red": 0.12,
+                "green": 0.18,
+                "blue": 0.28
+            },
+            "textFormat": {
+                "foregroundColor": {
+                    "red": 1,
+                    "green": 1,
+                    "blue": 1
+                },
+                "bold": True,
+                "fontSize": 10
+            },
+            "horizontalAlignment": "CENTER",
+            "verticalAlignment": "MIDDLE"
+        }
+    )
+
+    # ========================================================
+    # GENERAL FORMATTING
+    # ========================================================
+
+    if last_row >= 2:
+
+        ws.format(
+            f"A2:{last_col}{last_row}",
+            {
+                "textFormat": {
+                    "fontSize": 10
+                },
+                "horizontalAlignment": "CENTER",
+                "verticalAlignment": "MIDDLE"
+            }
+        )
+
+    # ========================================================
+    # NUMBER FORMATS
+    # ========================================================
+
+    # Integer columns
+    integer_columns = [
+        "B",
+        "Z"
+    ]
+
+    for col in integer_columns:
+
+        if last_row >= 2:
+
+            ws.format(
+                f"{col}2:{col}{last_row}",
+                {
+                    "numberFormat": {
+                        "type": "NUMBER",
+                        "pattern": "0"
+                    }
+                }
+            )
+
+    # Turnover
+    if last_row >= 2:
+
+        ws.format(
+            f"C2:C{last_row}",
+            {
+                "numberFormat": {
+                    "type": "NUMBER",
+                    "pattern": "#,##0"
+                }
+            }
+        )
+
+    # Decimal columns
+    decimal_columns = [
+        "D",
+        "E",
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "X"
+    ]
+
+    for col in decimal_columns:
+
+        if last_row >= 2:
+
+            ws.format(
+                f"{col}2:{col}{last_row}",
+                {
+                    "numberFormat": {
+                        "type": "NUMBER",
+                        "pattern": "0.00"
+                    }
+                }
+            )
+
+    # --------------------------------------------------------
+    # Signal Date = TEXT
+    # Prevent 1900/1901 date conversion
+    # --------------------------------------------------------
+
+    if last_row >= 2:
+
+        ws.format(
+            f"Y2:Y{last_row}",
+            {
+                "numberFormat": {
+                    "type": "TEXT",
+                    "pattern": "@"
+                }
+            }
+        )
+
+    # ========================================================
+    # CHART FORMULAS
+    # ========================================================
+    #
+    # IMPORTANT:
+    # Old code created circular reference:
+    #
+    # HYPERLINK(AA2, ...)
+    #
+    # which caused #REF!
+    #
+    # Now actual URL is inserted directly.
+    # ========================================================
+
+    if len(results) > 0:
+
+        chart_formulas = []
+
+        for item in results:
+
+            url = item["Chart"]
+
+            formula = (
+                '=HYPERLINK("'
+                + url
+                + '","📈 Chart")'
+            )
+
+            chart_formulas.append([
+                formula
+            ])
+
+        ws.update(
+            f"AA2:AA{last_row}",
+            chart_formulas,
+            value_input_option="USER_ENTERED"
+        )
+
+    # ========================================================
+    # ROW COLORS
+    # ========================================================
+
+    for row_num, item in enumerate(
+        results,
+        start=2
+    ):
+
+        setup = item["Setup"]
+
+        if setup == "CLASSIC POSITIVE DIVERGENCE":
+
+            # Light Blue
+            row_color = {
+                "red": 0.84,
+                "green": 0.92,
+                "blue": 1.00
+            }
+
+        else:
+
+            # Light Green
+            row_color = {
+                "red": 0.84,
+                "green": 1.00,
+                "blue": 0.86
+            }
+
+        ws.format(
+            f"A{row_num}:AA{row_num}",
+            {
+                "backgroundColor": row_color
+            }
+        )
+
+    # ========================================================
+    # SCORE HIGHLIGHT
+    # ========================================================
+
+    for row_num, item in enumerate(
+        results,
+        start=2
+    ):
+
+        score = float(
+            item["Strength Score"]
+        )
+
+        if score >= 75:
+
+            ws.format(
+                f"H{row_num}",
+                {
+                    "backgroundColor": {
+                        "red": 0.55,
+                        "green": 0.90,
+                        "blue": 0.55
+                    },
+                    "textFormat": {
+                        "bold": True
+                    }
+                }
+            )
+
+        elif score >= 65:
+
+            ws.format(
+                f"H{row_num}",
+                {
+                    "backgroundColor": {
+                        "red": 0.75,
+                        "green": 0.95,
+                        "blue": 0.65
+                    },
+                    "textFormat": {
+                        "bold": True
+                    }
+                }
+            )
+
+    # ========================================================
+    # FREEZE HEADER
+    # ========================================================
+
+    try:
+        ws.freeze(rows=1)
+    except Exception:
+        pass
+
+    # ========================================================
+    # FILTER
+    # ========================================================
 
     try:
 
-        ws.format(
-            f"A1:{last_col}1",
-            {
-                "backgroundColor": {
-                    "red": 0.10,
-                    "green": 0.25,
-                    "blue": 0.45,
+        ws.set_basic_filter(
+            f"A1:{last_col}{max(last_row, 2)}"
+        )
+
+    except Exception:
+        pass
+
+    # ========================================================
+    # COLUMN WIDTHS
+    # ========================================================
+
+    widths = {
+        "A": 110,
+        "B": 80,
+        "C": 120,
+        "D": 85,
+        "E": 95,
+        "F": 190,
+        "G": 110,
+        "H": 95,
+        "I": 90,
+        "J": 90,
+        "K": 80,
+        "L": 80,
+        "M": 70,
+        "N": 105,
+        "O": 90,
+        "P": 90,
+        "Q": 90,
+        "R": 80,
+        "S": 90,
+        "T": 85,
+        "U": 90,
+        "V": 90,
+        "W": 90,
+        "X": 80,
+        "Y": 100,
+        "Z": 100,
+        "AA": 90
+    }
+
+    # --------------------------------------------------------
+    # Use Sheets batch update for column widths
+    # --------------------------------------------------------
+
+    requests = []
+
+    for letter, width in widths.items():
+
+        col_index = ord(letter) - ord("A")
+
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": ws.id,
+                    "dimension": "COLUMNS",
+                    "startIndex": col_index,
+                    "endIndex": col_index + 1
                 },
-                "textFormat": {
-                    "bold": True,
-                    "foregroundColor": {
-                        "red": 1,
-                        "green": 1,
-                        "blue": 1,
-                    },
+                "properties": {
+                    "pixelSize": width
                 },
-                "horizontalAlignment":
-                    "CENTER",
-                "verticalAlignment":
-                    "MIDDLE",
-            },
-        )
+                "fields": "pixelSize"
+            }
+        })
 
-        if len(values) > 1:
+    try:
 
-            ws.format(
-                f"A2:{last_col}{end_row}",
-                {
-                    "horizontalAlignment":
-                        "CENTER",
-                    "verticalAlignment":
-                        "MIDDLE",
-                },
-            )
+        ws.spreadsheet.batch_update({
+            "requests": requests
+        })
 
-        # -------------------------------------------------
-        # FREEZE HEADER
-        # -------------------------------------------------
-
-        ws.freeze(
-            rows=1
-        )
-
-        # -------------------------------------------------
-        # CONDITIONAL ROW COLORS
-        # -------------------------------------------------
-
-        # Find Setup column
-        setup_col = (
-            OUTPUT_COLUMNS.index(
-                "Setup"
-            ) + 1
-        )
-
-        def letter(n):
-
-            result = ""
-
-            while n:
-
-                n, r = divmod(
-                    n - 1,
-                    26
-                )
-
-                result = chr(
-                    65 + r
-                ) + result
-
-            return result
-
-        setup_letter = letter(
-            setup_col
-        )
-
-        # Green = RSI divergence
-        # Blue = Classic divergence
-
-        if len(values) > 1:
-
-            for i, row in enumerate(
-                rows,
-                start=2
-            ):
-
-                setup = row[
-                    "Setup"
-                ]
-
-                if setup == (
-                    "RSI POSITIVE DIVERGENCE"
-                ):
-
-                    bg = {
-                        "red": 0.80,
-                        "green": 1.00,
-                        "blue": 0.80,
-                    }
-
-                else:
-
-                    bg = {
-                        "red": 0.80,
-                        "green": 0.90,
-                        "blue": 1.00,
-                    }
-
-                ws.format(
-                    f"A{i}:{last_col}{i}",
-                    {
-                        "backgroundColor":
-                            bg
-                    },
-                )
-
-        # -------------------------------------------------
-        # CHART COLUMN
-        # -------------------------------------------------
-
-        chart_col = (
-            OUTPUT_COLUMNS.index(
-                "Chart"
-            ) + 1
-        )
-
-        chart_letter = letter(
-            chart_col
-        )
-
-        if len(values) > 1:
-
-            for row_num in range(
-                2,
-                end_row + 1
-            ):
-
-                formula = (
-                    f'=HYPERLINK('
-                    f'{chart_letter}{row_num},'
-                    f'"📈 Chart")'
-                )
-
-                # Keep actual URL hidden
-                # and show clickable Chart
-                ws.update(
-                    f"{chart_letter}{row_num}",
-                    [[
-                        formula
-                    ]],
-                    value_input_option=
-                    "USER_ENTERED",
-                )
-
-        # -------------------------------------------------
-        # COLUMN WIDTHS
-        # -------------------------------------------------
-
-        widths = {
-            "A": 110,
-            "B": 100,
-            "C": 110,
-            "D": 90,
-            "E": 95,
-            "F": 190,
-            "G": 110,
-            "H": 100,
-            "I": 100,
-            "J": 100,
-            "K": 90,
-            "L": 90,
-            "M": 75,
-            "N": 105,
-            "O": 95,
-            "P": 90,
-            "Q": 90,
-            "R": 90,
-            "S": 100,
-            "T": 90,
-            "U": 90,
-            "V": 90,
-            "W": 90,
-            "X": 80,
-            "Y": 110,
-            "Z": 110,
-            "AA": 100,
-        }
-
-        for col, width in widths.items():
-
-            try:
-
-                ws.set_basic_filter(
-                    f"A1:{last_col}{end_row}"
-                )
-
-                break
-
-            except:
-
-                pass
-
-    except Exception as e:
-
-        print(
-            "Formatting warning:",
-            e
-        )
-
-
-# =========================================================
-# DIAGNOSTICS
-# =========================================================
-
-def diagnostics(rows):
-
-    print("\n")
-    print("=" * 60)
-    print("DIVERGENCE DIAGNOSTICS")
-    print("=" * 60)
-
-    if not rows:
-
-        print(
-            "No positive divergence "
-            "candidates found."
-        )
-
-        return
-
-    df = pd.DataFrame(
-        rows
-    )
+    except Exception:
+        pass
 
     print(
-        f"Candidates: {len(df)}"
+        f"Final List updated: {len(results)} stocks"
     )
 
-    print(
-        "RSI Positive Divergence:",
-        (
-            df["Setup"]
-            ==
-            "RSI POSITIVE DIVERGENCE"
-        ).sum()
-    )
 
-    print(
-        "Classic Positive Divergence:",
-        (
-            df["Setup"]
-            ==
-            "CLASSIC POSITIVE DIVERGENCE"
-        ).sum()
-    )
-
-    print(
-        "Strong:",
-        (
-            df["Divergence Strength"]
-            ==
-            "STRONG"
-        ).sum()
-    )
-
-    print(
-        "Good:",
-        (
-            df["Divergence Strength"]
-            ==
-            "GOOD"
-        ).sum()
-    )
-
-    print(
-        "Medium:",
-        (
-            df["Divergence Strength"]
-            ==
-            "MEDIUM"
-        ).sum()
-    )
-
-    print(
-        "Highest Score:",
-        df["Strength Score"].max()
-    )
-
-    print(
-        "Lowest Risk:",
-        f"{df['Risk %'].min():.2f}%"
-    )
-
-    print(
-        "Highest Risk:",
-        f"{df['Risk %'].max():.2f}%"
-    )
-
-    print("=" * 60)
-
-
-# =========================================================
+# ============================================================
 # MAIN
-# =========================================================
+# ============================================================
 
 def main():
 
     print("=" * 70)
-
-    print(
-        "NIFTY 200 "
-        "POSITIVE DIVERGENCE SCANNER V1.0"
-    )
-
+    print("NIFTY 200 POSITIVE DIVERGENCE SCANNER")
     print("=" * 70)
 
-    creds = get_credentials()
+    # --------------------------------------------------------
+    # Connect
+    # --------------------------------------------------------
 
-    gc = gspread.authorize(
-        creds
-    )
+    sh = connect_google_sheet()
 
-    sh = gc.open_by_key(
-        SPREADSHEET_ID
-    )
+    print("Google Sheet connected.")
 
-    universe_ws = (
-        sh.worksheet(
-            NIFTY_SHEET
-        )
-    )
+    # --------------------------------------------------------
+    # Load NIFTY200
+    # --------------------------------------------------------
 
-    final_ws = (
-        sh.worksheet(
-            FINAL_SHEET
-        )
-    )
-
-    # -----------------------------------------------------
-    # NIFTY200
-    # -----------------------------------------------------
-
-    universe = load_universe(
-        universe_ws
-    )
+    universe = load_nifty200(sh)
 
     print(
-        f"Universe loaded: "
-        f"{len(universe)} stocks"
+        f"NIFTY200 stocks found: {len(universe)}"
     )
 
-    symbols = (
-        universe[
-            "NSE Code"
-        ].tolist()
+    # --------------------------------------------------------
+    # Final sheet
+    # --------------------------------------------------------
+
+    final_ws = sh.worksheet(
+        FINAL_SHEET
     )
 
-    # -----------------------------------------------------
-    # DOWNLOAD DATA
-    # -----------------------------------------------------
+    # --------------------------------------------------------
+    # Scan
+    # --------------------------------------------------------
 
-    histories = download_history(
-        symbols
-    )
+    results = []
 
-    print(
-        f"Usable histories: "
-        f"{len(histories)}"
-    )
+    total = len(universe)
 
-    # -----------------------------------------------------
-    # ANALYZE
-    # -----------------------------------------------------
+    for counter, row in enumerate(
+        universe.itertuples(index=False),
+        start=1
+    ):
 
-    candidates = []
+        symbol = row[0]
+        turnover_rank = row[1]
+        turnover = row[2]
 
-    for _, u in universe.iterrows():
-
-        symbol = u[
-            "NSE Code"
-        ]
-
-        if symbol not in histories:
-
-            continue
+        print(
+            f"[{counter}/{total}] {symbol}"
+        )
 
         try:
 
             result = analyze_stock(
-                symbol=symbol,
-                hist=histories[
-                    symbol
-                ],
-                turnover_rank=int(
-                    u[
-                        "Turnover Rank"
-                    ]
-                ),
-                turnover=float(
-                    u[
-                        "Turnover"
-                    ]
-                ),
+                symbol,
+                turnover_rank,
+                turnover
             )
 
-            if result:
+            if result is not None:
 
-                candidates.append(
-                    result
+                results.append(result)
+
+                print(
+                    f"   -> {result['Setup']} "
+                    f"| Score {result['Strength Score']}"
                 )
 
         except Exception as e:
 
             print(
-                f"Analysis error "
-                f"{symbol}: {e}"
+                f"   ERROR: {symbol} -> {e}"
             )
 
-    # -----------------------------------------------------
+    # ========================================================
     # SORT
-    # -----------------------------------------------------
+    # ========================================================
 
-    setup_priority = {
-        "CLASSIC POSITIVE DIVERGENCE": 0,
-        "RSI POSITIVE DIVERGENCE": 1,
-    }
+    if results:
 
-    strength_priority = {
-        "STRONG": 0,
-        "GOOD": 1,
-        "MEDIUM": 2,
-    }
+        # First priority = score
+        # Second = fresh signal
+        # Third = turnover rank
 
-    candidates.sort(
-        key=lambda x: (
-            setup_priority.get(
-                x["Setup"],
-                9
-            ),
-            strength_priority.get(
-                x[
-                    "Divergence Strength"
-                ],
-                9
-            ),
-            -x[
-                "Strength Score"
-            ],
-            x[
-                "Turnover Rank"
-            ],
+        results = sorted(
+            results,
+            key=lambda x: (
+                -float(x["Strength Score"]),
+                int(x["Days Since Signal"]),
+                int(x["Turnover Rank"])
+            )
         )
-    )
 
-    # -----------------------------------------------------
-    # FINAL LIMIT
-    # -----------------------------------------------------
+        # ----------------------------------------------------
+        # Limit
+        # ----------------------------------------------------
 
-    candidates = candidates[
-        :MAX_FINAL_STOCKS
-    ]
+        results = results[
+            :MAX_FINAL_STOCKS
+        ]
 
-    diagnostics(
-        candidates
-    )
-
-    # -----------------------------------------------------
-    # WRITE GOOGLE SHEET
-    # -----------------------------------------------------
+    # ========================================================
+    # WRITE
+    # ========================================================
 
     write_final_sheet(
         final_ws,
-        candidates
+        results
     )
 
-    print("\n")
+    # ========================================================
+    # SUMMARY
+    # ========================================================
+
+    classic_count = sum(
+        1
+        for x in results
+        if x["Setup"]
+        == "CLASSIC POSITIVE DIVERGENCE"
+    )
+
+    rsi_count = sum(
+        1
+        for x in results
+        if x["Setup"]
+        == "RSI POSITIVE DIVERGENCE"
+    )
+
+    print()
+    print("=" * 70)
+    print("SCAN COMPLETE")
+    print("=" * 70)
+
     print(
-        "Final List updated successfully."
+        f"Total Signals : {len(results)}"
     )
 
     print(
-        f"Rows written: "
-        f"{len(candidates)}"
+        f"Classic Divergence : {classic_count}"
     )
 
     print(
-        f"Columns written: "
-        f"{len(OUTPUT_COLUMNS)}"
+        f"RSI Divergence : {rsi_count}"
     )
 
     print("=" * 70)
 
 
-# =========================================================
+# ============================================================
 # RUN
-# =========================================================
+# ============================================================
 
 if __name__ == "__main__":
-
     main()
