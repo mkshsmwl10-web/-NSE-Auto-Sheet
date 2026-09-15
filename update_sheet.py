@@ -1,23 +1,23 @@
 # =========================================================
-# NIFTY 200 SWING SNIPER V2.1.4
+# NIFTY 200 POSITIVE DIVERGENCE SCANNER V1.0
 # =========================================================
 # FINAL LIST:
-#   - High-quality BUY: FRESH BREAKOUT / RETEST + HOLD
-#   - High-quality WATCH: near breakout, waiting for confirmation
+#   1. RSI POSITIVE DIVERGENCE
+#   2. CLASSIC POSITIVE DIVERGENCE
 #
-# Data:
-#   - NIFTY200 sheet = current universe + turnover
-#   - Yahoo Finance = 1 year daily OHLCV history
+# DATA:
+#   - NIFTY200 sheet = universe + turnover
+#   - Yahoo Finance = 1 year daily OHLCV
 #
-# Important:
-#   - Uses completed daily candles only.
-#   - No intraday entry.
-#   - Google Sheet header is rewritten from A:V every run.
+# IMPORTANT:
+#   - Completed daily candles only
+#   - No intraday signal
+#   - Old breakout/retest logic removed
+#   - Final List rewritten completely every run
 # =========================================================
 
 import os
 import json
-import time
 import warnings
 from datetime import datetime
 
@@ -29,80 +29,124 @@ from oauth2client.service_account import ServiceAccountCredentials
 
 warnings.filterwarnings("ignore")
 
+
+# =========================================================
+# SETTINGS
+# =========================================================
+
 SPREADSHEET_ID = "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E"
+
 NIFTY_SHEET = "NIFTY200"
 FINAL_SHEET = "Final List"
 
 HISTORY_PERIOD = "1y"
-MIN_HISTORY_ROWS = 70
+MIN_HISTORY_ROWS = 100
 
-BREAKOUT_LOOKBACK = 20
-EMA_FAST = 20
-EMA_SLOW = 50
 RSI_LENGTH = 14
 ATR_LENGTH = 14
 VOLUME_LENGTH = 20
 
-# V2.1.4 = stricter sniper filters
-MIN_VOLUME_RATIO_BUY = 1.50
-MIN_VOLUME_RATIO_WATCH = 1.00
+# Swing detection
+SWING_LEFT = 3
+SWING_RIGHT = 3
 
-RSI_BUY_MIN = 55
-RSI_BUY_MAX = 68          # BUY requires RSI < 68
-RSI_WATCH_MAX = 68        # WATCH also avoids RSI 68+
-RSI_HARD_REJECT = 80
+# Divergence quality
+MIN_PRICE_LOWER_LOW_PCT = 0.50
+MIN_RSI_HIGHER_LOW = 2.0
 
-MAX_BREAKOUT_EXTENSION_PCT = 3.0
-WATCH_DISTANCE_PCT = 2.0
+# Maximum distance between two swing lows
+MAX_SWING_GAP = 60
 
-RETEST_MAX_ABOVE_PCT = 1.0
-RETEST_MAX_BELOW_PCT = 3.0
-RETEST_LOOKBACK_DAYS = 5
+# Signal should not be too old
+MAX_SIGNAL_AGE = 15
 
-MAX_RISK_PCT = 5.0
+# Volume
+MIN_VOLUME_RATIO = 0.80
+
+# Risk
+MAX_RISK_PCT = 7.0
+
 TARGET1_R = 1.5
 TARGET2_R = 3.0
 
-MAX_FINAL_STOCKS = 12
-MIN_BUY_SCORE = 75
-MIN_WATCH_SCORE = 70
+MAX_FINAL_STOCKS = 30
 
-# Exact 22-column output. Never change order accidentally.
+
+# =========================================================
+# FINAL LIST COLUMNS
+# =========================================================
+
 OUTPUT_COLUMNS = [
+
     "NSE Code",
     "Turnover Rank",
     "Turnover",
+
     "Close",
+    "Today Change %",
+
+    "Setup",
+    "Divergence Strength",
+    "Strength Score",
+
+    "Price Low 1",
+    "Price Low 2",
+
+    "RSI Low 1",
+    "RSI Low 2",
+    "RSI14",
+    "RSI Improvement %",
+
+    "Volume Ratio",
+
     "EMA20",
     "EMA50",
-    "RSI14",
-    "Volume Ratio",
-    "20-Day High",
-    "Breakout Level",
+    "ATR14",
+
+    "Support",
+
     "Entry",
     "Stop Loss",
     "Target 1",
     "Target 2",
     "Risk %",
-    "Today Change %",
-    "Setup",
-    "Strength Score",
-    "20-Day Range %",
-    "ATR14",
-    "Breakout Date",
+
+    "Signal Date",
+    "Days Since Signal",
+
     "Chart",
+
 ]
 
-EXCLUDE_WORDS = ["ETF", "BEES", "GOLD", "LIQUID", "SILVER", "INDEX"]
 
+# =========================================================
+# EXCLUDED SYMBOLS
+# =========================================================
+
+EXCLUDE_WORDS = [
+    "ETF",
+    "BEES",
+    "GOLD",
+    "LIQUID",
+    "SILVER",
+    "INDEX",
+]
+
+
+# =========================================================
+# GOOGLE CREDENTIALS
+# =========================================================
 
 def get_credentials():
-    """Use GitHub Actions secret first; support local credentials.json too."""
+
     secret = os.getenv("GCP_CREDENTIALS")
 
     if secret:
+
         try:
+
             info = json.loads(secret)
+
             return ServiceAccountCredentials.from_json_keyfile_dict(
                 info,
                 [
@@ -110,11 +154,17 @@ def get_credentials():
                     "https://www.googleapis.com/auth/drive",
                 ],
             )
+
         except Exception as e:
-            raise RuntimeError(f"GCP_CREDENTIALS is invalid JSON: {e}")
+
+            raise RuntimeError(
+                f"GCP_CREDENTIALS is invalid JSON: {e}"
+            )
 
     local_file = "credentials.json"
+
     if os.path.exists(local_file):
+
         return ServiceAccountCredentials.from_json_keyfile_name(
             local_file,
             [
@@ -128,437 +178,1021 @@ def get_credentials():
     )
 
 
+# =========================================================
+# HELPERS
+# =========================================================
+
 def clean_symbol(value):
+
     s = str(value).strip().upper()
+
     for suffix in [".NS", ".NSE"]:
+
         if s.endswith(suffix):
-            s = s[: -len(suffix)]
+
+            s = s[:-len(suffix)]
+
     return s
 
 
 def is_allowed_symbol(symbol):
+
     s = symbol.upper()
-    return not any(word in s for word in EXCLUDE_WORDS)
+
+    return not any(
+        word in s
+        for word in EXCLUDE_WORDS
+    )
 
 
 def to_float(value, default=np.nan):
+
     try:
+
         if value is None or value == "":
+
             return default
-        return float(str(value).replace(",", "").strip())
+
+        return float(
+            str(value)
+            .replace(",", "")
+            .strip()
+        )
+
     except Exception:
+
         return default
 
 
+# =========================================================
+# RSI
+# =========================================================
+
 def rsi(series, length=14):
+
     delta = series.diff()
+
     gain = delta.clip(lower=0)
+
     loss = -delta.clip(upper=0)
 
-    avg_gain = gain.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
-    avg_loss = loss.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
+    avg_gain = gain.ewm(
+        alpha=1 / length,
+        adjust=False,
+        min_periods=length
+    ).mean()
 
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    out = 100 - (100 / (1 + rs))
-    return out.fillna(50)
+    avg_loss = loss.ewm(
+        alpha=1 / length,
+        adjust=False,
+        min_periods=length
+    ).mean()
 
+    rs = (
+        avg_gain /
+        avg_loss.replace(0, np.nan)
+    )
+
+    result = 100 - (
+        100 / (1 + rs)
+    )
+
+    return result.fillna(50)
+
+
+# =========================================================
+# ATR
+# =========================================================
 
 def atr(df, length=14):
+
     prev_close = df["Close"].shift(1)
 
     tr1 = df["High"] - df["Low"]
-    tr2 = (df["High"] - prev_close).abs()
-    tr3 = (df["Low"] - prev_close).abs()
 
-    true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    tr2 = (
+        df["High"] -
+        prev_close
+    ).abs()
+
+    tr3 = (
+        df["Low"] -
+        prev_close
+    ).abs()
+
+    true_range = pd.concat(
+        [tr1, tr2, tr3],
+        axis=1
+    ).max(axis=1)
+
     return true_range.ewm(
-        alpha=1 / length, adjust=False, min_periods=length
+        alpha=1 / length,
+        adjust=False,
+        min_periods=length
     ).mean()
 
+
+# =========================================================
+# PREPARE HISTORY
+# =========================================================
 
 def prepare_history(hist):
+
     hist = hist.copy()
 
-    if isinstance(hist.columns, pd.MultiIndex):
-        hist.columns = hist.columns.get_level_values(0)
+    if isinstance(
+        hist.columns,
+        pd.MultiIndex
+    ):
 
-    required = ["Open", "High", "Low", "Close", "Volume"]
-    missing = [c for c in required if c not in hist.columns]
+        hist.columns = (
+            hist.columns
+            .get_level_values(0)
+        )
+
+    required = [
+        "Open",
+        "High",
+        "Low",
+        "Close",
+        "Volume"
+    ]
+
+    missing = [
+        c for c in required
+        if c not in hist.columns
+    ]
+
     if missing:
-        raise ValueError(f"Missing history columns: {missing}")
 
-    hist = hist[required].copy()
+        raise ValueError(
+            f"Missing history columns: {missing}"
+        )
+
+    hist = hist[
+        required
+    ].copy()
 
     for col in required:
-        hist[col] = pd.to_numeric(hist[col], errors="coerce")
 
-    hist = hist.dropna(subset=["High", "Low", "Close"]).copy()
+        hist[col] = pd.to_numeric(
+            hist[col],
+            errors="coerce"
+        )
+
+    hist = hist.dropna(
+        subset=[
+            "High",
+            "Low",
+            "Close"
+        ]
+    ).copy()
 
     if len(hist) < MIN_HISTORY_ROWS:
+
         return None
 
-    hist["EMA20"] = hist["Close"].ewm(
-        span=EMA_FAST, adjust=False, min_periods=EMA_FAST
-    ).mean()
-
-    hist["EMA50"] = hist["Close"].ewm(
-        span=EMA_SLOW, adjust=False, min_periods=EMA_SLOW
-    ).mean()
-
-    hist["RSI14"] = rsi(hist["Close"], RSI_LENGTH)
-    hist["ATR14"] = atr(hist, ATR_LENGTH)
-
-    # Previous completed 20-session high.
-    hist["Prev20High"] = (
-        hist["High"].rolling(BREAKOUT_LOOKBACK, min_periods=BREAKOUT_LOOKBACK).max()
-        .shift(1)
+    # Indicators
+    hist["EMA20"] = (
+        hist["Close"]
+        .ewm(
+            span=20,
+            adjust=False,
+            min_periods=20
+        )
+        .mean()
     )
 
-    hist["Prev20Low"] = (
-        hist["Low"].rolling(BREAKOUT_LOOKBACK, min_periods=BREAKOUT_LOOKBACK).min()
-        .shift(1)
+    hist["EMA50"] = (
+        hist["Close"]
+        .ewm(
+            span=50,
+            adjust=False,
+            min_periods=50
+        )
+        .mean()
+    )
+
+    hist["RSI14"] = rsi(
+        hist["Close"],
+        RSI_LENGTH
+    )
+
+    hist["ATR14"] = atr(
+        hist,
+        ATR_LENGTH
     )
 
     hist["AvgVolume20"] = (
-        hist["Volume"].rolling(VOLUME_LENGTH, min_periods=VOLUME_LENGTH).mean()
+        hist["Volume"]
+        .rolling(
+            VOLUME_LENGTH,
+            min_periods=VOLUME_LENGTH
+        )
+        .mean()
     )
 
     hist["VolumeRatio"] = (
-        hist["Volume"] / hist["AvgVolume20"].replace(0, np.nan)
+        hist["Volume"] /
+        hist["AvgVolume20"]
+        .replace(0, np.nan)
     )
 
-    hist["Range20Pct"] = (
-        (
-            hist["High"].rolling(BREAKOUT_LOOKBACK).max()
-            - hist["Low"].rolling(BREAKOUT_LOOKBACK).min()
-        )
-        / hist["Close"]
-        * 100
+    hist["DailyChangePct"] = (
+        hist["Close"].pct_change() * 100
     )
-
-    hist["EMA20SlopePct"] = (
-        hist["EMA20"].pct_change(5) * 100
-    )
-
-    hist["DailyChangePct"] = hist["Close"].pct_change() * 100
 
     return hist.dropna(
-        subset=["EMA20", "EMA50", "RSI14", "ATR14", "Prev20High"]
+        subset=[
+            "EMA20",
+            "EMA50",
+            "RSI14",
+            "ATR14"
+        ]
     )
 
 
-def get_previous_breakout(hist):
-    """Find the most recent genuine breakout in the previous 1-5 completed sessions."""
-    if len(hist) < RETEST_LOOKBACK_DAYS + 2:
+# =========================================================
+# SWING LOW DETECTION
+# =========================================================
+
+def find_swing_lows(series, left=3, right=3):
+
+    values = series.values
+
+    swing_indices = []
+
+    for i in range(
+        left,
+        len(values) - right
+    ):
+
+        left_values = values[
+            i-left:i
+        ]
+
+        right_values = values[
+            i+1:i+right+1
+        ]
+
+        current = values[i]
+
+        if (
+            current <= left_values.min()
+            and
+            current <= right_values.min()
+        ):
+
+            swing_indices.append(i)
+
+    return swing_indices
+
+
+# =========================================================
+# FIND DIVERGENCE
+# =========================================================
+
+def find_divergence(hist):
+
+    lows = find_swing_lows(
+        hist["Low"],
+        SWING_LEFT,
+        SWING_RIGHT
+    )
+
+    if len(lows) < 2:
+
         return None
 
-    end = len(hist) - 1
-    start = max(0, end - RETEST_LOOKBACK_DAYS)
+    latest_index = len(hist) - 1
 
-    candidates = []
+    # Only use swings that are confirmed
+    confirmed_lows = [
+        i for i in lows
+        if i + SWING_RIGHT <= latest_index
+    ]
 
-    for i in range(start, end):
-        row = hist.iloc[i]
+    if len(confirmed_lows) < 2:
 
-        if pd.isna(row["Prev20High"]):
+        return None
+
+    # Search newest valid pair first
+    for j in range(
+        len(confirmed_lows) - 1,
+        0,
+        -1
+    ):
+
+        i2 = confirmed_lows[j]
+        i1 = confirmed_lows[j - 1]
+
+        gap = i2 - i1
+
+        if gap > MAX_SWING_GAP:
+
             continue
 
-        if row["Close"] > row["Prev20High"]:
-            candidates.append(
-                {
-                    "date": hist.index[i],
-                    "level": float(row["Prev20High"]),
-                    "close": float(row["Close"]),
-                }
-            )
+        price1 = float(
+            hist["Low"].iloc[i1]
+        )
 
-    return candidates[-1] if candidates else None
+        price2 = float(
+            hist["Low"].iloc[i2]
+        )
+
+        rsi1 = float(
+            hist["RSI14"].iloc[i1]
+        )
+
+        rsi2 = float(
+            hist["RSI14"].iloc[i2]
+        )
+
+        if not all(
+            np.isfinite(x)
+            for x in [
+                price1,
+                price2,
+                rsi1,
+                rsi2
+            ]
+        ):
+
+            continue
+
+        price_lower_low_pct = (
+            (price1 - price2)
+            / price1
+        ) * 100
+
+        rsi_improvement = rsi2 - rsi1
+
+        # Price must make lower low
+        if price_lower_low_pct < MIN_PRICE_LOWER_LOW_PCT:
+
+            continue
+
+        # RSI must make higher low
+        if rsi_improvement < MIN_RSI_HIGHER_LOW:
+
+            continue
+
+        # Signal age
+        signal_age = (
+            latest_index - i2
+        )
+
+        if signal_age > MAX_SIGNAL_AGE:
+
+            continue
+
+        signal_date = hist.index[i2]
+
+        return {
+            "i1": i1,
+            "i2": i2,
+            "price1": price1,
+            "price2": price2,
+            "rsi1": rsi1,
+            "rsi2": rsi2,
+            "rsi_improvement": rsi_improvement,
+            "price_lower_low_pct": price_lower_low_pct,
+            "signal_date": signal_date,
+            "signal_age": signal_age,
+        }
+
+    return None
 
 
-def calculate_levels(entry, hist):
+# =========================================================
+# CLASSIC DIVERGENCE QUALITY
+# =========================================================
+
+def classify_divergence(div):
+
+    rsi_imp = div["rsi_improvement"]
+
+    price_drop = div[
+        "price_lower_low_pct"
+    ]
+
+    if (
+        rsi_imp >= 8
+        and price_drop >= 2
+    ):
+
+        return "STRONG"
+
+    if (
+        rsi_imp >= 5
+        and price_drop >= 1
+    ):
+
+        return "GOOD"
+
+    return "MEDIUM"
+
+
+# =========================================================
+# SCORE
+# =========================================================
+
+def calculate_score(
+    latest,
+    div
+):
+
+    score = 0
+
+    # -----------------------------------------
+    # RSI divergence strength
+    # -----------------------------------------
+
+    rsi_imp = div[
+        "rsi_improvement"
+    ]
+
+    if rsi_imp >= 10:
+
+        score += 30
+
+    elif rsi_imp >= 7:
+
+        score += 25
+
+    elif rsi_imp >= 5:
+
+        score += 20
+
+    else:
+
+        score += 15
+
+    # -----------------------------------------
+    # Price lower low
+    # -----------------------------------------
+
+    price_drop = div[
+        "price_lower_low_pct"
+    ]
+
+    if price_drop >= 5:
+
+        score += 20
+
+    elif price_drop >= 3:
+
+        score += 15
+
+    elif price_drop >= 1:
+
+        score += 10
+
+    else:
+
+        score += 5
+
+    # -----------------------------------------
+    # Current RSI
+    # -----------------------------------------
+
+    current_rsi = float(
+        latest["RSI14"]
+    )
+
+    if 30 <= current_rsi <= 45:
+
+        score += 15
+
+    elif 45 < current_rsi <= 55:
+
+        score += 12
+
+    elif current_rsi < 30:
+
+        score += 10
+
+    else:
+
+        score += 5
+
+    # -----------------------------------------
+    # Volume
+    # -----------------------------------------
+
+    volume_ratio = float(
+        latest["VolumeRatio"]
+    )
+
+    if volume_ratio >= 1.5:
+
+        score += 15
+
+    elif volume_ratio >= 1.0:
+
+        score += 10
+
+    elif volume_ratio >= 0.8:
+
+        score += 5
+
+    # -----------------------------------------
+    # Trend improvement
+    # -----------------------------------------
+
+    if latest["Close"] > latest["EMA20"]:
+
+        score += 5
+
+    if latest["EMA20"] > latest["EMA50"]:
+
+        score += 5
+
+    # -----------------------------------------
+    # Freshness
+    # -----------------------------------------
+
+    age = div["signal_age"]
+
+    if age <= 3:
+
+        score += 5
+
+    elif age <= 7:
+
+        score += 3
+
+    return int(
+        min(score, 100)
+    )
+
+
+# =========================================================
+# TRADE LEVELS
+# =========================================================
+
+def calculate_levels(
+    hist,
+    div
+):
+
     latest = hist.iloc[-1]
 
-    atr_value = float(latest["ATR14"])
-    recent_low = float(hist["Low"].tail(5).min())
+    close = float(
+        latest["Close"]
+    )
 
-    atr_stop = entry - (1.5 * atr_value)
-    structure_stop = recent_low * 0.995
+    atr14 = float(
+        latest["ATR14"]
+    )
 
-    # Higher stop = tighter risk, but still protected by recent structure.
-    stop = max(atr_stop, structure_stop)
+    # Recent structural support
+    support = float(
+        min(
+            div["price2"],
+            hist["Low"].tail(10).min()
+        )
+    )
 
-    risk_pct = ((entry - stop) / entry) * 100
+    # Entry = close confirmation
+    entry = close
 
-    if risk_pct <= 0:
+    # ATR + structure stop
+    atr_stop = (
+        entry -
+        1.5 * atr14
+    )
+
+    structure_stop = (
+        support * 0.995
+    )
+
+    stop = max(
+        atr_stop,
+        structure_stop
+    )
+
+    risk_points = (
+        entry - stop
+    )
+
+    if risk_points <= 0:
+
         return None
 
-    # Never allow a setup whose calculated risk exceeds 5%.
+    risk_pct = (
+        risk_points /
+        entry
+    ) * 100
+
     if risk_pct > MAX_RISK_PCT:
+
         return None
 
-    risk_points = entry - stop
+    target1 = (
+        entry +
+        TARGET1_R * risk_points
+    )
 
-    target1 = entry + TARGET1_R * risk_points
-    target2 = entry + TARGET2_R * risk_points
+    target2 = (
+        entry +
+        TARGET2_R * risk_points
+    )
 
     return {
-        "Entry": entry,
-        "Stop Loss": stop,
-        "Target 1": target1,
-        "Target 2": target2,
-        "Risk %": risk_pct,
+        "support": support,
+        "entry": entry,
+        "stop": stop,
+        "target1": target1,
+        "target2": target2,
+        "risk_pct": risk_pct,
     }
 
 
-def calculate_score(latest, setup):
-    score = 0
+# =========================================================
+# ANALYZE STOCK
+# =========================================================
 
-    # Trend
-    if latest["EMA20"] > latest["EMA50"]:
-        score += 20
+def analyze_stock(
+    symbol,
+    hist,
+    turnover_rank,
+    turnover
+):
 
-    # Price above EMA20
-    if latest["Close"] > latest["EMA20"]:
-        score += 15
-
-    # RSI
-    if RSI_BUY_MIN <= latest["RSI14"] < RSI_BUY_MAX:
-        score += 15
-    elif RSI_BUY_MIN <= latest["RSI14"] < RSI_WATCH_MAX:
-        score += 10
-
-    # Volume
-    if latest["VolumeRatio"] >= MIN_VOLUME_RATIO_BUY:
-        score += 15
-    elif latest["VolumeRatio"] >= MIN_VOLUME_RATIO_WATCH:
-        score += 10
-
-    # EMA slope
-    if latest["EMA20SlopePct"] > 0:
-        score += 10
-
-    # Controlled 20-day range
-    if latest["Range20Pct"] <= 12:
-        score += 10
-    elif latest["Range20Pct"] <= 18:
-        score += 5
-
-    # Setup quality
-    if setup in ("FRESH BREAKOUT", "RETEST + HOLD"):
-        score += 10
-    elif setup == "BREAKOUT WATCH":
-        score += 5
-
-    return int(min(score, 100))
-
-
-def analyze_stock(symbol, hist, turnover_rank, turnover):
     latest = hist.iloc[-1]
 
-    close = float(latest["Close"])
-    ema20 = float(latest["EMA20"])
-    ema50 = float(latest["EMA50"])
-    rsi14 = float(latest["RSI14"])
-    volume_ratio = float(latest["VolumeRatio"])
-    prev20_high = float(latest["Prev20High"])
-    atr14 = float(latest["ATR14"])
-    range20 = float(latest["Range20Pct"])
-    daily_change = float(latest["DailyChangePct"])
-    slope = float(latest["EMA20SlopePct"])
+    close = float(
+        latest["Close"]
+    )
 
     if not np.isfinite(close):
+
         return None
 
-    # -----------------------------
-    # HARD QUALITY FILTERS
-    # -----------------------------
-    if rsi14 >= RSI_HARD_REJECT:
+    # -----------------------------------------
+    # Divergence
+    # -----------------------------------------
+
+    div = find_divergence(hist)
+
+    if div is None:
+
         return None
 
-    if ema20 <= ema50:
-        return None
+    # -----------------------------------------
+    # Volume filter
+    # -----------------------------------------
 
-    if close <= ema20:
-        return None
+    volume_ratio = float(
+        latest["VolumeRatio"]
+    )
 
-    if range20 > 18:
-        return None
-
-    if slope <= 0:
-        return None
-
-    if rsi14 < RSI_BUY_MIN:
-        return None
-
-    if rsi14 >= RSI_WATCH_MAX:
-        return None
-
-    previous_breakout = get_previous_breakout(hist)
-
-    setup = None
-    breakout_level = prev20_high
-    breakout_date = ""
-
-    # -----------------------------
-    # 1. FRESH BREAKOUT
-    # -----------------------------
     if (
-        close > prev20_high
-        and volume_ratio >= MIN_VOLUME_RATIO_BUY
-        and RSI_BUY_MIN <= rsi14 < RSI_BUY_MAX
+        not np.isfinite(volume_ratio)
+        or
+        volume_ratio < MIN_VOLUME_RATIO
     ):
-        extension_pct = ((close - prev20_high) / prev20_high) * 100
 
-        if extension_pct <= MAX_BREAKOUT_EXTENSION_PCT:
-            setup = "FRESH BREAKOUT"
-            breakout_level = prev20_high
-            breakout_date = latest.name.strftime("%Y-%m-%d")
-
-    # -----------------------------
-    # 2. TRUE RETEST + HOLD
-    # -----------------------------
-    if setup is None and previous_breakout is not None:
-        breakout_level = previous_breakout["level"]
-        breakout_date = pd.Timestamp(previous_breakout["date"]).strftime("%Y-%m-%d")
-
-        distance_from_breakout = (
-            (close - breakout_level) / breakout_level
-        ) * 100
-
-        low_distance = (
-            (float(latest["Low"]) - breakout_level) / breakout_level
-        ) * 100
-
-        if (
-            volume_ratio >= MIN_VOLUME_RATIO_BUY
-            and RSI_BUY_MIN <= rsi14 < RSI_BUY_MAX
-            and low_distance >= -RETEST_MAX_BELOW_PCT
-            and low_distance <= RETEST_MAX_ABOVE_PCT
-            and close >= breakout_level
-            and distance_from_breakout <= MAX_BREAKOUT_EXTENSION_PCT
-            and distance_from_breakout >= -RETEST_MAX_BELOW_PCT
-        ):
-            setup = "RETEST + HOLD"
-
-    # -----------------------------
-    # 3. HIGH-QUALITY BREAKOUT WATCH
-    # -----------------------------
-    if setup is None:
-        distance_below = (
-            (prev20_high - close) / prev20_high
-        ) * 100
-
-        if (
-            0 <= distance_below <= WATCH_DISTANCE_PCT
-            and volume_ratio >= MIN_VOLUME_RATIO_WATCH
-            and RSI_BUY_MIN <= rsi14 < RSI_WATCH_MAX
-        ):
-            setup = "BREAKOUT WATCH"
-            breakout_level = prev20_high
-            breakout_date = ""
-
-    if setup is None:
         return None
 
-    score = calculate_score(latest, setup)
+    # -----------------------------------------
+    # Divergence classification
+    # -----------------------------------------
 
-    if setup == "BREAKOUT WATCH":
-        if score < MIN_WATCH_SCORE:
-            return None
-    else:
-        if score < MIN_BUY_SCORE:
-            return None
+    strength = classify_divergence(
+        div
+    )
 
-    # Entry:
-    # BUY = current close.
-    # WATCH = breakout trigger level.
-    entry = close if setup != "BREAKOUT WATCH" else breakout_level
+    score = calculate_score(
+        latest,
+        div
+    )
 
-    levels = calculate_levels(entry, hist)
+    # -----------------------------------------
+    # Setup classification
+    # -----------------------------------------
+
+    # RSI positive divergence:
+    # RSI itself is the confirming oscillator.
+
+    setup = "RSI POSITIVE DIVERGENCE"
+
+    # Classic positive divergence:
+    # stronger structural lower-low +
+    # meaningful RSI higher-low.
+
+    if (
+        div["price_lower_low_pct"] >= 2
+        and
+        div["rsi_improvement"] >= 5
+    ):
+
+        setup = "CLASSIC POSITIVE DIVERGENCE"
+
+    # -----------------------------------------
+    # Levels
+    # -----------------------------------------
+
+    levels = calculate_levels(
+        hist,
+        div
+    )
+
     if levels is None:
+
         return None
+
+    # -----------------------------------------
+    # Chart
+    # -----------------------------------------
 
     chart = (
-        "https://www.tradingview.com/chart/?symbol=NSE%3A"
+        "https://www.tradingview.com/chart/"
+        "?symbol=NSE%3A"
         + symbol
     )
 
+    signal_date = pd.Timestamp(
+        div["signal_date"]
+    )
+
+    days_since = int(
+        div["signal_age"]
+    )
+
     return {
-        "NSE Code": symbol,
-        "Turnover Rank": int(turnover_rank),
-        "Turnover": round(float(turnover), 2),
-        "Close": round(close, 2),
-        "EMA20": round(ema20, 2),
-        "EMA50": round(ema50, 2),
-        "RSI14": round(rsi14, 2),
-        "Volume Ratio": round(volume_ratio, 2),
-        "20-Day High": round(float(hist["High"].tail(20).max()), 2),
-        "Breakout Level": round(breakout_level, 2),
-        "Entry": round(levels["Entry"], 2),
-        "Stop Loss": round(levels["Stop Loss"], 2),
-        "Target 1": round(levels["Target 1"], 2),
-        "Target 2": round(levels["Target 2"], 2),
-        "Risk %": round(levels["Risk %"], 2),
-        "Today Change %": round(daily_change, 2),
-        "Setup": setup,
-        "Strength Score": score,
-        "20-Day Range %": round(range20, 2),
-        "ATR14": round(atr14, 2),
-        "Breakout Date": breakout_date,
-        "Chart": chart,
+
+        "NSE Code":
+            symbol,
+
+        "Turnover Rank":
+            int(turnover_rank),
+
+        "Turnover":
+            round(
+                float(turnover),
+                2
+            ),
+
+        "Close":
+            round(close, 2),
+
+        "Today Change %":
+            round(
+                float(
+                    latest[
+                        "DailyChangePct"
+                    ]
+                ),
+                2
+            ),
+
+        "Setup":
+            setup,
+
+        "Divergence Strength":
+            strength,
+
+        "Strength Score":
+            score,
+
+        "Price Low 1":
+            round(
+                div["price1"],
+                2
+            ),
+
+        "Price Low 2":
+            round(
+                div["price2"],
+                2
+            ),
+
+        "RSI Low 1":
+            round(
+                div["rsi1"],
+                2
+            ),
+
+        "RSI Low 2":
+            round(
+                div["rsi2"],
+                2
+            ),
+
+        "RSI14":
+            round(
+                float(
+                    latest["RSI14"]
+                ),
+                2
+            ),
+
+        "RSI Improvement %":
+            round(
+                div[
+                    "rsi_improvement"
+                ],
+                2
+            ),
+
+        "Volume Ratio":
+            round(
+                volume_ratio,
+                2
+            ),
+
+        "EMA20":
+            round(
+                float(
+                    latest["EMA20"]
+                ),
+                2
+            ),
+
+        "EMA50":
+            round(
+                float(
+                    latest["EMA50"]
+                ),
+                2
+            ),
+
+        "ATR14":
+            round(
+                float(
+                    latest["ATR14"]
+                ),
+                2
+            ),
+
+        "Support":
+            round(
+                levels["support"],
+                2
+            ),
+
+        "Entry":
+            round(
+                levels["entry"],
+                2
+            ),
+
+        "Stop Loss":
+            round(
+                levels["stop"],
+                2
+            ),
+
+        "Target 1":
+            round(
+                levels["target1"],
+                2
+            ),
+
+        "Target 2":
+            round(
+                levels["target2"],
+                2
+            ),
+
+        "Risk %":
+            round(
+                levels["risk_pct"],
+                2
+            ),
+
+        "Signal Date":
+            signal_date.strftime(
+                "%Y-%m-%d"
+            ),
+
+        "Days Since Signal":
+            days_since,
+
+        "Chart":
+            chart,
     }
 
 
-def load_universe(ws):
-    records = ws.get_all_records()
-    if not records:
-        raise ValueError(f"{NIFTY_SHEET} sheet is empty.")
+# =========================================================
+# LOAD NIFTY 200 UNIVERSE
+# =========================================================
 
-    df = pd.DataFrame(records)
+def load_universe(ws):
+
+    records = ws.get_all_records()
+
+    if not records:
+
+        raise ValueError(
+            f"{NIFTY_SHEET} sheet is empty."
+        )
+
+    df = pd.DataFrame(
+        records
+    )
 
     symbol_col = None
-    for col in ["NSE Code", "Symbol", "symbol", "NSECODE"]:
+
+    for col in [
+        "NSE Code",
+        "Symbol",
+        "symbol",
+        "NSECODE"
+    ]:
+
         if col in df.columns:
+
             symbol_col = col
+
             break
 
     if symbol_col is None:
+
         raise ValueError(
-            "NIFTY200 must contain 'NSE Code' or 'Symbol'."
+            "NIFTY200 must contain "
+            "'NSE Code' or 'Symbol'."
         )
 
-    df["NSE Code"] = df[symbol_col].apply(clean_symbol)
+    df["NSE Code"] = (
+        df[symbol_col]
+        .apply(clean_symbol)
+    )
 
     if "Turnover" not in df.columns:
-        raise ValueError("NIFTY200 must contain 'Turnover'.")
 
-    df["Turnover"] = df["Turnover"].apply(to_float)
-    df = df[df["NSE Code"].notna()]
-    df = df[df["NSE Code"].astype(str).str.len() > 0]
-    df = df[df["NSE Code"].apply(is_allowed_symbol)]
-    df = df[df["Turnover"].notna()]
+        raise ValueError(
+            "NIFTY200 must contain "
+            "'Turnover'."
+        )
 
-    # Stable turnover ranking.
+    df["Turnover"] = (
+        df["Turnover"]
+        .apply(to_float)
+    )
+
+    df = df[
+        df["NSE Code"].notna()
+    ]
+
+    df = df[
+        df["NSE Code"]
+        .astype(str)
+        .str.len() > 0
+    ]
+
+    df = df[
+        df["NSE Code"]
+        .apply(is_allowed_symbol)
+    ]
+
+    df = df[
+        df["Turnover"].notna()
+    ]
+
+    # Highest turnover first
     df = df.sort_values(
         "Turnover",
         ascending=False,
         kind="mergesort"
-    ).reset_index(drop=True)
+    ).reset_index(
+        drop=True
+    )
 
-    df["Turnover Rank"] = np.arange(1, len(df) + 1)
+    df["Turnover Rank"] = (
+        np.arange(
+            1,
+            len(df) + 1
+        )
+    )
 
-    # Keep top 200 after exclusions.
-    df = df.head(200).copy()
+    df = df.head(
+        200
+    ).copy()
 
     return df
 
 
-def download_history(symbols):
-    tickers = [f"{s}.NS" for s in symbols]
+# =========================================================
+# DOWNLOAD YAHOO HISTORY
+# =========================================================
 
-    print(f"Downloading Yahoo Finance history for {len(tickers)} symbols...")
+def download_history(symbols):
+
+    tickers = [
+        f"{s}.NS"
+        for s in symbols
+    ]
+
+    print(
+        f"Downloading Yahoo Finance "
+        f"history for {len(tickers)} symbols..."
+    )
 
     try:
+
         data = yf.download(
             tickers=tickers,
             period=HISTORY_PERIOD,
@@ -568,185 +1202,638 @@ def download_history(symbols):
             threads=True,
             progress=False,
         )
+
     except Exception as e:
-        print("Bulk Yahoo download failed:", e)
+
+        print(
+            "Bulk Yahoo download failed:",
+            e
+        )
+
         return {}
 
     histories = {}
 
-    if data is None or data.empty:
+    if (
+        data is None
+        or
+        data.empty
+    ):
+
         return histories
 
     for symbol in symbols:
+
         ticker = f"{symbol}.NS"
 
         try:
-            if len(symbols) == 1:
-                hist = data.copy()
-            else:
-                if ticker not in data.columns.get_level_values(0):
-                    continue
-                hist = data[ticker].copy()
 
-            hist = prepare_history(hist)
+            if len(symbols) == 1:
+
+                hist = data.copy()
+
+            else:
+
+                if (
+                    ticker
+                    not in
+                    data.columns
+                    .get_level_values(0)
+                ):
+
+                    continue
+
+                hist = data[
+                    ticker
+                ].copy()
+
+            hist = prepare_history(
+                hist
+            )
 
             if hist is not None:
-                histories[symbol] = hist
+
+                histories[
+                    symbol
+                ] = hist
 
         except Exception as e:
-            print(f"History error {symbol}: {e}")
+
+            print(
+                f"History error "
+                f"{symbol}: {e}"
+            )
 
     return histories
 
 
-def write_final_sheet(ws, rows):
-    # Always clear old data so no stale header/columns remain.
+# =========================================================
+# WRITE FINAL SHEET
+# =========================================================
+
+def write_final_sheet(
+    ws,
+    rows
+):
+
+    # Remove everything old
     ws.clear()
 
-    values = [OUTPUT_COLUMNS]
+    values = [
+        OUTPUT_COLUMNS
+    ]
 
     for row in rows:
-        values.append([row.get(col, "") for col in OUTPUT_COLUMNS])
 
-    end_row = max(len(values), 1)
+        values.append(
+            [
+                row.get(
+                    col,
+                    ""
+                )
+                for col in OUTPUT_COLUMNS
+            ]
+        )
 
-    # Exact A:V output.
+    end_row = max(
+        len(values),
+        1
+    )
+
+    end_col = len(
+        OUTPUT_COLUMNS
+    )
+
+    # Convert column number to Excel letter
+    def col_letter(n):
+
+        result = ""
+
+        while n:
+
+            n, remainder = divmod(
+                n - 1,
+                26
+            )
+
+            result = chr(
+                65 + remainder
+            ) + result
+
+        return result
+
+    last_col = col_letter(
+        end_col
+    )
+
     ws.update(
-        f"A1:V{end_row}",
+        f"A1:{last_col}{end_row}",
         values,
         value_input_option="USER_ENTERED",
     )
 
-    # Header formatting.
+    # -----------------------------------------------------
+    # HEADER
+    # -----------------------------------------------------
+
     try:
+
         ws.format(
-            "A1:V1",
+            f"A1:{last_col}1",
             {
-                "textFormat": {"bold": True},
-                "horizontalAlignment": "CENTER",
+                "backgroundColor": {
+                    "red": 0.10,
+                    "green": 0.25,
+                    "blue": 0.45,
+                },
+                "textFormat": {
+                    "bold": True,
+                    "foregroundColor": {
+                        "red": 1,
+                        "green": 1,
+                        "blue": 1,
+                    },
+                },
+                "horizontalAlignment":
+                    "CENTER",
+                "verticalAlignment":
+                    "MIDDLE",
             },
         )
 
         if len(values) > 1:
+
             ws.format(
-                f"A2:V{end_row}",
+                f"A2:{last_col}{end_row}",
                 {
-                    "horizontalAlignment": "CENTER",
+                    "horizontalAlignment":
+                        "CENTER",
+                    "verticalAlignment":
+                        "MIDDLE",
                 },
             )
 
-        ws.freeze(rows=1)
+        # -------------------------------------------------
+        # FREEZE HEADER
+        # -------------------------------------------------
+
+        ws.freeze(
+            rows=1
+        )
+
+        # -------------------------------------------------
+        # CONDITIONAL ROW COLORS
+        # -------------------------------------------------
+
+        # Find Setup column
+        setup_col = (
+            OUTPUT_COLUMNS.index(
+                "Setup"
+            ) + 1
+        )
+
+        def letter(n):
+
+            result = ""
+
+            while n:
+
+                n, r = divmod(
+                    n - 1,
+                    26
+                )
+
+                result = chr(
+                    65 + r
+                ) + result
+
+            return result
+
+        setup_letter = letter(
+            setup_col
+        )
+
+        # Green = RSI divergence
+        # Blue = Classic divergence
+
+        if len(values) > 1:
+
+            for i, row in enumerate(
+                rows,
+                start=2
+            ):
+
+                setup = row[
+                    "Setup"
+                ]
+
+                if setup == (
+                    "RSI POSITIVE DIVERGENCE"
+                ):
+
+                    bg = {
+                        "red": 0.80,
+                        "green": 1.00,
+                        "blue": 0.80,
+                    }
+
+                else:
+
+                    bg = {
+                        "red": 0.80,
+                        "green": 0.90,
+                        "blue": 1.00,
+                    }
+
+                ws.format(
+                    f"A{i}:{last_col}{i}",
+                    {
+                        "backgroundColor":
+                            bg
+                    },
+                )
+
+        # -------------------------------------------------
+        # CHART COLUMN
+        # -------------------------------------------------
+
+        chart_col = (
+            OUTPUT_COLUMNS.index(
+                "Chart"
+            ) + 1
+        )
+
+        chart_letter = letter(
+            chart_col
+        )
+
+        if len(values) > 1:
+
+            for row_num in range(
+                2,
+                end_row + 1
+            ):
+
+                formula = (
+                    f'=HYPERLINK('
+                    f'{chart_letter}{row_num},'
+                    f'"📈 Chart")'
+                )
+
+                # Keep actual URL hidden
+                # and show clickable Chart
+                ws.update(
+                    f"{chart_letter}{row_num}",
+                    [[
+                        formula
+                    ]],
+                    value_input_option=
+                    "USER_ENTERED",
+                )
+
+        # -------------------------------------------------
+        # COLUMN WIDTHS
+        # -------------------------------------------------
+
+        widths = {
+            "A": 110,
+            "B": 100,
+            "C": 110,
+            "D": 90,
+            "E": 95,
+            "F": 190,
+            "G": 110,
+            "H": 100,
+            "I": 100,
+            "J": 100,
+            "K": 90,
+            "L": 90,
+            "M": 75,
+            "N": 105,
+            "O": 95,
+            "P": 90,
+            "Q": 90,
+            "R": 90,
+            "S": 100,
+            "T": 90,
+            "U": 90,
+            "V": 90,
+            "W": 90,
+            "X": 80,
+            "Y": 110,
+            "Z": 110,
+            "AA": 100,
+        }
+
+        for col, width in widths.items():
+
+            try:
+
+                ws.set_basic_filter(
+                    f"A1:{last_col}{end_row}"
+                )
+
+                break
+
+            except:
+
+                pass
 
     except Exception as e:
-        print("Formatting warning:", e)
 
+        print(
+            "Formatting warning:",
+            e
+        )
+
+
+# =========================================================
+# DIAGNOSTICS
+# =========================================================
 
 def diagnostics(rows):
+
+    print("\n")
+    print("=" * 60)
+    print("DIVERGENCE DIAGNOSTICS")
+    print("=" * 60)
+
     if not rows:
-        print("No candidates found.")
+
+        print(
+            "No positive divergence "
+            "candidates found."
+        )
+
         return
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(
+        rows
+    )
 
-    assert len(df["Turnover Rank"]) == len(
-        set(df["Turnover Rank"])
-    ), "Duplicate turnover ranks found."
+    print(
+        f"Candidates: {len(df)}"
+    )
 
-    assert (df["Risk %"] <= MAX_RISK_PCT + 1e-9).all(), \
-        "Risk > 5% found."
+    print(
+        "RSI Positive Divergence:",
+        (
+            df["Setup"]
+            ==
+            "RSI POSITIVE DIVERGENCE"
+        ).sum()
+    )
 
-    buy = df[df["Setup"].isin(["FRESH BREAKOUT", "RETEST + HOLD"])]
+    print(
+        "Classic Positive Divergence:",
+        (
+            df["Setup"]
+            ==
+            "CLASSIC POSITIVE DIVERGENCE"
+        ).sum()
+    )
 
-    if not buy.empty:
-        assert (buy["RSI14"] >= RSI_BUY_MIN).all()
-        assert (buy["RSI14"] < RSI_BUY_MAX).all()
-        assert (buy["Volume Ratio"] >= MIN_VOLUME_RATIO_BUY).all()
+    print(
+        "Strong:",
+        (
+            df["Divergence Strength"]
+            ==
+            "STRONG"
+        ).sum()
+    )
 
-    watch = df[df["Setup"] == "BREAKOUT WATCH"]
+    print(
+        "Good:",
+        (
+            df["Divergence Strength"]
+            ==
+            "GOOD"
+        ).sum()
+    )
 
-    if not watch.empty:
-        assert (watch["RSI14"] >= RSI_BUY_MIN).all()
-        assert (watch["RSI14"] < RSI_WATCH_MAX).all()
-        assert (watch["Volume Ratio"] >= MIN_VOLUME_RATIO_WATCH).all()
+    print(
+        "Medium:",
+        (
+            df["Divergence Strength"]
+            ==
+            "MEDIUM"
+        ).sum()
+    )
 
-    print("\nDiagnostics:")
-    print(f"Candidates: {len(df)}")
-    print(f"BUY: {len(buy)}")
-    print(f"WATCH: {len(watch)}")
-    print(f"Max risk: {df['Risk %'].max():.2f}%")
-    print(f"Max score: {df['Strength Score'].max()}")
+    print(
+        "Highest Score:",
+        df["Strength Score"].max()
+    )
 
+    print(
+        "Lowest Risk:",
+        f"{df['Risk %'].min():.2f}%"
+    )
+
+    print(
+        "Highest Risk:",
+        f"{df['Risk %'].max():.2f}%"
+    )
+
+    print("=" * 60)
+
+
+# =========================================================
+# MAIN
+# =========================================================
 
 def main():
-    print("=" * 65)
-    print("NIFTY 200 SWING SNIPER V2.1.4")
-    print("=" * 65)
+
+    print("=" * 70)
+
+    print(
+        "NIFTY 200 "
+        "POSITIVE DIVERGENCE SCANNER V1.0"
+    )
+
+    print("=" * 70)
 
     creds = get_credentials()
-    gc = gspread.authorize(creds)
 
-    sh = gc.open_by_key(SPREADSHEET_ID)
-    universe_ws = sh.worksheet(NIFTY_SHEET)
-    final_ws = sh.worksheet(FINAL_SHEET)
+    gc = gspread.authorize(
+        creds
+    )
 
-    universe = load_universe(universe_ws)
+    sh = gc.open_by_key(
+        SPREADSHEET_ID
+    )
 
-    print(f"Universe loaded: {len(universe)} stocks")
+    universe_ws = (
+        sh.worksheet(
+            NIFTY_SHEET
+        )
+    )
 
-    symbols = universe["NSE Code"].tolist()
-    histories = download_history(symbols)
+    final_ws = (
+        sh.worksheet(
+            FINAL_SHEET
+        )
+    )
 
-    print(f"Usable histories: {len(histories)}")
+    # -----------------------------------------------------
+    # NIFTY200
+    # -----------------------------------------------------
+
+    universe = load_universe(
+        universe_ws
+    )
+
+    print(
+        f"Universe loaded: "
+        f"{len(universe)} stocks"
+    )
+
+    symbols = (
+        universe[
+            "NSE Code"
+        ].tolist()
+    )
+
+    # -----------------------------------------------------
+    # DOWNLOAD DATA
+    # -----------------------------------------------------
+
+    histories = download_history(
+        symbols
+    )
+
+    print(
+        f"Usable histories: "
+        f"{len(histories)}"
+    )
+
+    # -----------------------------------------------------
+    # ANALYZE
+    # -----------------------------------------------------
 
     candidates = []
 
     for _, u in universe.iterrows():
-        symbol = u["NSE Code"]
+
+        symbol = u[
+            "NSE Code"
+        ]
 
         if symbol not in histories:
+
             continue
 
         try:
+
             result = analyze_stock(
                 symbol=symbol,
-                hist=histories[symbol],
-                turnover_rank=int(u["Turnover Rank"]),
-                turnover=float(u["Turnover"]),
+                hist=histories[
+                    symbol
+                ],
+                turnover_rank=int(
+                    u[
+                        "Turnover Rank"
+                    ]
+                ),
+                turnover=float(
+                    u[
+                        "Turnover"
+                    ]
+                ),
             )
 
             if result:
-                candidates.append(result)
+
+                candidates.append(
+                    result
+                )
 
         except Exception as e:
-            print(f"Analysis error {symbol}: {e}")
 
-    # BUY first, then WATCH; highest score first.
+            print(
+                f"Analysis error "
+                f"{symbol}: {e}"
+            )
+
+    # -----------------------------------------------------
+    # SORT
+    # -----------------------------------------------------
+
     setup_priority = {
-        "FRESH BREAKOUT": 0,
-        "RETEST + HOLD": 1,
-        "BREAKOUT WATCH": 2,
+        "CLASSIC POSITIVE DIVERGENCE": 0,
+        "RSI POSITIVE DIVERGENCE": 1,
+    }
+
+    strength_priority = {
+        "STRONG": 0,
+        "GOOD": 1,
+        "MEDIUM": 2,
     }
 
     candidates.sort(
         key=lambda x: (
-            setup_priority.get(x["Setup"], 9),
-            -x["Strength Score"],
-            x["Turnover Rank"],
+            setup_priority.get(
+                x["Setup"],
+                9
+            ),
+            strength_priority.get(
+                x[
+                    "Divergence Strength"
+                ],
+                9
+            ),
+            -x[
+                "Strength Score"
+            ],
+            x[
+                "Turnover Rank"
+            ],
         )
     )
 
-    # Hard cap final list.
-    candidates = candidates[:MAX_FINAL_STOCKS]
+    # -----------------------------------------------------
+    # FINAL LIMIT
+    # -----------------------------------------------------
 
-    diagnostics(candidates)
+    candidates = candidates[
+        :MAX_FINAL_STOCKS
+    ]
 
-    write_final_sheet(final_ws, candidates)
+    diagnostics(
+        candidates
+    )
 
-    print("\nFinal List updated successfully.")
-    print(f"Rows written: {len(candidates)}")
-    print("Columns written: A:V (exactly 22 columns)")
-    print("=" * 65)
+    # -----------------------------------------------------
+    # WRITE GOOGLE SHEET
+    # -----------------------------------------------------
 
+    write_final_sheet(
+        final_ws,
+        candidates
+    )
+
+    print("\n")
+    print(
+        "Final List updated successfully."
+    )
+
+    print(
+        f"Rows written: "
+        f"{len(candidates)}"
+    )
+
+    print(
+        f"Columns written: "
+        f"{len(OUTPUT_COLUMNS)}"
+    )
+
+    print("=" * 70)
+
+
+# =========================================================
+# RUN
+# =========================================================
 
 if __name__ == "__main__":
+
     main()
