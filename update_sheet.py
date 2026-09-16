@@ -14,8 +14,6 @@
 #
 # ============================================================
 
-import os
-import json
 import gspread
 import numpy as np
 import pandas as pd
@@ -115,41 +113,18 @@ def connect_google_sheet():
         "https://www.googleapis.com/auth/drive"
     ]
 
-    # GitHub Actions provides the Google service-account JSON
-    # through the GCP_CREDENTIALS secret. No credentials.json
-    # file is required in the repository.
-    credentials_json = os.environ.get("GCP_CREDENTIALS")
+    # --------------------------------------------------------
+    # IMPORTANT:
+    # Apni existing credentials JSON ka naam/path yahan rakho
+    # --------------------------------------------------------
 
-    if not credentials_json:
-        raise RuntimeError(
-            "GCP_CREDENTIALS GitHub Secret nahi mila."
-        )
-
-    try:
-        credentials_dict = json.loads(credentials_json)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(
-            "GCP_CREDENTIALS valid JSON nahi hai."
-        ) from e
-
-    required_keys = ["type", "client_email", "private_key"]
-    missing = [
-        key for key in required_keys
-        if key not in credentials_dict
-    ]
-
-    if missing:
-        raise RuntimeError(
-            "GCP_CREDENTIALS mein required fields missing hain: "
-            + ", ".join(missing)
-        )
-
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(
-        credentials_dict,
+    creds = ServiceAccountCredentials.from_json_keyfile_name(
+        "credentials.json",
         scope
     )
 
     client = gspread.authorize(creds)
+
     sh = client.open_by_key(SPREADSHEET_ID)
 
     return sh
@@ -1052,11 +1027,6 @@ def write_final_sheet(
     # Clear old values
     # --------------------------------------------------------
 
-    try:
-        ws.clear_basic_filter()
-    except Exception:
-        pass
-
     ws.clear()
 
     # --------------------------------------------------------
@@ -1082,8 +1052,8 @@ def write_final_sheet(
     # --------------------------------------------------------
 
     ws.update(
-        f"A1:{last_col}{last_row}",
-        values,
+        range_name=f"A1:{last_col}{last_row}",
+        values=values,
         value_input_option="USER_ENTERED"
     )
 
@@ -1205,24 +1175,6 @@ def write_final_sheet(
             )
 
     # --------------------------------------------------------
-    # Force trading levels to NUMBER.
-    # This removes any old Date formatting from Stop Loss,
-    # Target 1, Target 2, etc.
-    # --------------------------------------------------------
-
-    if last_row >= 2:
-
-        ws.format(
-            f"T2:X{last_row}",
-            {
-                "numberFormat": {
-                    "type": "NUMBER",
-                    "pattern": "0.00"
-                }
-            }
-        )
-
-    # --------------------------------------------------------
     # Signal Date = TEXT
     # Prevent 1900/1901 date conversion
     # --------------------------------------------------------
@@ -1272,8 +1224,8 @@ def write_final_sheet(
             ])
 
         ws.update(
-            f"AA2:AA{last_row}",
-            chart_formulas,
+            range_name=f"AA2:AA{last_row}",
+            values=chart_formulas,
             value_input_option="USER_ENTERED"
         )
 
@@ -1422,7 +1374,14 @@ def write_final_sheet(
 
     for letter, width in widths.items():
 
-        col_index = ord(letter) - ord("A")
+        # Convert Excel/Google Sheets column letters to a zero-based index.
+        # A = 0, B = 1, ..., Z = 25, AA = 26.
+        col_index = 0
+
+        for ch in letter.upper():
+            col_index = col_index * 26 + (ord(ch) - ord("A") + 1)
+
+        col_index -= 1
 
         requests.append({
             "updateDimensionProperties": {
