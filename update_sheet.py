@@ -114,12 +114,39 @@ def connect_google_sheet():
     ]
 
     # --------------------------------------------------------
-    # IMPORTANT:
-    # Apni existing credentials JSON ka naam/path yahan rakho
+    # GitHub Actions: credentials JSON is stored in the
+    # GCP_CREDENTIALS repository secret. No credentials.json
+    # file is required in the repository.
     # --------------------------------------------------------
 
-    creds = ServiceAccountCredentials.from_json_keyfile_name(
-        "credentials.json",
+    credentials_json = os.environ.get("GCP_CREDENTIALS")
+
+    if not credentials_json:
+        raise RuntimeError(
+            "GCP_CREDENTIALS GitHub Secret nahi mila."
+        )
+
+    try:
+        credentials_dict = json.loads(credentials_json)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            "GCP_CREDENTIALS valid JSON nahi hai."
+        ) from e
+
+    required_keys = ["type", "client_email", "private_key"]
+    missing = [
+        key for key in required_keys
+        if key not in credentials_dict
+    ]
+
+    if missing:
+        raise RuntimeError(
+            "GCP_CREDENTIALS mein required fields missing hain: "
+            + ", ".join(missing)
+        )
+
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(
+        credentials_dict,
         scope
     )
 
