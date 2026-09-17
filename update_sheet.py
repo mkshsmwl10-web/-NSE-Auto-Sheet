@@ -1,8 +1,8 @@
 # ============================================================
-# NIFTY 200 POSITIVE DIVERGENCE SCANNER V1.1
+# NIFTY 200 POSITIVE DIVERGENCE SCANNER V1.2
 # ============================================================
 #
-# V1.1 - MORE SIGNALS + DEBUG COUNT
+# V1.2 - MORE SIGNALS + DEBUG COUNT
 #
 # SETUPS:
 #   1. RSI POSITIVE DIVERGENCE
@@ -12,7 +12,7 @@
 #   - NIFTY200 Google Sheet
 #   - Yahoo Finance daily OHLCV
 #
-# V1.1 CHANGES:
+# V1.2 CHANGES:
 #   - More relaxed signal-age filter
 #   - More relaxed volume filter
 #   - More relaxed maximum-risk filter
@@ -67,13 +67,13 @@ MIN_RSI_HIGHER_LOW = 1.50
 # Maximum distance between two swing lows
 MAX_SWING_GAP = 90
 
-# V1.1 - More signals
+# V1.2 - More signals
 MAX_SIGNAL_AGE = 30
 
-# V1.1 - More signals
+# V1.2 - More signals
 MIN_VOLUME_RATIO = 0.60
 
-# V1.1 - More signals
+# V1.2 - More signals
 MAX_RISK_PCT = 10.0
 
 # Targets
@@ -82,6 +82,8 @@ TARGET2_R = 3.0
 
 # Maximum stocks in Final List
 MAX_FINAL_STOCKS = 30
+MIN_FINAL_SCORE = 60
+WATCHLIST_MIN_SCORE = 50
 
 # Optional delay between Yahoo requests
 REQUEST_DELAY_SECONDS = 0.10
@@ -105,7 +107,7 @@ OUTPUT_COLUMNS = [
     "RSI Low 1",
     "RSI Low 2",
     "RSI14",
-    "RSI Improvement %",
+    "RSI Improvement",
     "Volume Ratio",
     "EMA20",
     "EMA50",
@@ -890,7 +892,7 @@ def analyze_stock(
 
         volume_ratio = 0
 
-    # Volume is now a soft-enough V1.1 filter
+    # Volume is now a soft-enough V1.2 filter
     if volume_ratio < MIN_VOLUME_RATIO:
 
         debug["Volume Failed"] += 1
@@ -1124,7 +1126,7 @@ def analyze_stock(
             2
         ),
 
-        "RSI Improvement %": round(
+        "RSI Improvement": round(
             rsi_improvement,
             2
         ),
@@ -1611,7 +1613,7 @@ def write_debug_sheet(
 
     rows = [
         [
-            "NIFTY 200 POSITIVE DIVERGENCE SCANNER V1.1",
+            "NIFTY 200 POSITIVE DIVERGENCE SCANNER V1.2",
             "",
             "",
             "",
@@ -1867,7 +1869,7 @@ def main():
 
     print("=" * 70)
     print(
-        "NIFTY 200 POSITIVE DIVERGENCE SCANNER V1.1"
+        "NIFTY 200 POSITIVE DIVERGENCE SCANNER V1.2"
     )
     print(
         "MORE SIGNALS + DEBUG COUNT"
@@ -2051,7 +2053,7 @@ def main():
     print()
     print("=" * 70)
     print(
-        "SCAN COMPLETE - V1.1"
+        "SCAN COMPLETE - V1.2"
     )
     print("=" * 70)
 
