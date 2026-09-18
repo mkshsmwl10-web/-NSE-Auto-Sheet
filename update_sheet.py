@@ -1,32 +1,49 @@
 #!/usr/bin/env python3
 """
-NIFTY 200 Positive Divergence + Cup / Cup-with-Handle Scanner V1.3
+NIFTY 200 POSITIVE DIVERGENCE + CUP PATTERN SCANNER V1.4
 
-Keeps:
-- RSI Positive Divergence
-- Classic Positive Divergence
-- Cup
-- Cup with Handle
+SETUPS ARE COMPLETELY SEPARATE
 
-Cup patterns are checked on Daily, Weekly and Monthly OHLC data.
-The scanner reports whether the pattern is BEFORE breakout, BREAKOUT,
-or AFTER breakout.
+SETUP A:
+    RSI Positive Divergence
+    Classic Positive Divergence
 
-Final List keeps Score >= 60 and removes the unwanted columns:
-Stock/NSE Code, RSI Improvement %, EMA20, EMA50, Support, Entry,
-Target 1, Target 2, Risk %.
+SETUP B:
+    Cup Pattern
+    Cup with Handle
 
-NOTE:
-Cup/cup-with-handle detection is rule-based, not a discretionary chart
-pattern engine. Thresholds can be tuned in the CONFIG section.
+Cup Pattern is independently checked on:
+    Daily
+    Weekly
+    Monthly
+
+Cup Status:
+    BEFORE BREAKOUT
+    BREAKOUT
+    AFTER BREAKOUT
+
+FINAL LIST:
+    Stock Name
+    NSE Code
+    Setup
+    Daily Pattern
+    Daily Status
+    Weekly Pattern
+    Weekly Status
+    Monthly Pattern
+    Monthly Status
+    CMP
+    Chart Link
+
+IMPORTANT:
+    RSI + Cup is NEVER created as a combined setup.
+    If a stock has both, it gets separate rows.
 """
 
 import os
 import sys
 import json
-import math
 import re
-from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -35,161 +52,201 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 
-# =========================
+# ============================================================
 # CONFIG
-# =========================
+# ============================================================
 
 SPREADSHEET_ID = os.environ.get(
     "SPREADSHEET_ID",
     "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E",
 )
 
-FINAL_LIST_SHEET = os.environ.get("FINAL_LIST_SHEET", "Final List")
+INPUT_SHEET = "NIFTY200"
+FINAL_LIST_SHEET = os.environ.get(
+    "FINAL_LIST_SHEET",
+    "Final List",
+)
 
 MIN_HISTORY_ROWS = 100
-MIN_SCORE = 60
 
-# Cup detection
+# ------------------------------------------------------------
+# DIVERGENCE
+# ------------------------------------------------------------
+
+RSI_PERIOD = 14
+
+SWING_LEFT = 3
+SWING_RIGHT = 3
+
+MIN_PRICE_LOWER_LOW_PCT = 0.50
+MIN_RSI_IMPROVEMENT = 2.0
+
+MAX_DIVERGENCE_GAP = 60
+MAX_SIGNAL_AGE = 15
+
+
+# ------------------------------------------------------------
+# CUP
+# ------------------------------------------------------------
+
 CUP_MIN_BARS = {
     "Daily": 40,
     "Weekly": 20,
     "Monthly": 12,
 }
+
 CUP_MAX_BARS = {
     "Daily": 180,
     "Weekly": 80,
     "Monthly": 48,
 }
 
-# Minimum depth from rim to cup bottom.
 CUP_MIN_DEPTH = 0.12
 CUP_MAX_DEPTH = 0.45
 
-# The right side should recover close to the left rim.
 RIM_TOLERANCE = 0.08
 
-# Handle is a short consolidation/pullback near the right rim.
 HANDLE_MAX_RETRACE = 0.18
 HANDLE_MAX_BARS_RATIO = 0.35
 
-# Breakout confirmation:
-# close must exceed rim by this fraction.
 BREAKOUT_BUFFER = 0.005
 
-# Breakout can be considered recent for AFTER BREAKOUT.
 RECENT_BREAKOUT_BARS = 12
 
 
-REMOVE_COLUMNS = {
-    "stock/nse code",
-    "nse code",
-    "stock code",
-    "stock/nse",
-    "rsi improvement %",
-    "rsi improvement",
-    "ema20",
-    "ema 20",
-    "ema50",
-    "ema 50",
-    "support",
-    "entry",
-    "target 1",
-    "target1",
-    "target 2",
-    "target2",
-    "risk %",
-    "risk",
-}
+# ============================================================
+# FINAL OUTPUT COLUMNS
+# ============================================================
+
+FINAL_COLUMNS = [
+    "Stock Name",
+    "NSE Code",
+    "Setup",
+
+    "Daily Pattern",
+    "Daily Status",
+
+    "Weekly Pattern",
+    "Weekly Status",
+
+    "Monthly Pattern",
+    "Monthly Status",
+
+    "CMP",
+    "Chart Link",
+]
 
 
-# =========================
-# GOOGLE SHEETS
-# =========================
+# ============================================================
+# HEADER NORMALIZER
+# ============================================================
 
-def normalize_header(x):
-    return re.sub(r"\s+", " ", str(x or "").strip().lower())
+def normalize_header(value):
+    return re.sub(
+        r"\s+",
+        " ",
+        str(value or "").strip().lower()
+    )
 
+
+# ============================================================
+# GOOGLE CREDENTIALS
+# ============================================================
 
 def get_credentials():
-    raw = os.environ.get("GCP_CREDENTIALS", "").strip()
+
+    raw = os.environ.get(
+        "GCP_CREDENTIALS",
+        ""
+    ).strip()
 
     if not raw:
-        raise RuntimeError("GCP_CREDENTIALS is missing.")
+        raise RuntimeError(
+            "GCP_CREDENTIALS is missing."
+        )
 
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
 
+    # GitHub Secret contains JSON
     if raw.startswith("{"):
+
         return Credentials.from_service_account_info(
             json.loads(raw),
             scopes=scopes,
         )
 
+    # Or a credentials file path
     if os.path.exists(raw):
+
         return Credentials.from_service_account_file(
             raw,
             scopes=scopes,
         )
 
     raise RuntimeError(
-        "GCP_CREDENTIALS is not valid JSON or a valid credentials file."
+        "GCP_CREDENTIALS is not valid JSON "
+        "or a valid credentials file."
     )
 
 
-def write_final_list(rows):
-    creds = get_credentials()
-    client = gspread.authorize(creds)
+# ============================================================
+# YAHOO SYMBOL
+# ============================================================
 
-    sh = client.open_by_key(SPREADSHEET_ID)
-    ws = sh.worksheet(FINAL_LIST_SHEET)
+def yahoo_symbol(nse_code):
 
-    if not rows:
-        ws.clear()
-        return
+    code = str(
+        nse_code
+    ).strip().upper()
 
-    headers = list(rows[0].keys())
+    if not code:
+        return None
 
-    # Remove unwanted columns from final output.
-    keep_headers = [
-        h for h in headers
-        if normalize_header(h) not in REMOVE_COLUMNS
-    ]
+    if code.endswith(".NS"):
+        return code
 
-    # Score column must remain.
-    if not any(normalize_header(h) == "score" for h in keep_headers):
-        raise RuntimeError("Score column disappeared from output.")
+    return code + ".NS"
 
-    output = [keep_headers]
 
-    for row in rows:
-        output.append([row.get(h, "") for h in keep_headers])
+# ============================================================
+# TRADINGVIEW CHART LINK
+# ============================================================
 
-    ws.clear()
-    ws.update(
-        "A1",
-        output,
-        value_input_option="USER_ENTERED",
+def tradingview_link(nse_code):
+
+    code = str(
+        nse_code
+    ).strip().upper()
+
+    code = code.replace(
+        ".NS",
+        ""
     )
 
+    return (
+        "https://in.tradingview.com/chart/"
+        "?symbol=NSE%3A"
+        + code
+    )
+
+
+# ============================================================
+# DOWNLOAD DATA
+# ============================================================
+
+def download_ohlcv(
+    symbol,
+    period="5y",
+    interval="1d"
+):
+
     try:
-        ws.freeze(rows=1)
-    except Exception:
-        pass
 
-    print("Final List updated.")
-    print("Rows:", len(rows))
-    print("Columns:", len(keep_headers))
-
-
-# =========================
-# DATA
-# =========================
-
-def download_ohlcv(symbol, period="5y", interval="1d"):
-    try:
         ticker = yf.Ticker(symbol)
+
         df = ticker.history(
             period=period,
             interval=interval,
@@ -201,64 +258,125 @@ def download_ohlcv(symbol, period="5y", interval="1d"):
 
         df = df.reset_index()
 
-        # Standardize names.
+        # Normalize column names
         df.columns = [
-            str(c).strip().lower().replace(" ", "_")
+            str(c)
+            .strip()
+            .lower()
+            .replace(" ", "_")
             for c in df.columns
         ]
 
-        required = {"close", "high", "low", "volume"}
-        if not required.issubset(set(df.columns)):
+        required = {
+            "close",
+            "high",
+            "low",
+            "volume",
+        }
+
+        if not required.issubset(
+            set(df.columns)
+        ):
             return None
 
-        df = df.dropna(subset=["close", "high", "low"])
+        df = df.dropna(
+            subset=[
+                "close",
+                "high",
+                "low",
+            ]
+        )
+
+        if len(df) < MIN_HISTORY_ROWS:
+            return None
+
         return df
 
     except Exception as e:
-        print("Download error:", symbol, e)
+
+        print(
+            "Download error:",
+            symbol,
+            e
+        )
+
         return None
 
 
-def resample_ohlcv(df, timeframe):
+# ============================================================
+# RESAMPLE
+# ============================================================
+
+def resample_ohlcv(
+    df,
+    timeframe
+):
+
     x = df.copy()
 
     if "date" in x.columns:
         date_col = "date"
+
     elif "datetime" in x.columns:
         date_col = "datetime"
+
     else:
         return None
 
-    x[date_col] = pd.to_datetime(x[date_col], errors="coerce")
-    x = x.dropna(subset=[date_col])
-    x = x.set_index(date_col)
+    x[date_col] = pd.to_datetime(
+        x[date_col],
+        errors="coerce"
+    )
 
-    rule = {
+    x = x.dropna(
+        subset=[date_col]
+    )
+
+    x = x.set_index(
+        date_col
+    )
+
+    rules = {
         "Daily": "1D",
         "Weekly": "W-FRI",
         "Monthly": "ME",
-    }[timeframe]
+    }
 
-    out = x.resample(rule).agg({
+    rule = rules[timeframe]
+
+    out = x.resample(
+        rule
+    ).agg({
+
         "open": "first",
         "high": "max",
         "low": "min",
         "close": "last",
         "volume": "sum",
+
     }).dropna()
 
     return out.reset_index()
 
 
-# =========================
-# RSI DIVERGENCE
-# =========================
+# ============================================================
+# RSI
+# ============================================================
 
-def rsi(series, period=14):
+def rsi(
+    series,
+    period=14
+):
+
     delta = series.diff()
 
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
+    gain = delta.clip(
+        lower=0
+    )
+
+    loss = -delta.clip(
+        upper=0
+    )
 
     avg_gain = gain.ewm(
         alpha=1 / period,
@@ -272,153 +390,477 @@ def rsi(series, period=14):
         adjust=False,
     ).mean()
 
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
+    rs = (
+        avg_gain /
+        avg_loss.replace(
+            0,
+            np.nan
+        )
+    )
+
+    return (
+        100 -
+        (
+            100 /
+            (1 + rs)
+        )
+    )
 
 
-def local_lows(series, left=3, right=3):
-    values = series.to_numpy(dtype=float)
+# ============================================================
+# PIVOT LOWS
+# ============================================================
+
+def local_lows(
+    series,
+    left=3,
+    right=3
+):
+
+    values = series.to_numpy(
+        dtype=float
+    )
+
     lows = []
 
-    for i in range(left, len(values) - right):
-        window = values[i-left:i+right+1]
-        if values[i] == np.min(window):
+    for i in range(
+        left,
+        len(values) - right
+    ):
+
+        window = values[
+            i-left:i+right+1
+        ]
+
+        if (
+            np.isfinite(values[i])
+            and
+            values[i] == np.min(window)
+        ):
             lows.append(i)
 
     return lows
 
 
-def positive_divergence(df):
-    if df is None or len(df) < MIN_HISTORY_ROWS:
-        return False, "", 0
+# ============================================================
+# POSITIVE DIVERGENCE
+# ============================================================
 
-    close = df["close"].astype(float)
-    rs = rsi(close, 14)
+def find_divergence_setups(df):
 
-    lows = local_lows(close, 3, 3)
+    """
+    Returns a LIST.
+
+    Possible results:
+        RSI Positive Divergence
+        Classic Positive Divergence
+
+    Both can be returned independently.
+
+    This function NEVER returns Cup Pattern.
+    """
+
+    results = []
+
+    if (
+        df is None
+        or len(df) < MIN_HISTORY_ROWS
+    ):
+        return results
+
+    close = df[
+        "close"
+    ].astype(float)
+
+    rsi_values = rsi(
+        close,
+        RSI_PERIOD
+    )
+
+    lows = local_lows(
+        close,
+        SWING_LEFT,
+        SWING_RIGHT
+    )
 
     if len(lows) < 2:
-        return False, "", 0
+        return results
 
-    i1, i2 = lows[-2], lows[-1]
+    # Test recent pivot pairs
+    recent_lows = lows[-8:]
 
-    price1 = close.iloc[i1]
-    price2 = close.iloc[i2]
-    rsi1 = rs.iloc[i1]
-    rsi2 = rs.iloc[i2]
+    best_rsi = None
+    best_classic = None
 
-    if pd.isna(rsi1) or pd.isna(rsi2):
-        return False, "", 0
+    for x in range(
+        len(recent_lows) - 1
+    ):
 
-    lower_price = price2 < price1 * 0.995
-    higher_rsi = rsi2 >= rsi1 + 2
+        i1 = recent_lows[x]
 
-    if lower_price and higher_rsi:
-        return True, "RSI Positive Divergence", 65
+        for y in range(
+            x + 1,
+            len(recent_lows)
+        ):
 
-    # Classic positive divergence can use a lower low with improving
-    # momentum even if the RSI improvement is smaller.
-    if lower_price and rsi2 > rsi1:
-        return True, "Classic Positive Divergence", 60
+            i2 = recent_lows[y]
 
-    return False, "", 0
+            gap = i2 - i1
+
+            if (
+                gap <= 0
+                or gap > MAX_DIVERGENCE_GAP
+            ):
+                continue
+
+            price1 = float(
+                close.iloc[i1]
+            )
+
+            price2 = float(
+                close.iloc[i2]
+            )
+
+            rsi1 = float(
+                rsi_values.iloc[i1]
+            )
+
+            rsi2 = float(
+                rsi_values.iloc[i2]
+            )
+
+            if not all(
+                np.isfinite(x)
+                for x in [
+                    price1,
+                    price2,
+                    rsi1,
+                    rsi2,
+                ]
+            ):
+                continue
+
+            price_lower_pct = (
+                (price1 - price2)
+                / price1
+                * 100
+            )
+
+            rsi_improvement = (
+                rsi2 - rsi1
+            )
+
+            signal_age = (
+                len(df) - 1 - i2
+            )
+
+            if (
+                signal_age >
+                MAX_SIGNAL_AGE
+            ):
+                continue
+
+            # ------------------------------------------------
+            # RSI POSITIVE DIVERGENCE
+            # ------------------------------------------------
+
+            if (
+                price_lower_pct
+                >= MIN_PRICE_LOWER_LOW_PCT
+                and
+                rsi_improvement
+                >= MIN_RSI_IMPROVEMENT
+            ):
+
+                candidate = {
+                    "Setup":
+                        "RSI Positive Divergence",
+
+                    "Signal Age":
+                        signal_age,
+
+                    "RSI Improvement":
+                        rsi_improvement,
+
+                    "Price Lower Low":
+                        price_lower_pct,
+                }
+
+                if (
+                    best_rsi is None
+                    or
+                    signal_age <
+                    best_rsi["Signal Age"]
+                ):
+                    best_rsi = candidate
+
+            # ------------------------------------------------
+            # CLASSIC POSITIVE DIVERGENCE
+            # ------------------------------------------------
+
+            if (
+                price_lower_pct
+                >= MIN_PRICE_LOWER_LOW_PCT
+                and
+                rsi2 > rsi1
+            ):
+
+                candidate = {
+                    "Setup":
+                        "Classic Positive Divergence",
+
+                    "Signal Age":
+                        signal_age,
+
+                    "RSI Improvement":
+                        rsi_improvement,
+
+                    "Price Lower Low":
+                        price_lower_pct,
+                }
+
+                if (
+                    best_classic is None
+                    or
+                    signal_age <
+                    best_classic["Signal Age"]
+                ):
+                    best_classic = candidate
+
+    if best_rsi is not None:
+
+        results.append(
+            best_rsi
+        )
+
+    if best_classic is not None:
+
+        results.append(
+            best_classic
+        )
+
+    return results
 
 
-# =========================
-# CUP / CUP WITH HANDLE
-# =========================
+# ============================================================
+# SMOOTHING
+# ============================================================
 
-def smooth(values, window):
+def smooth(
+    values,
+    window
+):
+
     if len(values) < window:
         return values
-    return pd.Series(values).rolling(
-        window=window,
-        center=True,
-        min_periods=1,
-    ).mean().to_numpy()
+
+    return (
+        pd.Series(values)
+        .rolling(
+            window=window,
+            center=True,
+            min_periods=1,
+        )
+        .mean()
+        .to_numpy()
+    )
 
 
-def detect_cup(df, timeframe):
+# ============================================================
+# CUP DETECTOR
+# ============================================================
+
+def detect_cup(
+    df,
+    timeframe
+):
+
     """
     Returns:
-      pattern: None / Cup / Cup with Handle
-      status: BEFORE BREAKOUT / BREAKOUT / AFTER BREAKOUT
-      score: pattern score
+
+        pattern
+        status
+
+    Pattern:
+        Cup
+        Cup with Handle
+
+    Status:
+        BEFORE BREAKOUT
+        BREAKOUT
+        AFTER BREAKOUT
+
+    No divergence logic is used here.
     """
 
     if df is None:
-        return None, "", 0
+        return None, ""
 
-    min_bars = CUP_MIN_BARS[timeframe]
-    max_bars = CUP_MAX_BARS[timeframe]
+    min_bars = CUP_MIN_BARS[
+        timeframe
+    ]
+
+    max_bars = CUP_MAX_BARS[
+        timeframe
+    ]
 
     if len(df) < min_bars:
-        return None, "", 0
+        return None, ""
 
-    # Work on recent history but allow enough room for a large cup.
-    data = df.tail(min(len(df), max_bars + 30)).copy()
+    data = df.tail(
+        min(
+            len(df),
+            max_bars + 30
+        )
+    ).copy()
 
-    close = data["close"].astype(float).to_numpy()
-    high = data["high"].astype(float).to_numpy()
-    low = data["low"].astype(float).to_numpy()
+    close = data[
+        "close"
+    ].astype(float).to_numpy()
 
-    if len(close) < min_bars:
-        return None, "", 0
+    high = data[
+        "high"
+    ].astype(float).to_numpy()
 
-    sm = smooth(close, max(3, len(close) // 30))
+    low = data[
+        "low"
+    ].astype(float).to_numpy()
 
-    # Find candidate left rim in the first half and bottom afterward.
-    n = len(sm)
+    n = len(close)
 
-    left_zone_end = int(n * 0.45)
-    right_zone_start = int(n * 0.55)
+    if n < min_bars:
+        return None, ""
 
-    if left_zone_end < 5 or right_zone_start >= n - 5:
-        return None, "", 0
+    sm = smooth(
+        close,
+        max(
+            3,
+            n // 30
+        )
+    )
 
-    left_candidates = np.argsort(sm[:left_zone_end])[-10:]
-    right_candidates = np.argsort(sm[right_zone_start:])[-10:] + right_zone_start
+    left_zone_end = int(
+        n * 0.45
+    )
+
+    right_zone_start = int(
+        n * 0.55
+    )
+
+    if (
+        left_zone_end < 5
+        or
+        right_zone_start >= n - 5
+    ):
+        return None, ""
+
+    left_candidates = (
+        np.argsort(
+            sm[:left_zone_end]
+        )[-10:]
+    )
+
+    right_candidates = (
+        np.argsort(
+            sm[right_zone_start:]
+        )[-10:]
+        + right_zone_start
+    )
 
     best = None
 
+    # --------------------------------------------------------
+    # FIND CUP
+    # --------------------------------------------------------
+
     for li in left_candidates:
+
         left_rim = sm[li]
 
-        # Bottom must be meaningfully after left rim.
-        bottom_slice = low[li + 3:right_zone_start]
+        if left_rim <= 0:
+            continue
+
+        bottom_slice = low[
+            li + 3:
+            right_zone_start
+        ]
+
         if len(bottom_slice) < 5:
             continue
 
-        rel_bottom = int(np.argmin(bottom_slice))
-        bi = li + 3 + rel_bottom
+        rel_bottom = int(
+            np.argmin(
+                bottom_slice
+            )
+        )
+
+        bi = (
+            li
+            + 3
+            + rel_bottom
+        )
+
         bottom = low[bi]
 
-        depth = (left_rim - bottom) / left_rim if left_rim else 0
+        depth = (
+            (left_rim - bottom)
+            / left_rim
+        )
 
-        if depth < CUP_MIN_DEPTH or depth > CUP_MAX_DEPTH:
+        if (
+            depth < CUP_MIN_DEPTH
+            or
+            depth > CUP_MAX_DEPTH
+        ):
             continue
 
         for ri in right_candidates:
+
             if ri <= bi:
                 continue
 
             right_rim = sm[ri]
 
-            # Right rim should recover close to left rim.
-            rim_similarity = abs(right_rim - left_rim) / left_rim
+            rim_similarity = (
+                abs(
+                    right_rim -
+                    left_rim
+                )
+                / left_rim
+            )
 
-            if rim_similarity > RIM_TOLERANCE:
+            if (
+                rim_similarity >
+                RIM_TOLERANCE
+            ):
                 continue
 
-            # Cup should have a rounded/gradual recovery rather than
-            # an immediate V-shape.
-            left_span = bi - li
-            right_span = ri - bi
+            left_span = (
+                bi - li
+            )
 
-            if left_span < 5 or right_span < 5:
+            right_span = (
+                ri - bi
+            )
+
+            if (
+                left_span < 5
+                or
+                right_span < 5
+            ):
                 continue
 
-            balance = min(left_span, right_span) / max(left_span, right_span)
+            balance = (
+                min(
+                    left_span,
+                    right_span
+                )
+                /
+                max(
+                    left_span,
+                    right_span
+                )
+            )
 
             if balance < 0.25:
                 continue
@@ -429,329 +871,786 @@ def detect_cup(df, timeframe):
                 "ri": ri,
                 "left_rim": left_rim,
                 "right_rim": right_rim,
+                "bottom": bottom,
                 "depth": depth,
                 "balance": balance,
             }
 
-            if best is None or candidate["depth"] > best["depth"]:
+            if (
+                best is None
+                or
+                candidate["ri"] >
+                best["ri"]
+            ):
                 best = candidate
 
     if best is None:
-        return None, "", 0
+        return None, ""
 
     li = best["li"]
     bi = best["bi"]
     ri = best["ri"]
-    rim = max(best["left_rim"], best["right_rim"])
 
-    current_close = close[-1]
+    rim = max(
+        best["left_rim"],
+        best["right_rim"]
+    )
 
-    # Breakout level is the higher rim.
-    breakout_level = rim * (1 + BREAKOUT_BUFFER)
+    breakout_level = (
+        rim *
+        (1 + BREAKOUT_BUFFER)
+    )
 
-    # Search for breakout after the right rim.
-    after_right = close[ri + 1:]
+    # --------------------------------------------------------
+    # BREAKOUT
+    # --------------------------------------------------------
 
     breakout_index = None
 
-    for j, value in enumerate(after_right, start=ri + 1):
-        if value > breakout_level:
+    for j in range(
+        ri + 1,
+        len(close)
+    ):
+
+        if (
+            close[j] >
+            breakout_level
+        ):
+
             breakout_index = j
             break
 
-    # Handle detection.
+    # --------------------------------------------------------
+    # HANDLE
+    # --------------------------------------------------------
+
     pattern = "Cup"
 
-    handle_start = ri
-    handle_end = len(close) - 1
-    handle = close[handle_start:handle_end + 1]
+    if ri < len(close) - 1:
 
-    if len(handle) >= 3:
-        handle_high = np.max(handle)
-        handle_low = np.min(handle)
+        handle_start = ri + 1
 
-        handle_retrace = (
-            (handle_high - handle_low) / handle_high
-            if handle_high
-            else 0
+        handle = close[
+            handle_start:
+        ]
+
+        if len(handle) >= 3:
+
+            handle_high = float(
+                np.max(handle)
+            )
+
+            handle_low = float(
+                np.min(handle)
+            )
+
+            if handle_high > 0:
+
+                handle_retrace = (
+                    (
+                        handle_high -
+                        handle_low
+                    )
+                    /
+                    handle_high
+                )
+
+                handle_bars = len(
+                    handle
+                )
+
+                max_handle_bars = max(
+                    3,
+                    int(
+                        (ri - li)
+                        *
+                        HANDLE_MAX_BARS_RATIO
+                    )
+                )
+
+                cup_mid = (
+                    best["bottom"]
+                    +
+                    (
+                        rim -
+                        best["bottom"]
+                    )
+                    * 0.50
+                )
+
+                if (
+                    handle_bars
+                    <= max_handle_bars
+                    and
+                    handle_retrace
+                    <= HANDLE_MAX_RETRACE
+                    and
+                    handle_low
+                    >= cup_mid
+                ):
+                    pattern = (
+                        "Cup with Handle"
+                    )
+
+    # --------------------------------------------------------
+    # STATUS
+    # --------------------------------------------------------
+
+    if breakout_index is None:
+
+        status = (
+            "BEFORE BREAKOUT"
         )
 
-        max_handle_bars = max(
-            3,
-            int((ri - li) * HANDLE_MAX_BARS_RATIO)
+    else:
+
+        bars_since = (
+            len(close)
+            - 1
+            - breakout_index
         )
-
-        handle_bars = len(handle)
-
-        # Handle should be relatively short and shallow.
-        if (
-            handle_bars <= max_handle_bars
-            and handle_retrace <= HANDLE_MAX_RETRACE
-            and handle_low >= best["bi"] if False else True
-        ):
-            # Additional condition: handle low should remain above
-            # the cup midpoint, avoiding a deep retracement.
-            cup_mid = bottom + (rim - bottom) * 0.50
-
-            if handle_low >= cup_mid:
-                pattern = "Cup with Handle"
-
-    if breakout_index is not None:
-        # If breakout is on the latest few bars => BREAKOUT.
-        bars_since = len(close) - 1 - breakout_index
 
         if bars_since <= 2:
+
             status = "BREAKOUT"
-        elif bars_since <= RECENT_BREAKOUT_BARS:
-            status = "AFTER BREAKOUT"
+
+        elif (
+            bars_since
+            <= RECENT_BREAKOUT_BARS
+        ):
+
+            status = (
+                "AFTER BREAKOUT"
+            )
+
         else:
-            status = "AFTER BREAKOUT"
-    else:
-        status = "BEFORE BREAKOUT"
 
-    score = 60
+            # Old breakout is ignored.
+            return None, ""
 
-    # Better score for clean depth / balance.
-    if best["depth"] >= 0.18:
-        score += 5
-    if best["balance"] >= 0.50:
-        score += 5
-    if pattern == "Cup with Handle":
-        score += 5
-    if status == "BREAKOUT":
-        score += 5
-
-    score = min(score, 80)
-
-    return pattern, status, score
+    return pattern, status
 
 
-# =========================
-# SYMBOL HELPERS
-# =========================
+# ============================================================
+# GET STOCK NAME + NSE CODE
+# ============================================================
 
-def yahoo_symbol(nse_code):
-    code = str(nse_code).strip().upper()
+def get_nifty200_stocks():
 
-    if not code:
-        return None
-
-    if code.endswith(".NS"):
-        return code
-
-    return code + ".NS"
-
-
-# =========================
-# MAIN SCANNER
-# =========================
-
-def scan_symbol(nse_code):
-    symbol = yahoo_symbol(nse_code)
-
-    daily = download_ohlcv(symbol, period="5y", interval="1d")
-
-    if daily is None or len(daily) < MIN_HISTORY_ROWS:
-        return None
-
-    divergence_found, divergence_type, divergence_score = positive_divergence(
-        daily
-    )
-
-    patterns = []
-
-    for timeframe in ("Daily", "Weekly", "Monthly"):
-        tf_df = resample_ohlcv(daily, timeframe)
-
-        pattern, status, pscore = detect_cup(tf_df, timeframe)
-
-        if pattern:
-            patterns.append({
-                "timeframe": timeframe,
-                "pattern": pattern,
-                "status": status,
-                "score": pscore,
-            })
-
-    # Require either divergence OR cup-family pattern.
-    if not divergence_found and not patterns:
-        return None
-
-    best_pattern_score = max(
-        [p["score"] for p in patterns],
-        default=0,
-    )
-
-    # Combined score.
-    if divergence_found:
-        score = max(divergence_score, best_pattern_score)
-        if patterns:
-            score = min(100, score + 5)
-    else:
-        score = best_pattern_score
-
-    if score < MIN_SCORE:
-        return None
-
-    current_price = float(daily["close"].iloc[-1])
-
-    daily_patterns = [
-        p for p in patterns if p["timeframe"] == "Daily"
-    ]
-    weekly_patterns = [
-        p for p in patterns if p["timeframe"] == "Weekly"
-    ]
-    monthly_patterns = [
-        p for p in patterns if p["timeframe"] == "Monthly"
-    ]
-
-    def pattern_text(items):
-        if not items:
-            return ""
-        return "; ".join(
-            f'{x["pattern"]} - {x["status"]}'
-            for x in items
-        )
-
-    pattern_names = []
-    for p in patterns:
-        pattern_names.append(
-            f'{p["timeframe"]}: {p["pattern"]}'
-        )
-
-    setup_parts = []
-    if divergence_found:
-        setup_parts.append(divergence_type)
-    if pattern_names:
-        setup_parts.extend(pattern_names)
-
-    return {
-        "NSE Code": nse_code,
-        "Setup": " + ".join(setup_parts),
-        "Divergence Strength": divergence_type if divergence_found else "",
-        "Score": score,
-        "Current Price": round(current_price, 2),
-
-        "Daily Pattern": pattern_text(daily_patterns),
-        "Weekly Pattern": pattern_text(weekly_patterns),
-        "Monthly Pattern": pattern_text(monthly_patterns),
-
-        "Cup Pattern Present":
-            "YES" if patterns else "NO",
-
-        "Cup Pattern Timeframes":
-            ", ".join(p["timeframe"] for p in patterns),
-
-        "Cup Breakout Status":
-            "; ".join(
-                f'{p["timeframe"]}: {p["status"]}'
-                for p in patterns
-            ),
-    }
-
-
-def get_nifty200_codes():
-    """
-    Reads NIFTY200 sheet and tries common NSE-code headers.
-    """
     creds = get_credentials()
-    client = gspread.authorize(creds)
 
-    sh = client.open_by_key(SPREADSHEET_ID)
+    client = gspread.authorize(
+        creds
+    )
+
+    sh = client.open_by_key(
+        SPREADSHEET_ID
+    )
 
     try:
-        ws = sh.worksheet("NIFTY200")
+
+        ws = sh.worksheet(
+            INPUT_SHEET
+        )
+
     except gspread.WorksheetNotFound:
-        raise RuntimeError("NIFTY200 worksheet not found.")
+
+        raise RuntimeError(
+            "NIFTY200 worksheet not found."
+        )
 
     values = ws.get_all_values()
 
     if not values:
-        raise RuntimeError("NIFTY200 sheet is empty.")
+        raise RuntimeError(
+            "NIFTY200 sheet is empty."
+        )
 
     headers = values[0]
-    normalized = [normalize_header(x) for x in headers]
 
-    code_idx = None
+    normalized = [
+        normalize_header(x)
+        for x in headers
+    ]
 
-    candidates = [
+    # --------------------------------------------------------
+    # NSE CODE COLUMN
+    # --------------------------------------------------------
+
+    code_candidates = [
         "nse code",
         "nse_code",
         "symbol",
         "stock",
+        "stock code",
         "stock/nse code",
         "code",
+        "nse symbol",
     ]
 
-    for candidate in candidates:
+    code_idx = None
+
+    for candidate in code_candidates:
+
         if candidate in normalized:
-            code_idx = normalized.index(candidate)
+
+            code_idx = (
+                normalized.index(
+                    candidate
+                )
+            )
+
             break
 
     if code_idx is None:
-        # If no header is found, use first column as a fallback.
+
         code_idx = 0
 
-    codes = []
+    # --------------------------------------------------------
+    # STOCK NAME COLUMN
+    # --------------------------------------------------------
+
+    name_candidates = [
+        "stock name",
+        "stock",
+        "name",
+        "company name",
+        "company",
+        "security name",
+    ]
+
+    name_idx = None
+
+    for candidate in name_candidates:
+
+        if candidate in normalized:
+
+            name_idx = (
+                normalized.index(
+                    candidate
+                )
+            )
+
+            break
+
+    stocks = []
+
+    seen = set()
 
     for row in values[1:]:
-        if code_idx >= len(row):
+
+        if (
+            code_idx >=
+            len(row)
+        ):
             continue
 
-        code = str(row[code_idx]).strip().upper()
+        code = str(
+            row[code_idx]
+        ).strip().upper()
 
-        if code and code not in codes:
-            codes.append(code)
+        if not code:
+            continue
 
-    return codes
+        if code in seen:
+            continue
+
+        seen.add(code)
+
+        if (
+            name_idx is not None
+            and
+            name_idx < len(row)
+        ):
+
+            name = str(
+                row[name_idx]
+            ).strip()
+
+        else:
+
+            name = code
+
+        if not name:
+            name = code
+
+        stocks.append({
+            "Stock Name": name,
+            "NSE Code": code,
+        })
+
+    return stocks
 
 
-def main():
-    print("==========================================")
-    print("NIFTY 200 DIVERGENCE + CUP SCANNER V1.3")
-    print("==========================================")
+# ============================================================
+# SCAN ONE STOCK
+# ============================================================
 
-    codes = get_nifty200_codes()
+def scan_stock(
+    stock_name,
+    nse_code
+):
 
-    print("Stocks found:", len(codes))
+    symbol = yahoo_symbol(
+        nse_code
+    )
+
+    daily = download_ohlcv(
+        symbol,
+        period="5y",
+        interval="1d"
+    )
+
+    if (
+        daily is None
+        or
+        len(daily) <
+        MIN_HISTORY_ROWS
+    ):
+        return []
+
+    current_price = float(
+        daily[
+            "close"
+        ].iloc[-1]
+    )
+
+    chart = tradingview_link(
+        nse_code
+    )
 
     results = []
 
-    for number, code in enumerate(codes, start=1):
-        print(f"[{number}/{len(codes)}] {code}")
+    # ========================================================
+    # SETUP A — DIVERGENCE
+    # ========================================================
+
+    divergence_setups = (
+        find_divergence_setups(
+            daily
+        )
+    )
+
+    for div in divergence_setups:
+
+        results.append({
+
+            "Stock Name":
+                stock_name,
+
+            "NSE Code":
+                nse_code,
+
+            "Setup":
+                div["Setup"],
+
+            "Daily Pattern":
+                "",
+
+            "Daily Status":
+                "",
+
+            "Weekly Pattern":
+                "",
+
+            "Weekly Status":
+                "",
+
+            "Monthly Pattern":
+                "",
+
+            "Monthly Status":
+                "",
+
+            "CMP":
+                round(
+                    current_price,
+                    2
+                ),
+
+            "Chart Link":
+                chart,
+        })
+
+    # ========================================================
+    # SETUP B — CUP PATTERN
+    # ========================================================
+
+    cup_result = {
+
+        "Daily Pattern": "",
+        "Daily Status": "",
+
+        "Weekly Pattern": "",
+        "Weekly Status": "",
+
+        "Monthly Pattern": "",
+        "Monthly Status": "",
+    }
+
+    cup_found = False
+
+    for timeframe in [
+        "Daily",
+        "Weekly",
+        "Monthly",
+    ]:
+
+        tf_df = resample_ohlcv(
+            daily,
+            timeframe
+        )
+
+        pattern, status = (
+            detect_cup(
+                tf_df,
+                timeframe
+            )
+        )
+
+        if pattern:
+
+            cup_found = True
+
+            cup_result[
+                f"{timeframe} Pattern"
+            ] = pattern
+
+            cup_result[
+                f"{timeframe} Status"
+            ] = status
+
+    # IMPORTANT:
+    # Cup gets its OWN row.
+    # It is NEVER combined with divergence.
+
+    if cup_found:
+
+        results.append({
+
+            "Stock Name":
+                stock_name,
+
+            "NSE Code":
+                nse_code,
+
+            "Setup":
+                "Cup Pattern",
+
+            "Daily Pattern":
+                cup_result[
+                    "Daily Pattern"
+                ],
+
+            "Daily Status":
+                cup_result[
+                    "Daily Status"
+                ],
+
+            "Weekly Pattern":
+                cup_result[
+                    "Weekly Pattern"
+                ],
+
+            "Weekly Status":
+                cup_result[
+                    "Weekly Status"
+                ],
+
+            "Monthly Pattern":
+                cup_result[
+                    "Monthly Pattern"
+                ],
+
+            "Monthly Status":
+                cup_result[
+                    "Monthly Status"
+                ],
+
+            "CMP":
+                round(
+                    current_price,
+                    2
+                ),
+
+            "Chart Link":
+                chart,
+        })
+
+    return results
+
+
+# ============================================================
+# WRITE FINAL LIST
+# ============================================================
+
+def write_final_list(
+    rows
+):
+
+    creds = get_credentials()
+
+    client = gspread.authorize(
+        creds
+    )
+
+    sh = client.open_by_key(
+        SPREADSHEET_ID
+    )
+
+    try:
+
+        ws = sh.worksheet(
+            FINAL_LIST_SHEET
+        )
+
+    except gspread.WorksheetNotFound:
+
+        ws = sh.add_worksheet(
+            title=FINAL_LIST_SHEET,
+            rows=1000,
+            cols=len(FINAL_COLUMNS)
+        )
+
+    ws.clear()
+
+    # Always use fixed columns.
+    output = [
+        FINAL_COLUMNS
+    ]
+
+    for row in rows:
+
+        output.append([
+            row.get(
+                column,
+                ""
+            )
+            for column in FINAL_COLUMNS
+        ])
+
+    ws.update(
+        "A1",
+        output,
+        value_input_option="USER_ENTERED",
+    )
+
+    try:
+        ws.freeze(
+            rows=1
+        )
+    except Exception:
+        pass
+
+    # Header formatting
+    try:
+
+        ws.format(
+            "A1:K1",
+            {
+                "textFormat": {
+                    "bold": True
+                },
+                "horizontalAlignment":
+                    "CENTER",
+            }
+        )
+
+    except Exception:
+        pass
+
+    print(
+        "Final List updated."
+    )
+
+    print(
+        "Rows:",
+        len(rows)
+    )
+
+    print(
+        "Columns:",
+        len(FINAL_COLUMNS)
+    )
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+
+    print(
+        "=============================================="
+    )
+
+    print(
+        "NIFTY 200 DIVERGENCE + CUP SCANNER V1.4"
+    )
+
+    print(
+        "=============================================="
+    )
+
+    print(
+        "Divergence and Cup are COMPLETELY SEPARATE."
+    )
+
+    print(
+        "Cup timeframes: Daily / Weekly / Monthly"
+    )
+
+    print(
+        ""
+    )
+
+    stocks = (
+        get_nifty200_stocks()
+    )
+
+    print(
+        "Stocks found:",
+        len(stocks)
+    )
+
+    results = []
+
+    for number, stock in enumerate(
+        stocks,
+        start=1
+    ):
+
+        stock_name = stock[
+            "Stock Name"
+        ]
+
+        nse_code = stock[
+            "NSE Code"
+        ]
+
+        print(
+            f"[{number}/{len(stocks)}] "
+            f"{nse_code} - {stock_name}"
+        )
 
         try:
-            result = scan_symbol(code)
 
-            if result:
-                results.append(result)
+            stock_results = (
+                scan_stock(
+                    stock_name,
+                    nse_code
+                )
+            )
+
+            if stock_results:
+
+                for result in (
+                    stock_results
+                ):
+
+                    results.append(
+                        result
+                    )
+
+                    print(
+                        "   FOUND:",
+                        result["Setup"]
+                    )
+
+            else:
+
                 print(
-                    "  FOUND:",
-                    result["Setup"],
-                    "| Score:", result["Score"],
+                    "   No setup"
                 )
 
         except Exception as e:
-            print("  ERROR:", e)
 
-    # Highest score first.
+            print(
+                "   ERROR:",
+                e
+            )
+
+    # --------------------------------------------------------
+    # SORT
+    # --------------------------------------------------------
+
+    setup_order = {
+
+        "RSI Positive Divergence":
+            1,
+
+        "Classic Positive Divergence":
+            2,
+
+        "Cup Pattern":
+            3,
+    }
+
     results.sort(
-        key=lambda x: float(x.get("Score", 0)),
-        reverse=True,
+        key=lambda x: (
+            setup_order.get(
+                x.get(
+                    "Setup",
+                    ""
+                ),
+                99
+            ),
+            x.get(
+                "Stock Name",
+                ""
+            ),
+            x.get(
+                "NSE Code",
+                ""
+            ),
+        )
     )
 
-    write_final_list(results)
+    # --------------------------------------------------------
+    # WRITE
+    # --------------------------------------------------------
 
-    print("==========================================")
-    print("SCAN COMPLETE")
-    print("Qualified stocks:", len(results))
-    print("Score filter: >=", MIN_SCORE)
-    print("==========================================")
+    write_final_list(
+        results
+    )
 
+    print(
+        ""
+    )
+
+    print(
+        "=============================================="
+    )
+
+    print(
+        "SCAN COMPLETE"
+    )
+
+    print(
+        "Qualified rows:",
+        len(results)
+    )
+
+    print(
+        "=============================================="
+    )
+
+
+# ============================================================
+# RUN
+# ============================================================
 
 if __name__ == "__main__":
+
     try:
+
         main()
+
     except Exception as exc:
-        print("FATAL ERROR:", exc)
+
+        print(
+            "FATAL ERROR:",
+            exc
+        )
+
         sys.exit(1)
