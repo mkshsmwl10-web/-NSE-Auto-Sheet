@@ -1,43 +1,38 @@
 #!/usr/bin/env python3
 """
-NIFTY 200 POSITIVE DIVERGENCE + CUP PATTERN SCANNER V1.4
+NIFTY 200 Positive Divergence + Cup Pattern Scanner V2.0
 
-SETUPS ARE COMPLETELY SEPARATE
+FINAL LIST EXACT COLUMNS:
+A  Stock Name
+B  NSE Code
+C  Setup
+D  Daily Pattern
+E  Daily Status
+F  Weekly Pattern
+G  Weekly Status
+H  Monthly Pattern
+I  Monthly Status
+J  CMP
+K  Chart Link
 
-SETUP A:
-    RSI Positive Divergence
-    Classic Positive Divergence
+SETUPS ARE COMPLETELY SEPARATE:
+1. RSI Positive Divergence
+2. Classic Positive Divergence
+3. Cup Pattern
 
-SETUP B:
-    Cup Pattern
-    Cup with Handle
+Cup Pattern is scanned independently on:
+- Daily
+- Weekly
+- Monthly
 
-Cup Pattern is independently checked on:
-    Daily
-    Weekly
-    Monthly
+Cup status:
+- BEFORE BREAKOUT
+- BREAKOUT
+- AFTER BREAKOUT
 
-Cup Status:
-    BEFORE BREAKOUT
-    BREAKOUT
-    AFTER BREAKOUT
-
-FINAL LIST:
-    Stock Name
-    NSE Code
-    Setup
-    Daily Pattern
-    Daily Status
-    Weekly Pattern
-    Weekly Status
-    Monthly Pattern
-    Monthly Status
-    CMP
-    Chart Link
-
-IMPORTANT:
-    RSI + Cup is NEVER created as a combined setup.
-    If a stock has both, it gets separate rows.
+If a stock has divergence AND a cup pattern, separate rows are written.
+No old columns such as Score, RSI Improvement %, EMA20, EMA50, Support,
+Entry, Target, Risk, Cup Pattern Present, etc. are written to Final List.
 """
 
 import os
@@ -61,33 +56,14 @@ SPREADSHEET_ID = os.environ.get(
     "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E",
 )
 
-INPUT_SHEET = "NIFTY200"
-FINAL_LIST_SHEET = os.environ.get(
-    "FINAL_LIST_SHEET",
-    "Final List",
-)
+FINAL_LIST_SHEET = os.environ.get("FINAL_LIST_SHEET", "Final List")
+INPUT_SHEET = os.environ.get("INPUT_SHEET", "NIFTY200")
 
 MIN_HISTORY_ROWS = 100
 
-# ------------------------------------------------------------
-# DIVERGENCE
-# ------------------------------------------------------------
-
-RSI_PERIOD = 14
-
-SWING_LEFT = 3
-SWING_RIGHT = 3
-
-MIN_PRICE_LOWER_LOW_PCT = 0.50
-MIN_RSI_IMPROVEMENT = 2.0
-
-MAX_DIVERGENCE_GAP = 60
-MAX_SIGNAL_AGE = 15
-
-
-# ------------------------------------------------------------
-# CUP
-# ------------------------------------------------------------
+# -------------------------
+# Cup configuration
+# -------------------------
 
 CUP_MIN_BARS = {
     "Daily": 40,
@@ -110,147 +86,293 @@ HANDLE_MAX_RETRACE = 0.18
 HANDLE_MAX_BARS_RATIO = 0.35
 
 BREAKOUT_BUFFER = 0.005
-
 RECENT_BREAKOUT_BARS = 12
 
 
 # ============================================================
-# FINAL OUTPUT COLUMNS
+# FINAL LIST SCHEMA - NEVER CHANGE ORDER ACCIDENTALLY
 # ============================================================
 
 FINAL_COLUMNS = [
     "Stock Name",
     "NSE Code",
     "Setup",
-
     "Daily Pattern",
     "Daily Status",
-
     "Weekly Pattern",
     "Weekly Status",
-
     "Monthly Pattern",
     "Monthly Status",
-
     "CMP",
     "Chart Link",
 ]
 
 
 # ============================================================
-# HEADER NORMALIZER
+# GOOGLE SHEETS
 # ============================================================
 
 def normalize_header(value):
     return re.sub(
         r"\s+",
         " ",
-        str(value or "").strip().lower()
+        str(value or "").strip().lower(),
     )
 
 
-# ============================================================
-# GOOGLE CREDENTIALS
-# ============================================================
-
 def get_credentials():
-
-    raw = os.environ.get(
-        "GCP_CREDENTIALS",
-        ""
-    ).strip()
+    raw = os.environ.get("GCP_CREDENTIALS", "").strip()
 
     if not raw:
-        raise RuntimeError(
-            "GCP_CREDENTIALS is missing."
-        )
+        raise RuntimeError("GCP_CREDENTIALS is missing.")
 
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
 
-    # GitHub Secret contains JSON
+    # GitHub secret contains complete JSON.
     if raw.startswith("{"):
+        try:
+            info = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "GCP_CREDENTIALS contains invalid JSON."
+            ) from exc
 
         return Credentials.from_service_account_info(
-            json.loads(raw),
+            info,
             scopes=scopes,
         )
 
-    # Or a credentials file path
+    # Local file path.
     if os.path.exists(raw):
-
         return Credentials.from_service_account_file(
             raw,
             scopes=scopes,
         )
 
     raise RuntimeError(
-        "GCP_CREDENTIALS is not valid JSON "
-        "or a valid credentials file."
+        "GCP_CREDENTIALS is not valid JSON or a valid credentials file."
     )
 
 
-# ============================================================
-# YAHOO SYMBOL
-# ============================================================
-
-def yahoo_symbol(nse_code):
-
-    code = str(
-        nse_code
-    ).strip().upper()
-
-    if not code:
-        return None
-
-    if code.endswith(".NS"):
-        return code
-
-    return code + ".NS"
+def get_google_sheet():
+    creds = get_credentials()
+    client = gspread.authorize(creds)
+    return client.open_by_key(SPREADSHEET_ID)
 
 
-# ============================================================
-# TRADINGVIEW CHART LINK
-# ============================================================
+def write_final_list(rows):
+    """
+    Writes Final List using a FIXED column order.
+    This prevents column shifting caused by dictionary order or old fields.
+    """
 
-def tradingview_link(nse_code):
-
-    code = str(
-        nse_code
-    ).strip().upper()
-
-    code = code.replace(
-        ".NS",
-        ""
-    )
-
-    return (
-        "https://in.tradingview.com/chart/"
-        "?symbol=NSE%3A"
-        + code
-    )
-
-
-# ============================================================
-# DOWNLOAD DATA
-# ============================================================
-
-def download_ohlcv(
-    symbol,
-    period="5y",
-    interval="1d"
-):
+    sh = get_google_sheet()
 
     try:
+        ws = sh.worksheet(FINAL_LIST_SHEET)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(
+            title=FINAL_LIST_SHEET,
+            rows=1000,
+            cols=len(FINAL_COLUMNS),
+        )
 
+    output = [FINAL_COLUMNS]
+
+    for row in rows:
+        output.append([
+            row.get("Stock Name", ""),
+            row.get("NSE Code", ""),
+            row.get("Setup", ""),
+            row.get("Daily Pattern", ""),
+            row.get("Daily Status", ""),
+            row.get("Weekly Pattern", ""),
+            row.get("Weekly Status", ""),
+            row.get("Monthly Pattern", ""),
+            row.get("Monthly Status", ""),
+            row.get("CMP", ""),
+            row.get("Chart Link", ""),
+        ])
+
+    ws.clear()
+
+    ws.update(
+        "A1",
+        output,
+        value_input_option="USER_ENTERED",
+    )
+
+    try:
+        ws.freeze(rows=1)
+    except Exception:
+        pass
+
+    print("")
+    print("==========================================")
+    print("FINAL LIST UPDATED")
+    print("==========================================")
+    print("Rows:", len(rows))
+    print("Columns:", len(FINAL_COLUMNS))
+    print("Exact columns:")
+    for index, column in enumerate(FINAL_COLUMNS, start=1):
+        print(f"{index}. {column}")
+    print("==========================================")
+
+
+# ============================================================
+# INPUT STOCK LIST
+# ============================================================
+
+def get_nifty200_stocks():
+    """
+    Reads NIFTY200 sheet and returns:
+        [
+            {
+                "Stock Name": "...",
+                "NSE Code": "..."
+            }
+        ]
+
+    Tries several common header names so the scanner works with
+    existing NIFTY200 sheet layouts.
+    """
+
+    sh = get_google_sheet()
+
+    try:
+        ws = sh.worksheet(INPUT_SHEET)
+    except gspread.WorksheetNotFound:
+        raise RuntimeError(
+            f'{INPUT_SHEET} worksheet not found.'
+        )
+
+    values = ws.get_all_values()
+
+    if not values:
+        raise RuntimeError(
+            f'{INPUT_SHEET} sheet is empty.'
+        )
+
+    headers = values[0]
+    normalized = [
+        normalize_header(x)
+        for x in headers
+    ]
+
+    # -------------------------
+    # NSE code candidates
+    # -------------------------
+
+    code_candidates = [
+        "nse code",
+        "nse_code",
+        "nsecode",
+        "symbol",
+        "stock code",
+        "stock_code",
+        "stock/nse code",
+        "code",
+    ]
+
+    # -------------------------
+    # Stock name candidates
+    # -------------------------
+
+    name_candidates = [
+        "stock name",
+        "stock_name",
+        "company name",
+        "company_name",
+        "company",
+        "name",
+        "stock",
+    ]
+
+    code_idx = None
+    name_idx = None
+
+    for candidate in code_candidates:
+        if candidate in normalized:
+            code_idx = normalized.index(candidate)
+            break
+
+    for candidate in name_candidates:
+        if candidate in normalized:
+            candidate_idx = normalized.index(candidate)
+
+            # Avoid accidentally using the code column as name.
+            if candidate_idx != code_idx:
+                name_idx = candidate_idx
+                break
+
+    # If no code header exists, use first column.
+    if code_idx is None:
+        code_idx = 0
+
+    stocks = []
+    seen_codes = set()
+
+    for row in values[1:]:
+        if code_idx >= len(row):
+            continue
+
+        code = str(row[code_idx]).strip().upper()
+
+        if not code:
+            continue
+
+        # Remove accidental .NS from NSE code.
+        if code.endswith(".NS"):
+            code = code[:-3]
+
+        if not re.match(r"^[A-Z0-9&._-]+$", code):
+            continue
+
+        if code in seen_codes:
+            continue
+
+        # Name priority:
+        # 1. Name column
+        # 2. Code itself
+        if name_idx is not None and name_idx < len(row):
+            name = str(row[name_idx]).strip()
+        else:
+            name = code
+
+        if not name:
+            name = code
+
+        stocks.append({
+            "Stock Name": name,
+            "NSE Code": code,
+        })
+
+        seen_codes.add(code)
+
+    if not stocks:
+        raise RuntimeError(
+            "No valid NSE stocks found in NIFTY200 sheet."
+        )
+
+    return stocks
+
+
+# ============================================================
+# DATA
+# ============================================================
+
+def download_ohlcv(symbol, period="5y", interval="1d"):
+    try:
         ticker = yf.Ticker(symbol)
 
         df = ticker.history(
             period=period,
             interval=interval,
             auto_adjust=False,
+            actions=False,
         )
 
         if df is None or df.empty:
@@ -258,14 +380,25 @@ def download_ohlcv(
 
         df = df.reset_index()
 
-        # Normalize column names
-        df.columns = [
-            str(c)
-            .strip()
-            .lower()
-            .replace(" ", "_")
-            for c in df.columns
-        ]
+        # Standardize column names.
+        new_columns = []
+
+        for column in df.columns:
+            name = str(column).strip().lower()
+
+            name = name.replace(" ", "_")
+            name = name.replace("-", "_")
+
+            new_columns.append(name)
+
+        df.columns = new_columns
+
+        # yfinance can sometimes return datetime instead of date.
+        if "date" not in df.columns and "datetime" not in df.columns:
+            if isinstance(df.index, pd.DatetimeIndex):
+                df = df.reset_index()
+            else:
+                return None
 
         required = {
             "close",
@@ -274,10 +407,28 @@ def download_ohlcv(
             "volume",
         }
 
-        if not required.issubset(
-            set(df.columns)
-        ):
+        if not required.issubset(set(df.columns)):
             return None
+
+        df["close"] = pd.to_numeric(
+            df["close"],
+            errors="coerce",
+        )
+
+        df["high"] = pd.to_numeric(
+            df["high"],
+            errors="coerce",
+        )
+
+        df["low"] = pd.to_numeric(
+            df["low"],
+            errors="coerce",
+        )
+
+        df["volume"] = pd.to_numeric(
+            df["volume"],
+            errors="coerce",
+        )
 
         df = df.dropna(
             subset=[
@@ -287,54 +438,44 @@ def download_ohlcv(
             ]
         )
 
-        if len(df) < MIN_HISTORY_ROWS:
-            return None
+        df = df.sort_values(
+            "date" if "date" in df.columns else "datetime"
+        )
+
+        df = df.reset_index(drop=True)
 
         return df
 
-    except Exception as e:
-
+    except Exception as exc:
         print(
-            "Download error:",
-            symbol,
-            e
+            f"  Download error for {symbol}: {exc}"
         )
-
         return None
 
 
-# ============================================================
-# RESAMPLE
-# ============================================================
-
-def resample_ohlcv(
-    df,
-    timeframe
-):
+def resample_ohlcv(df, timeframe):
+    if df is None or df.empty:
+        return None
 
     x = df.copy()
 
     if "date" in x.columns:
         date_col = "date"
-
     elif "datetime" in x.columns:
         date_col = "datetime"
-
     else:
         return None
 
     x[date_col] = pd.to_datetime(
         x[date_col],
-        errors="coerce"
+        errors="coerce",
     )
 
     x = x.dropna(
         subset=[date_col]
     )
 
-    x = x.set_index(
-        date_col
-    )
+    x = x.set_index(date_col)
 
     rules = {
         "Daily": "1D",
@@ -344,17 +485,39 @@ def resample_ohlcv(
 
     rule = rules[timeframe]
 
-    out = x.resample(
-        rule
-    ).agg({
+    try:
+        out = x.resample(rule).agg({
+            "open": "first",
+            "high": "max",
+            "low": "min",
+            "close": "last",
+            "volume": "sum",
+        }).dropna(
+            subset=[
+                "high",
+                "low",
+                "close",
+            ]
+        )
 
-        "open": "first",
-        "high": "max",
-        "low": "min",
-        "close": "last",
-        "volume": "sum",
-
-    }).dropna()
+    except Exception:
+        # Compatibility for pandas versions where ME is unsupported.
+        if timeframe == "Monthly":
+            out = x.resample("M").agg({
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum",
+            }).dropna(
+                subset=[
+                    "high",
+                    "low",
+                    "close",
+                ]
+            )
+        else:
+            raise
 
     return out.reset_index()
 
@@ -363,20 +526,11 @@ def resample_ohlcv(
 # RSI
 # ============================================================
 
-def rsi(
-    series,
-    period=14
-):
-
+def calculate_rsi(series, period=14):
     delta = series.diff()
 
-    gain = delta.clip(
-        lower=0
-    )
-
-    loss = -delta.clip(
-        upper=0
-    )
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
 
     avg_gain = gain.ewm(
         alpha=1 / period,
@@ -390,53 +544,37 @@ def rsi(
         adjust=False,
     ).mean()
 
-    rs = (
-        avg_gain /
-        avg_loss.replace(
-            0,
-            np.nan
-        )
+    rs = avg_gain / avg_loss.replace(
+        0,
+        np.nan,
     )
 
-    return (
-        100 -
-        (
-            100 /
-            (1 + rs)
-        )
+    result = 100 - (
+        100 / (1 + rs)
     )
 
+    return result
 
-# ============================================================
-# PIVOT LOWS
-# ============================================================
 
-def local_lows(
-    series,
-    left=3,
-    right=3
-):
-
+def local_lows(series, left=3, right=3):
     values = series.to_numpy(
         dtype=float
     )
 
     lows = []
 
+    if len(values) < left + right + 1:
+        return lows
+
     for i in range(
         left,
-        len(values) - right
+        len(values) - right,
     ):
-
         window = values[
-            i-left:i+right+1
+            i - left:i + right + 1
         ]
 
-        if (
-            np.isfinite(values[i])
-            and
-            values[i] == np.min(window)
-        ):
+        if values[i] == np.min(window):
             lows.append(i)
 
     return lows
@@ -447,212 +585,110 @@ def local_lows(
 # ============================================================
 
 def find_divergence_setups(df):
-
     """
-    Returns a LIST.
+    Returns separate setups.
 
-    Possible results:
-        RSI Positive Divergence
-        Classic Positive Divergence
+    Possible output:
+        ["RSI Positive Divergence"]
+        ["Classic Positive Divergence"]
+        ["RSI Positive Divergence",
+         "Classic Positive Divergence"]
+        []
 
-    Both can be returned independently.
+    RSI Positive Divergence:
+        Price makes lower low by >= 0.5%
+        RSI makes higher low by >= 2 points.
 
-    This function NEVER returns Cup Pattern.
+    Classic Positive Divergence:
+        Price makes lower low by >= 0.5%
+        RSI makes a higher low.
+
+    Both are deliberately allowed to produce separate rows.
     """
 
-    results = []
+    found = []
 
-    if (
-        df is None
-        or len(df) < MIN_HISTORY_ROWS
-    ):
-        return results
+    if df is None:
+        return found
 
-    close = df[
-        "close"
-    ].astype(float)
+    if len(df) < MIN_HISTORY_ROWS:
+        return found
 
-    rsi_values = rsi(
+    close = df["close"].astype(float)
+
+    rsi_values = calculate_rsi(
         close,
-        RSI_PERIOD
+        period=14,
     )
 
     lows = local_lows(
         close,
-        SWING_LEFT,
-        SWING_RIGHT
+        left=3,
+        right=3,
     )
 
     if len(lows) < 2:
-        return results
+        return found
 
-    # Test recent pivot pairs
-    recent_lows = lows[-8:]
+    # Look at the latest two confirmed swing lows.
+    i1, i2 = lows[-2], lows[-1]
 
-    best_rsi = None
-    best_classic = None
+    price1 = float(close.iloc[i1])
+    price2 = float(close.iloc[i2])
 
-    for x in range(
-        len(recent_lows) - 1
-    ):
+    rsi1 = rsi_values.iloc[i1]
+    rsi2 = rsi_values.iloc[i2]
 
-        i1 = recent_lows[x]
+    if pd.isna(rsi1) or pd.isna(rsi2):
+        return found
 
-        for y in range(
-            x + 1,
-            len(recent_lows)
-        ):
+    rsi1 = float(rsi1)
+    rsi2 = float(rsi2)
 
-            i2 = recent_lows[y]
+    lower_price = (
+        price2 <= price1 * 0.995
+    )
 
-            gap = i2 - i1
+    higher_rsi = (
+        rsi2 > rsi1
+    )
 
-            if (
-                gap <= 0
-                or gap > MAX_DIVERGENCE_GAP
-            ):
-                continue
+    strong_rsi = (
+        rsi2 >= rsi1 + 2
+    )
 
-            price1 = float(
-                close.iloc[i1]
-            )
-
-            price2 = float(
-                close.iloc[i2]
-            )
-
-            rsi1 = float(
-                rsi_values.iloc[i1]
-            )
-
-            rsi2 = float(
-                rsi_values.iloc[i2]
-            )
-
-            if not all(
-                np.isfinite(x)
-                for x in [
-                    price1,
-                    price2,
-                    rsi1,
-                    rsi2,
-                ]
-            ):
-                continue
-
-            price_lower_pct = (
-                (price1 - price2)
-                / price1
-                * 100
-            )
-
-            rsi_improvement = (
-                rsi2 - rsi1
-            )
-
-            signal_age = (
-                len(df) - 1 - i2
-            )
-
-            if (
-                signal_age >
-                MAX_SIGNAL_AGE
-            ):
-                continue
-
-            # ------------------------------------------------
-            # RSI POSITIVE DIVERGENCE
-            # ------------------------------------------------
-
-            if (
-                price_lower_pct
-                >= MIN_PRICE_LOWER_LOW_PCT
-                and
-                rsi_improvement
-                >= MIN_RSI_IMPROVEMENT
-            ):
-
-                candidate = {
-                    "Setup":
-                        "RSI Positive Divergence",
-
-                    "Signal Age":
-                        signal_age,
-
-                    "RSI Improvement":
-                        rsi_improvement,
-
-                    "Price Lower Low":
-                        price_lower_pct,
-                }
-
-                if (
-                    best_rsi is None
-                    or
-                    signal_age <
-                    best_rsi["Signal Age"]
-                ):
-                    best_rsi = candidate
-
-            # ------------------------------------------------
-            # CLASSIC POSITIVE DIVERGENCE
-            # ------------------------------------------------
-
-            if (
-                price_lower_pct
-                >= MIN_PRICE_LOWER_LOW_PCT
-                and
-                rsi2 > rsi1
-            ):
-
-                candidate = {
-                    "Setup":
-                        "Classic Positive Divergence",
-
-                    "Signal Age":
-                        signal_age,
-
-                    "RSI Improvement":
-                        rsi_improvement,
-
-                    "Price Lower Low":
-                        price_lower_pct,
-                }
-
-                if (
-                    best_classic is None
-                    or
-                    signal_age <
-                    best_classic["Signal Age"]
-                ):
-                    best_classic = candidate
-
-    if best_rsi is not None:
-
-        results.append(
-            best_rsi
+    # Strong RSI positive divergence.
+    if lower_price and strong_rsi:
+        found.append(
+            "RSI Positive Divergence"
         )
 
-    if best_classic is not None:
-
-        results.append(
-            best_classic
+    # Classic positive divergence.
+    if lower_price and higher_rsi:
+        found.append(
+            "Classic Positive Divergence"
         )
 
-    return results
+    return found
 
 
 # ============================================================
-# SMOOTHING
+# CUP HELPERS
 # ============================================================
 
-def smooth(
-    values,
-    window
-):
+def smooth(values, window):
+    values = np.asarray(
+        values,
+        dtype=float,
+    )
 
-    if len(values) < window:
+    if len(values) < 3:
         return values
+
+    window = max(
+        3,
+        int(window),
+    )
 
     return (
         pd.Series(values)
@@ -667,76 +703,66 @@ def smooth(
 
 
 # ============================================================
-# CUP DETECTOR
+# CUP / CUP WITH HANDLE
 # ============================================================
 
-def detect_cup(
-    df,
-    timeframe
-):
-
+def detect_cup(df, timeframe):
     """
     Returns:
+        (pattern, status)
 
-        pattern
-        status
-
-    Pattern:
+    pattern:
         Cup
         Cup with Handle
+        None
 
-    Status:
+    status:
         BEFORE BREAKOUT
         BREAKOUT
         AFTER BREAKOUT
-
-    No divergence logic is used here.
     """
 
     if df is None:
         return None, ""
 
-    min_bars = CUP_MIN_BARS[
-        timeframe
-    ]
-
-    max_bars = CUP_MAX_BARS[
-        timeframe
-    ]
+    min_bars = CUP_MIN_BARS[timeframe]
+    max_bars = CUP_MAX_BARS[timeframe]
 
     if len(df) < min_bars:
         return None, ""
 
+    # Keep the recent relevant window.
     data = df.tail(
         min(
             len(df),
-            max_bars + 30
+            max_bars + 30,
         )
     ).copy()
 
-    close = data[
-        "close"
-    ].astype(float).to_numpy()
+    if len(data) < min_bars:
+        return None, ""
 
-    high = data[
-        "high"
-    ].astype(float).to_numpy()
+    close = data["close"].astype(
+        float
+    ).to_numpy()
 
-    low = data[
-        "low"
-    ].astype(float).to_numpy()
+    high = data["high"].astype(
+        float
+    ).to_numpy()
+
+    low = data["low"].astype(
+        float
+    ).to_numpy()
 
     n = len(close)
 
-    if n < min_bars:
-        return None, ""
-
+    # Smooth only for rim detection.
     sm = smooth(
         close,
         max(
             3,
-            n // 30
-        )
+            n // 30,
+        ),
     )
 
     left_zone_end = int(
@@ -749,8 +775,7 @@ def detect_cup(
 
     if (
         left_zone_end < 5
-        or
-        right_zone_start >= n - 5
+        or right_zone_start >= n - 5
     ):
         return None, ""
 
@@ -769,96 +794,84 @@ def detect_cup(
 
     best = None
 
-    # --------------------------------------------------------
-    # FIND CUP
-    # --------------------------------------------------------
-
     for li in left_candidates:
-
-        left_rim = sm[li]
+        left_rim = float(
+            sm[li]
+        )
 
         if left_rim <= 0:
             continue
 
         bottom_slice = low[
-            li + 3:
-            right_zone_start
+            li + 3:right_zone_start
         ]
 
         if len(bottom_slice) < 5:
             continue
 
-        rel_bottom = int(
-            np.argmin(
-                bottom_slice
-            )
+        relative_bottom = int(
+            np.argmin(bottom_slice)
         )
 
         bi = (
             li
             + 3
-            + rel_bottom
+            + relative_bottom
         )
 
-        bottom = low[bi]
+        bottom_price = float(
+            low[bi]
+        )
 
         depth = (
-            (left_rim - bottom)
-            / left_rim
-        )
+            left_rim - bottom_price
+        ) / left_rim
 
         if (
             depth < CUP_MIN_DEPTH
-            or
-            depth > CUP_MAX_DEPTH
+            or depth > CUP_MAX_DEPTH
         ):
             continue
 
         for ri in right_candidates:
-
             if ri <= bi:
                 continue
 
-            right_rim = sm[ri]
+            right_rim = float(
+                sm[ri]
+            )
 
             rim_similarity = (
                 abs(
-                    right_rim -
-                    left_rim
+                    right_rim
+                    - left_rim
                 )
                 / left_rim
             )
 
             if (
-                rim_similarity >
-                RIM_TOLERANCE
+                rim_similarity
+                > RIM_TOLERANCE
             ):
                 continue
 
-            left_span = (
-                bi - li
-            )
-
-            right_span = (
-                ri - bi
-            )
+            left_span = bi - li
+            right_span = ri - bi
 
             if (
                 left_span < 5
-                or
-                right_span < 5
+                or right_span < 5
             ):
                 continue
 
             balance = (
                 min(
                     left_span,
-                    right_span
+                    right_span,
                 )
-                /
-                max(
+                / max(
                     left_span,
-                    right_span
+                    right_span,
                 )
             )
 
@@ -871,16 +884,15 @@ def detect_cup(
                 "ri": ri,
                 "left_rim": left_rim,
                 "right_rim": right_rim,
-                "bottom": bottom,
+                "bottom": bottom_price,
                 "depth": depth,
                 "balance": balance,
             }
 
             if (
                 best is None
-                or
-                candidate["ri"] >
-                best["ri"]
+                or candidate["depth"]
+                > best["depth"]
             ):
                 best = candidate
 
@@ -893,117 +905,102 @@ def detect_cup(
 
     rim = max(
         best["left_rim"],
-        best["right_rim"]
+        best["right_rim"],
+    )
+
+    current_close = float(
+        close[-1]
     )
 
     breakout_level = (
-        rim *
-        (1 + BREAKOUT_BUFFER)
+        rim * (
+            1
+            + BREAKOUT_BUFFER
+        )
     )
 
     # --------------------------------------------------------
-    # BREAKOUT
+    # Find first confirmed close above breakout level after
+    # the right side of the cup.
     # --------------------------------------------------------
 
     breakout_index = None
 
     for j in range(
         ri + 1,
-        len(close)
+        len(close),
     ):
-
         if (
-            close[j] >
-            breakout_level
+            close[j]
+            > breakout_level
         ):
-
             breakout_index = j
             break
 
     # --------------------------------------------------------
-    # HANDLE
+    # Handle detection
     # --------------------------------------------------------
 
     pattern = "Cup"
 
-    if ri < len(close) - 1:
+    handle = close[
+        ri:
+    ]
 
-        handle_start = ri + 1
+    if len(handle) >= 3:
+        handle_high = float(
+            np.max(handle)
+        )
 
-        handle = close[
-            handle_start:
-        ]
+        handle_low = float(
+            np.min(handle)
+        )
 
-        if len(handle) >= 3:
+        if handle_high > 0:
+            handle_retrace = (
+                handle_high
+                - handle_low
+            ) / handle_high
+        else:
+            handle_retrace = 1.0
 
-            handle_high = float(
-                np.max(handle)
-            )
+        max_handle_bars = max(
+            3,
+            int(
+                (ri - li)
+                * HANDLE_MAX_BARS_RATIO
+            ),
+        )
 
-            handle_low = float(
-                np.min(handle)
-            )
+        handle_bars = len(handle)
 
-            if handle_high > 0:
+        # Cup midpoint.
+        cup_mid = (
+            best["bottom"]
+            + (
+                rim
+                - best["bottom"]
+            ) * 0.50
+        )
 
-                handle_retrace = (
-                    (
-                        handle_high -
-                        handle_low
-                    )
-                    /
-                    handle_high
-                )
-
-                handle_bars = len(
-                    handle
-                )
-
-                max_handle_bars = max(
-                    3,
-                    int(
-                        (ri - li)
-                        *
-                        HANDLE_MAX_BARS_RATIO
-                    )
-                )
-
-                cup_mid = (
-                    best["bottom"]
-                    +
-                    (
-                        rim -
-                        best["bottom"]
-                    )
-                    * 0.50
-                )
-
-                if (
-                    handle_bars
-                    <= max_handle_bars
-                    and
-                    handle_retrace
-                    <= HANDLE_MAX_RETRACE
-                    and
-                    handle_low
-                    >= cup_mid
-                ):
-                    pattern = (
-                        "Cup with Handle"
-                    )
+        if (
+            handle_bars
+            <= max_handle_bars
+            and handle_retrace
+            <= HANDLE_MAX_RETRACE
+            and handle_low
+            >= cup_mid
+        ):
+            pattern = "Cup with Handle"
 
     # --------------------------------------------------------
-    # STATUS
+    # Breakout status
     # --------------------------------------------------------
 
     if breakout_index is None:
-
-        status = (
-            "BEFORE BREAKOUT"
-        )
+        status = "BEFORE BREAKOUT"
 
     else:
-
         bars_since = (
             len(close)
             - 1
@@ -1011,218 +1008,112 @@ def detect_cup(
         )
 
         if bars_since <= 2:
-
             status = "BREAKOUT"
-
-        elif (
-            bars_since
-            <= RECENT_BREAKOUT_BARS
-        ):
-
-            status = (
-                "AFTER BREAKOUT"
-            )
-
         else:
-
-            # Old breakout is ignored.
-            return None, ""
+            status = "AFTER BREAKOUT"
 
     return pattern, status
 
 
 # ============================================================
-# GET STOCK NAME + NSE CODE
+# CHART LINK
 # ============================================================
 
-def get_nifty200_stocks():
+def tradingview_link(nse_code):
+    code = str(
+        nse_code
+    ).strip().upper()
 
-    creds = get_credentials()
-
-    client = gspread.authorize(
-        creds
+    return (
+        "https://in.tradingview.com/chart/"
+        "?symbol=NSE%3A"
+        + code
     )
 
-    sh = client.open_by_key(
-        SPREADSHEET_ID
-    )
 
-    try:
+# ============================================================
+# BUILD OUTPUT ROW
+# ============================================================
 
-        ws = sh.worksheet(
-            INPUT_SHEET
-        )
+def make_row(
+    stock_name,
+    nse_code,
+    setup,
+    cmp_price,
+    daily_pattern="",
+    daily_status="",
+    weekly_pattern="",
+    weekly_status="",
+    monthly_pattern="",
+    monthly_status="",
+):
+    return {
+        "Stock Name": stock_name,
+        "NSE Code": nse_code,
+        "Setup": setup,
 
-    except gspread.WorksheetNotFound:
+        "Daily Pattern": daily_pattern,
+        "Daily Status": daily_status,
 
-        raise RuntimeError(
-            "NIFTY200 worksheet not found."
-        )
+        "Weekly Pattern": weekly_pattern,
+        "Weekly Status": weekly_status,
 
-    values = ws.get_all_values()
+        "Monthly Pattern": monthly_pattern,
+        "Monthly Status": monthly_status,
 
-    if not values:
-        raise RuntimeError(
-            "NIFTY200 sheet is empty."
-        )
+        "CMP": round(
+            float(cmp_price),
+            2,
+        ),
 
-    headers = values[0]
-
-    normalized = [
-        normalize_header(x)
-        for x in headers
-    ]
-
-    # --------------------------------------------------------
-    # NSE CODE COLUMN
-    # --------------------------------------------------------
-
-    code_candidates = [
-        "nse code",
-        "nse_code",
-        "symbol",
-        "stock",
-        "stock code",
-        "stock/nse code",
-        "code",
-        "nse symbol",
-    ]
-
-    code_idx = None
-
-    for candidate in code_candidates:
-
-        if candidate in normalized:
-
-            code_idx = (
-                normalized.index(
-                    candidate
-                )
-            )
-
-            break
-
-    if code_idx is None:
-
-        code_idx = 0
-
-    # --------------------------------------------------------
-    # STOCK NAME COLUMN
-    # --------------------------------------------------------
-
-    name_candidates = [
-        "stock name",
-        "stock",
-        "name",
-        "company name",
-        "company",
-        "security name",
-    ]
-
-    name_idx = None
-
-    for candidate in name_candidates:
-
-        if candidate in normalized:
-
-            name_idx = (
-                normalized.index(
-                    candidate
-                )
-            )
-
-            break
-
-    stocks = []
-
-    seen = set()
-
-    for row in values[1:]:
-
-        if (
-            code_idx >=
-            len(row)
-        ):
-            continue
-
-        code = str(
-            row[code_idx]
-        ).strip().upper()
-
-        if not code:
-            continue
-
-        if code in seen:
-            continue
-
-        seen.add(code)
-
-        if (
-            name_idx is not None
-            and
-            name_idx < len(row)
-        ):
-
-            name = str(
-                row[name_idx]
-            ).strip()
-
-        else:
-
-            name = code
-
-        if not name:
-            name = code
-
-        stocks.append({
-            "Stock Name": name,
-            "NSE Code": code,
-        })
-
-    return stocks
+        "Chart Link": tradingview_link(
+            nse_code
+        ),
+    }
 
 
 # ============================================================
 # SCAN ONE STOCK
 # ============================================================
 
-def scan_stock(
-    stock_name,
-    nse_code
-):
+def scan_stock(stock):
+    stock_name = stock["Stock Name"]
+    nse_code = stock["NSE Code"]
 
-    symbol = yahoo_symbol(
-        nse_code
+    symbol = (
+        str(nse_code)
+        .strip()
+        .upper()
+    )
+
+    if symbol.endswith(".NS"):
+        symbol = symbol[:-3]
+
+    yahoo_symbol = (
+        symbol
+        + ".NS"
     )
 
     daily = download_ohlcv(
-        symbol,
+        yahoo_symbol,
         period="5y",
-        interval="1d"
+        interval="1d",
     )
 
     if (
         daily is None
-        or
-        len(daily) <
-        MIN_HISTORY_ROWS
+        or len(daily) < MIN_HISTORY_ROWS
     ):
         return []
 
-    current_price = float(
-        daily[
-            "close"
-        ].iloc[-1]
-    )
-
-    chart = tradingview_link(
-        nse_code
+    cmp_price = float(
+        daily["close"].iloc[-1]
     )
 
     results = []
 
     # ========================================================
-    # SETUP A — DIVERGENCE
+    # SETUP A - DIVERGENCE
     # ========================================================
 
     divergence_setups = (
@@ -1231,247 +1122,108 @@ def scan_stock(
         )
     )
 
-    for div in divergence_setups:
-
-        results.append({
-
-            "Stock Name":
-                stock_name,
-
-            "NSE Code":
-                nse_code,
-
-            "Setup":
-                div["Setup"],
-
-            "Daily Pattern":
-                "",
-
-            "Daily Status":
-                "",
-
-            "Weekly Pattern":
-                "",
-
-            "Weekly Status":
-                "",
-
-            "Monthly Pattern":
-                "",
-
-            "Monthly Status":
-                "",
-
-            "CMP":
-                round(
-                    current_price,
-                    2
-                ),
-
-            "Chart Link":
-                chart,
-        })
+    for setup in divergence_setups:
+        # Divergence is a separate setup row.
+        # Cup fields remain blank.
+        results.append(
+            make_row(
+                stock_name=stock_name,
+                nse_code=nse_code,
+                setup=setup,
+                cmp_price=cmp_price,
+            )
+        )
 
     # ========================================================
-    # SETUP B — CUP PATTERN
+    # SETUP B - CUP PATTERN
     # ========================================================
 
-    cup_result = {
+    cup_results = {}
 
-        "Daily Pattern": "",
-        "Daily Status": "",
-
-        "Weekly Pattern": "",
-        "Weekly Status": "",
-
-        "Monthly Pattern": "",
-        "Monthly Status": "",
-    }
-
-    cup_found = False
-
-    for timeframe in [
+    for timeframe in (
         "Daily",
         "Weekly",
         "Monthly",
-    ]:
-
+    ):
         tf_df = resample_ohlcv(
             daily,
-            timeframe
+            timeframe,
         )
 
-        pattern, status = (
-            detect_cup(
-                tf_df,
-                timeframe
-            )
+        pattern, status = detect_cup(
+            tf_df,
+            timeframe,
         )
 
-        if pattern:
+        cup_results[timeframe] = (
+            pattern,
+            status,
+        )
 
-            cup_found = True
+    daily_pattern, daily_status = (
+        cup_results["Daily"]
+    )
 
-            cup_result[
-                f"{timeframe} Pattern"
-            ] = pattern
+    weekly_pattern, weekly_status = (
+        cup_results["Weekly"]
+    )
 
-            cup_result[
-                f"{timeframe} Status"
-            ] = status
+    monthly_pattern, monthly_status = (
+        cup_results["Monthly"]
+    )
 
-    # IMPORTANT:
-    # Cup gets its OWN row.
-    # It is NEVER combined with divergence.
+    cup_found = any(
+        pattern is not None
+        for pattern, status
+        in cup_results.values()
+    )
 
     if cup_found:
+        # Exactly ONE Cup Pattern row.
+        #
+        # It can contain:
+        # Daily Cup
+        # Weekly Cup
+        # Monthly Cup
+        #
+        # without mixing with divergence.
+        results.append(
+            make_row(
+                stock_name=stock_name,
+                nse_code=nse_code,
+                setup="Cup Pattern",
+                cmp_price=cmp_price,
 
-        results.append({
-
-            "Stock Name":
-                stock_name,
-
-            "NSE Code":
-                nse_code,
-
-            "Setup":
-                "Cup Pattern",
-
-            "Daily Pattern":
-                cup_result[
-                    "Daily Pattern"
-                ],
-
-            "Daily Status":
-                cup_result[
-                    "Daily Status"
-                ],
-
-            "Weekly Pattern":
-                cup_result[
-                    "Weekly Pattern"
-                ],
-
-            "Weekly Status":
-                cup_result[
-                    "Weekly Status"
-                ],
-
-            "Monthly Pattern":
-                cup_result[
-                    "Monthly Pattern"
-                ],
-
-            "Monthly Status":
-                cup_result[
-                    "Monthly Status"
-                ],
-
-            "CMP":
-                round(
-                    current_price,
-                    2
+                daily_pattern=(
+                    daily_pattern
+                    or ""
+                ),
+                daily_status=(
+                    daily_status
+                    or ""
                 ),
 
-            "Chart Link":
-                chart,
-        })
+                weekly_pattern=(
+                    weekly_pattern
+                    or ""
+                ),
+                weekly_status=(
+                    weekly_status
+                    or ""
+                ),
+
+                monthly_pattern=(
+                    monthly_pattern
+                    or ""
+                ),
+                monthly_status=(
+                    monthly_status
+                    or ""
+                ),
+            )
+        )
 
     return results
-
-
-# ============================================================
-# WRITE FINAL LIST
-# ============================================================
-
-def write_final_list(
-    rows
-):
-
-    creds = get_credentials()
-
-    client = gspread.authorize(
-        creds
-    )
-
-    sh = client.open_by_key(
-        SPREADSHEET_ID
-    )
-
-    try:
-
-        ws = sh.worksheet(
-            FINAL_LIST_SHEET
-        )
-
-    except gspread.WorksheetNotFound:
-
-        ws = sh.add_worksheet(
-            title=FINAL_LIST_SHEET,
-            rows=1000,
-            cols=len(FINAL_COLUMNS)
-        )
-
-    ws.clear()
-
-    # Always use fixed columns.
-    output = [
-        FINAL_COLUMNS
-    ]
-
-    for row in rows:
-
-        output.append([
-            row.get(
-                column,
-                ""
-            )
-            for column in FINAL_COLUMNS
-        ])
-
-    ws.update(
-        "A1",
-        output,
-        value_input_option="USER_ENTERED",
-    )
-
-    try:
-        ws.freeze(
-            rows=1
-        )
-    except Exception:
-        pass
-
-    # Header formatting
-    try:
-
-        ws.format(
-            "A1:K1",
-            {
-                "textFormat": {
-                    "bold": True
-                },
-                "horizontalAlignment":
-                    "CENTER",
-            }
-        )
-
-    except Exception:
-        pass
-
-    print(
-        "Final List updated."
-    )
-
-    print(
-        "Rows:",
-        len(rows)
-    )
-
-    print(
-        "Columns:",
-        len(FINAL_COLUMNS)
-    )
 
 
 # ============================================================
@@ -1479,178 +1231,154 @@ def write_final_list(
 # ============================================================
 
 def main():
+    print("")
+    print("==========================================")
+    print("NIFTY 200 DIVERGENCE + CUP SCANNER V2.0")
+    print("==========================================")
+    print("")
+    print("Final List schema:")
+    print("A  Stock Name")
+    print("B  NSE Code")
+    print("C  Setup")
+    print("D  Daily Pattern")
+    print("E  Daily Status")
+    print("F  Weekly Pattern")
+    print("G  Weekly Status")
+    print("H  Monthly Pattern")
+    print("I  Monthly Status")
+    print("J  CMP")
+    print("K  Chart Link")
+    print("")
 
-    print(
-        "=============================================="
-    )
-
-    print(
-        "NIFTY 200 DIVERGENCE + CUP SCANNER V1.4"
-    )
-
-    print(
-        "=============================================="
-    )
-
-    print(
-        "Divergence and Cup are COMPLETELY SEPARATE."
-    )
-
-    print(
-        "Cup timeframes: Daily / Weekly / Monthly"
-    )
-
-    print(
-        ""
-    )
-
-    stocks = (
-        get_nifty200_stocks()
-    )
+    stocks = get_nifty200_stocks()
 
     print(
         "Stocks found:",
-        len(stocks)
+        len(stocks),
     )
 
     results = []
 
     for number, stock in enumerate(
         stocks,
-        start=1
+        start=1,
     ):
-
-        stock_name = stock[
-            "Stock Name"
-        ]
-
-        nse_code = stock[
-            "NSE Code"
-        ]
+        code = stock["NSE Code"]
+        name = stock["Stock Name"]
 
         print(
             f"[{number}/{len(stocks)}] "
-            f"{nse_code} - {stock_name}"
+            f"{code} | {name}"
         )
 
         try:
-
-            stock_results = (
-                scan_stock(
-                    stock_name,
-                    nse_code
-                )
+            stock_results = scan_stock(
+                stock
             )
 
             if stock_results:
-
-                for result in (
+                results.extend(
                     stock_results
-                ):
-
-                    results.append(
-                        result
-                    )
-
-                    print(
-                        "   FOUND:",
-                        result["Setup"]
-                    )
-
-            else:
-
-                print(
-                    "   No setup"
                 )
 
-        except Exception as e:
+                for row in stock_results:
+                    print(
+                        "  FOUND:",
+                        row["Setup"],
+                    )
 
+        except Exception as exc:
             print(
-                "   ERROR:",
-                e
+                "  ERROR:",
+                code,
+                "|",
+                exc,
             )
 
     # --------------------------------------------------------
-    # SORT
+    # Sort:
+    # Stock Name -> Setup
     # --------------------------------------------------------
 
-    setup_order = {
-
-        "RSI Positive Divergence":
-            1,
-
-        "Classic Positive Divergence":
-            2,
-
-        "Cup Pattern":
-            3,
-    }
-
     results.sort(
-        key=lambda x: (
-            setup_order.get(
-                x.get(
+        key=lambda row: (
+            str(
+                row.get(
+                    "Stock Name",
+                    "",
+                )
+            ).upper(),
+            str(
+                row.get(
                     "Setup",
-                    ""
-                ),
-                99
-            ),
-            x.get(
-                "Stock Name",
-                ""
-            ),
-            x.get(
-                "NSE Code",
-                ""
+                    "",
+                )
             ),
         )
     )
 
     # --------------------------------------------------------
-    # WRITE
+    # Write sheet
     # --------------------------------------------------------
 
     write_final_list(
         results
     )
 
-    print(
-        ""
+    # --------------------------------------------------------
+    # Summary
+    # --------------------------------------------------------
+
+    divergence_rows = sum(
+        1
+        for row in results
+        if row["Setup"]
+        in {
+            "RSI Positive Divergence",
+            "Classic Positive Divergence",
+        }
     )
 
-    print(
-        "=============================================="
+    cup_rows = sum(
+        1
+        for row in results
+        if row["Setup"]
+        == "Cup Pattern"
     )
 
+    print("")
+    print("==========================================")
+    print("SCAN COMPLETE")
+    print("==========================================")
     print(
-        "SCAN COMPLETE"
+        "Qualified output rows:",
+        len(results),
     )
-
     print(
-        "Qualified rows:",
-        len(results)
+        "Divergence rows:",
+        divergence_rows,
     )
-
     print(
-        "=============================================="
+        "Cup Pattern rows:",
+        cup_rows,
     )
+    print("")
+    print(
+        "IMPORTANT: Divergence and Cup are "
+        "separate Setup rows."
+    )
+    print("==========================================")
 
-
-# ============================================================
-# RUN
-# ============================================================
 
 if __name__ == "__main__":
-
     try:
-
         main()
 
     except Exception as exc:
-
-        print(
-            "FATAL ERROR:",
-            exc
-        )
-
+        print("")
+        print("==========================================")
+        print("FATAL ERROR")
+        print("==========================================")
+        print(exc)
+        print("==========================================")
         sys.exit(1)
