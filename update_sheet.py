@@ -1551,105 +1551,240 @@ def generate_cup_chart(stock_name, nse_code, cup_details):
 
 
 def generate_unified_stock_chart(stock_name, nse_code, cmp_price, daily, cup_details, divergence_details, divergence_setups):
-    """One page: Daily/Weekly/Monthly candlestick charts; RSI lives under the same timeframe chart."""
+    """Interactive TradingView-style page using Lightweight Charts."""
     filename = f"{_safe_slug(nse_code)}-all-patterns.html"
+
     tf_data = {
         "Daily": daily,
         "Weekly": resample_ohlcv(daily, "Weekly"),
         "Monthly": resample_ohlcv(daily, "Monthly"),
     }
 
-    panels = []
-    tabs = []
-    first_active = None
-
-    for timeframe in ("Daily","Weekly","Monthly"):
+    payload = {}
+    for timeframe in ("Daily", "Weekly", "Monthly"):
         details = cup_details.get(timeframe) or {}
         has_div = timeframe == "Daily" and bool(divergence_setups)
+
         if not details and not has_div:
             continue
-        if first_active is None:
-            first_active = timeframe
 
-        marks = {}
-        pattern_text = "RSI Positive Divergence" if has_div else ""
-        status_text = ""
+        df = details.get("data") if details else tf_data[timeframe]
+        d = df.copy().reset_index(drop=False)
+        dc = _date_col(d)
+
+        candles, volumes, rsi_points = [], [], []
+        rsi_series = calculate_rsi(d["close"].astype(float), 14)
+
+        for i, row in d.iterrows():
+            dt = pd.to_datetime(row[dc], errors="coerce")
+            if pd.isna(dt):
+                continue
+            t = dt.strftime("%Y-%m-%d")
+            o, h, l, c = map(float, (row["open"], row["high"], row["low"], row["close"]))
+            candles.append({"time": t, "open": o, "high": h, "low": l, "close": c})
+            if "volume" in d.columns and pd.notna(row.get("volume")):
+                volumes.append({
+                    "time": t,
+                    "value": float(row["volume"]),
+                    "color": "rgba(38,166,154,0.45)" if c >= o else "rgba(239,83,80,0.45)",
+                })
+            rv = rsi_series.iloc[i]
+            if pd.notna(rv):
+                rsi_points.append({"time": t, "value": float(rv)})
+
+        markers = []
+        lines = []
+        pattern = ""
+        status = ""
+
+        def time_at(idx):
+            if idx is None:
+                return None
+            idx = int(idx)
+            if not (0 <= idx < len(d)):
+                return None
+            dt = pd.to_datetime(d.iloc[idx][dc], errors="coerce")
+            return None if pd.isna(dt) else dt.strftime("%Y-%m-%d")
+
         if details:
-            marks.update({
-                "li": details.get("li"), "bi": details.get("bi"), "ri": details.get("ri"),
-                "breakout_index": details.get("breakout_index"),
-                "breakout_level": details.get("breakout_level"),
-            })
-            pattern_text = details.get("pattern","")
-            status_text = details.get("status","")
+            pattern = details.get("pattern", "")
+            status = details.get("status", "")
+            for key, label, position, color in (
+                ("li", "Left Rim", "aboveBar", "#38bdf8"),
+                ("bi", "Cup Bottom", "belowBar", "#38bdf8"),
+                ("ri", "Right Rim", "aboveBar", "#38bdf8"),
+                ("breakout_index", "Breakout", "belowBar", "#22c55e"),
+            ):
+                tm = time_at(details.get(key))
+                if tm:
+                    markers.append({
+                        "time": tm, "position": position,
+                        "color": color, "shape": "circle", "text": label
+                    })
+            if details.get("breakout_level") is not None:
+                lines.append({
+                    "price": float(details["breakout_level"]),
+                    "title": "Breakout / Resistance",
+                    "color": "#f59e0b",
+                })
+
+        div_line = None
+        rsi_div_line = None
         if has_div and divergence_details:
-            marks["i1"] = divergence_details.get("i1")
-            marks["i2"] = divergence_details.get("i2")
+            i1, i2 = divergence_details.get("i1"), divergence_details.get("i2")
+            t1, t2 = time_at(i1), time_at(i2)
+            if t1 and t2:
+                p1 = float(d.iloc[int(i1)]["low"])
+                p2 = float(d.iloc[int(i2)]["low"])
+                div_line = [{"time": t1, "value": p1}, {"time": t2, "value": p2}]
+                rsi_div_line = [
+                    {"time": t1, "value": float(divergence_details["rsi1"])},
+                    {"time": t2, "value": float(divergence_details["rsi2"])},
+                ]
+                markers.extend([
+                    {"time": t1, "position": "belowBar", "color": "#ef4444", "shape": "arrowUp", "text": "Price Low 1"},
+                    {"time": t2, "position": "belowBar", "color": "#22c55e", "shape": "arrowUp", "text": "Price Low 2"},
+                ])
 
-        tfdf = details.get("data") if details else tf_data[timeframe]
-        price = _svg_price_chart(
-            tfdf, marks=marks,
-            title=f"{nse_code} · {timeframe} Candles · {pattern_text} {status_text}",
-            max_bars=220 if timeframe=="Daily" else 180,
-        )
-        rsi_details = divergence_details if has_div else None
-        rsi = _svg_rsi_chart(
-            tfdf, details=rsi_details,
-            title=f"{nse_code} {timeframe} RSI (14)",
-            max_bars=220 if timeframe=="Daily" else 180,
-        )
-        active = " active" if timeframe == first_active else ""
-        panels.append(f'<div id="panel-{timeframe}" class="tfpanel{active}">{price}{rsi}</div>')
-        tabs.append(f'<button class="tab{active}" onclick="showTF(\'{timeframe}\',this)">{timeframe}</button>')
+        payload[timeframe] = {
+            "candles": candles,
+            "volumes": volumes,
+            "rsi": rsi_points,
+            "markers": markers,
+            "priceLines": lines,
+            "divergence": div_line,
+            "rsiDivergence": rsi_div_line,
+            "pattern": pattern or ("RSI Positive Divergence" if has_div else ""),
+            "status": status,
+        }
 
-    setups = []
-    if divergence_setups:
-        setups.extend(divergence_setups)
+    setups = list(divergence_setups or [])
     if cup_details:
         setups.append("Cup Pattern")
     setup_text = " + ".join(dict.fromkeys(setups)) or "Pattern"
+    first_tf = next(iter(payload.keys()), "Daily")
+    js_payload = json.dumps(payload, separators=(",", ":"))
 
     page = f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(nse_code)} Pattern Chart</title>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{html.escape(nse_code)} Interactive Pattern Chart</title>
+<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 <style>
-*{{box-sizing:border-box}}
-body{{margin:0;background:#06101a;color:#e6edf7;font-family:Inter,Arial,Helvetica,sans-serif}}
-.wrap{{max-width:1540px;margin:auto;padding:12px}}
-.head{{display:grid;grid-template-columns:1.35fr .62fr 1fr;gap:0;background:linear-gradient(180deg,#0d1d2c,#091724);border:1px solid #1b344a;border-radius:10px;overflow:hidden}}
-.head>div{{padding:16px 20px;min-height:92px}}
-h1{{margin:0 0 7px;font-size:31px;letter-spacing:.2px}}
-.muted{{color:#9fb0c3;font-size:13px}}
-.metric{{border-left:1px solid #29445a}}
-.cmp{{font-size:26px;color:#27d3ad;font-weight:800;margin-top:7px}}
-.setup{{color:#f8bd38;font-weight:800;font-size:18px;margin-top:7px}}
-.tabs{{display:flex;gap:8px;margin:12px 0;background:#081522;padding:8px;border:1px solid #183147;border-radius:9px}}
-.tab{{background:#102236;color:#d8e4f0;border:1px solid #2a455d;padding:10px 24px;border-radius:7px;cursor:pointer;font-size:15px;font-weight:700}}
-.tab:hover{{border-color:#3b82f6}}
-.tab.active{{background:#0867d5;border-color:#3790ff;color:#fff;box-shadow:0 0 0 1px #0759b7 inset}}
-.tfpanel{{display:none;border:1px solid #1b344a;border-radius:8px;overflow:hidden;background:#08131f;margin-bottom:12px;box-shadow:0 10px 35px rgba(0,0,0,.18)}}
-.tfpanel.active{{display:block}}
-svg{{display:block;width:100%;height:auto;background:#08131f}}
-.note{{background:linear-gradient(90deg,#07342c,#09251f);border:1px solid #13846d;color:#bdf7e9;padding:14px 18px;border-radius:8px;margin-top:12px;font-size:14px}}
-@media(max-width:800px){{.head{{grid-template-columns:1fr}}.metric{{border-left:0;border-top:1px solid #29445a}}.tabs{{overflow:auto}}.tab{{white-space:nowrap}}}}
-</style></head><body><div class="wrap">
-<div class="head"><div><h1>{html.escape(stock_name)} ({html.escape(nse_code)})</h1><div class="muted">NSE Auto Sheet · Scanner-marked candlestick chart</div></div>
+*{{box-sizing:border-box}} body{{margin:0;background:#07111c;color:#d9e3ee;font-family:Arial,sans-serif}}
+.wrap{{max-width:1600px;margin:auto;padding:12px}}
+.header{{display:grid;grid-template-columns:1.4fr .6fr 1fr;background:#0c1a28;border:1px solid #1d3449;border-radius:9px;overflow:hidden}}
+.header>div{{padding:15px 20px}} .metric{{border-left:1px solid #29445a}}
+h1{{margin:0 0 5px;font-size:29px}} .muted{{color:#8fa4b8;font-size:13px}}
+.cmp{{font-size:25px;font-weight:800;color:#26c6aa;margin-top:6px}}
+.setup{{font-size:17px;font-weight:800;color:#f4b942;margin-top:6px}}
+.tabs{{display:flex;gap:7px;padding:8px;margin:10px 0;background:#0a1724;border:1px solid #1c344a;border-radius:8px}}
+.tab{{border:1px solid #2c4962;background:#102336;color:#d7e4ef;padding:9px 22px;border-radius:6px;font-weight:700;cursor:pointer}}
+.tab.active{{background:#1268ce;border-color:#4396ef;color:white}}
+.toolbar{{display:flex;justify-content:space-between;align-items:center;background:#0a1724;border:1px solid #1c344a;border-bottom:0;padding:9px 12px;border-radius:8px 8px 0 0}}
+#patternTitle{{font-weight:700}} #ohlc{{color:#9fb0c3;font-size:13px}}
+.chartbox{{height:610px;border:1px solid #1c344a;background:#08131f}}
+.rsibox{{height:220px;border:1px solid #1c344a;border-top:0;background:#08131f}}
+.help{{margin-top:10px;padding:12px 15px;background:#0b2924;border:1px solid #146b5b;border-radius:8px;color:#bdf4e8}}
+@media(max-width:800px){{.header{{grid-template-columns:1fr}}.metric{{border-left:0;border-top:1px solid #29445a}}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="header">
+<div><h1>{html.escape(stock_name)} ({html.escape(nse_code)})</h1><div class="muted">Interactive scanner-marked candlestick chart</div></div>
 <div class="metric"><div class="muted">CMP</div><div class="cmp">₹ {cmp_price:,.2f}</div></div>
-<div class="metric"><div class="muted">Detected Setup</div><div class="setup">{html.escape(setup_text)}</div></div></div>
-<div class="tabs">{''.join(tabs)}</div>
-{''.join(panels)}
-<div class="note">Cup / Cup with Handle markers, breakout level, price divergence and RSI divergence are drawn from the same scanner detections used for the Final List.</div>
+<div class="metric"><div class="muted">Detected Setup</div><div class="setup">{html.escape(setup_text)}</div></div>
+</div>
+<div class="tabs" id="tabs"></div>
+<div class="toolbar"><span id="patternTitle"></span><span id="ohlc">Move mouse over candles for OHLC</span></div>
+<div id="chart" class="chartbox"></div>
+<div id="rsi" class="rsibox"></div>
+<div class="help">Mouse wheel = zoom · drag = move chart · hover = OHLC · Daily / Weekly / Monthly buttons show the exact scanner timeframe.</div>
 </div>
 <script>
-function showTF(tf,btn){{
- document.querySelectorAll('.tfpanel').forEach(x=>x.classList.remove('active'));
- document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
- document.getElementById('panel-'+tf).classList.add('active'); btn.classList.add('active');
+const DATA={js_payload};
+let chart=null,rsiChart=null;
+function addCandleSeriesCompat(ch, opts){{
+  if(ch.addCandlestickSeries) return ch.addCandlestickSeries(opts);
+  return ch.addSeries(LightweightCharts.CandlestickSeries,opts);
 }}
-</script></body></html>"""
+function addHistogramSeriesCompat(ch, opts){{
+  if(ch.addHistogramSeries) return ch.addHistogramSeries(opts);
+  return ch.addSeries(LightweightCharts.HistogramSeries,opts);
+}}
+function addLineSeriesCompat(ch, opts){{
+  if(ch.addLineSeries) return ch.addLineSeries(opts);
+  return ch.addSeries(LightweightCharts.LineSeries,opts);
+}}
+function destroyCharts(){{
+  if(chart) chart.remove(); if(rsiChart) rsiChart.remove();
+  chart=null;rsiChart=null;
+}}
+function render(tf){{
+  destroyCharts();
+  const d=DATA[tf];
+  document.getElementById('patternTitle').textContent=tf+' · '+d.pattern+(d.status?' · '+d.status:'');
+  const common={{
+    layout:{{background:{{color:'#08131f'}},textColor:'#9fb0c3'}},
+    grid:{{vertLines:{{color:'#162738'}},horzLines:{{color:'#162738'}}}},
+    rightPriceScale:{{borderColor:'#29445a'}},
+    timeScale:{{borderColor:'#29445a',timeVisible:true}},
+    crosshair:{{mode:LightweightCharts.CrosshairMode.Normal}},
+    handleScroll:true,handleScale:true,
+  }};
+  chart=LightweightCharts.createChart(document.getElementById('chart'),{{...common,width:document.getElementById('chart').clientWidth,height:610}});
+  const candles=addCandleSeriesCompat(chart,{{upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350'}});
+  candles.setData(d.candles);
+  const vol=addHistogramSeriesCompat(chart,{{priceFormat:{{type:'volume'}},priceScaleId:'volume'}});
+  vol.priceScale().applyOptions({{scaleMargins:{{top:.82,bottom:0}}}});
+  vol.setData(d.volumes);
+  d.priceLines.forEach(x=>candles.createPriceLine({{price:x.price,color:x.color,lineWidth:2,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:x.title}}));
+  if(d.markers.length){{
+    if(LightweightCharts.createSeriesMarkers) LightweightCharts.createSeriesMarkers(candles,d.markers);
+    else if(candles.setMarkers) candles.setMarkers(d.markers);
+  }}
+  if(d.divergence){{
+    const dl=addLineSeriesCompat(chart,{{color:'#f87171',lineWidth:3,priceLineVisible:false,lastValueVisible:false}});
+    dl.setData(d.divergence);
+  }}
+  chart.timeScale().fitContent();
+
+  rsiChart=LightweightCharts.createChart(document.getElementById('rsi'),{{...common,width:document.getElementById('rsi').clientWidth,height:220,rightPriceScale:{{borderColor:'#29445a',autoScale:false}}}});
+  const rs=addLineSeriesCompat(rsiChart,{{color:'#a970ff',lineWidth:2,priceLineVisible:false}});
+  rs.setData(d.rsi);
+  [30,70].forEach(v=>rs.createPriceLine({{price:v,color:'#64748b',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'RSI '+v}}));
+  if(d.rsiDivergence){{
+    const rd=addLineSeriesCompat(rsiChart,{{color:'#22c55e',lineWidth:3,priceLineVisible:false,lastValueVisible:false}});
+    rd.setData(d.rsiDivergence);
+  }}
+  rsiChart.timeScale().fitContent();
+
+  chart.subscribeCrosshairMove(p=>{{
+    const bar=p.seriesData.get(candles);
+    document.getElementById('ohlc').textContent=bar ? `O ${{bar.open.toFixed(2)}}  H ${{bar.high.toFixed(2)}}  L ${{bar.low.toFixed(2)}}  C ${{bar.close.toFixed(2)}}` : 'Move mouse over candles for OHLC';
+  }});
+}}
+const tabs=document.getElementById('tabs');
+Object.keys(DATA).forEach(tf=>{{
+ const b=document.createElement('button');b.className='tab'+(tf==='{first_tf}'?' active':'');b.textContent=tf;
+ b.onclick=()=>{{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');render(tf)}};
+ tabs.appendChild(b);
+}});
+render('{first_tf}');
+window.addEventListener('resize',()=>{{
+ if(chart) chart.applyOptions({{width:document.getElementById('chart').clientWidth}});
+ if(rsiChart) rsiChart.applyOptions({{width:document.getElementById('rsi').clientWidth}});
+}});
+</script>
+</body></html>"""
+
     CHART_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    (CHART_OUTPUT_DIR/filename).write_text(page,encoding="utf-8")
+    (CHART_OUTPUT_DIR / filename).write_text(page, encoding="utf-8")
     return pattern_chart_url(filename)
+
 
 
 # ============================================================
