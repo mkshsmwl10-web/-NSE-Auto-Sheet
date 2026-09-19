@@ -1,115 +1,92 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>INFY Interactive Pattern Chart</title>
-<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<title>INFY · TradingView</title>
 <style>
-*{box-sizing:border-box} body{margin:0;background:#07111c;color:#d9e3ee;font-family:Arial,sans-serif}
-.wrap{max-width:1600px;margin:auto;padding:12px}
-.header{display:grid;grid-template-columns:1.4fr .6fr 1fr;background:#0c1a28;border:1px solid #1d3449;border-radius:9px;overflow:hidden}
-.header>div{padding:15px 20px} .metric{border-left:1px solid #29445a}
-h1{margin:0 0 5px;font-size:29px} .muted{color:#8fa4b8;font-size:13px}
-.cmp{font-size:25px;font-weight:800;color:#26c6aa;margin-top:6px}
-.setup{font-size:17px;font-weight:800;color:#f4b942;margin-top:6px}
-.tabs{display:flex;gap:7px;padding:8px;margin:10px 0;background:#0a1724;border:1px solid #1c344a;border-radius:8px}
-.tab{border:1px solid #2c4962;background:#102336;color:#d7e4ef;padding:9px 22px;border-radius:6px;font-weight:700;cursor:pointer}
-.tab.active{background:#1268ce;border-color:#4396ef;color:white}
-.toolbar{display:flex;justify-content:space-between;align-items:center;background:#0a1724;border:1px solid #1c344a;border-bottom:0;padding:9px 12px;border-radius:8px 8px 0 0}
-#patternTitle{font-weight:700} #ohlc{color:#9fb0c3;font-size:13px}
-.chartbox{height:610px;border:1px solid #1c344a;background:#08131f}
-.rsibox{height:220px;border:1px solid #1c344a;border-top:0;background:#08131f}
-.help{margin-top:10px;padding:12px 15px;background:#0b2924;border:1px solid #146b5b;border-radius:8px;color:#bdf4e8}
-@media(max-width:800px){.header{grid-template-columns:1fr}.metric{border-left:0;border-top:1px solid #29445a}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#0b0e11;color:#d1d4dc;font-family:Arial,Helvetica,sans-serif}
+.page{height:100vh;display:flex;flex-direction:column}
+.scanner{display:grid;grid-template-columns:1.2fr .45fr 1.35fr;min-height:82px;background:#131722;border-bottom:1px solid #2a2e39}
+.cell{padding:13px 18px}
+.cell+.cell{border-left:1px solid #2a2e39}
+h1{font-size:23px;margin:0 0 5px;color:#f0f3fa}
+.label{font-size:11px;color:#787b86;text-transform:uppercase;letter-spacing:.7px}
+.value{margin-top:5px;font-size:18px;font-weight:700;color:#f0f3fa}
+.cmp{color:#26a69a}
+.setup{color:#f0b90b}
+.summary{font-size:12px;color:#b2b5be;margin-top:5px;line-height:1.35}
+.tvwrap{flex:1;min-height:650px}
+.tradingview-widget-container{height:100%;width:100%}
+.tradingview-widget-container__widget{height:calc(100% - 28px);width:100%}
+.tradingview-widget-copyright{height:28px;padding:5px 10px;font-size:12px;background:#131722;color:#787b86}
+.tradingview-widget-copyright a{color:#2962ff;text-decoration:none}
+@media(max-width:850px){
+ .scanner{grid-template-columns:1fr}
+ .cell+.cell{border-left:0;border-top:1px solid #2a2e39}
+ .tvwrap{min-height:700px}
+}
 </style>
 </head>
 <body>
-<div class="wrap">
-<div class="header">
-<div><h1>INFY (INFY)</h1><div class="muted">Interactive scanner-marked candlestick chart</div></div>
-<div class="metric"><div class="muted">CMP</div><div class="cmp">₹ 1,051.40</div></div>
-<div class="metric"><div class="muted">Detected Setup</div><div class="setup">Cup Pattern</div></div>
-</div>
-<div class="tabs" id="tabs"></div>
-<div class="toolbar"><span id="patternTitle"></span><span id="ohlc">Move mouse over candles for OHLC</span></div>
-<div id="chart" class="chartbox"></div>
-<div id="rsi" class="rsibox"></div>
-<div class="help">Mouse wheel = zoom · drag = move chart · hover = OHLC · Daily / Weekly / Monthly buttons show the exact scanner timeframe.</div>
-</div>
-<script>
-const DATA={"Monthly":{"candles":[{"time":"2021-09-30","open":1685.0,"high":1788.0,"low":1655.0,"close":1675.199951171875},{"time":"2021-10-31","open":1665.0999755859375,"high":1848.0,"low":1661.050048828125,"close":1667.75},{"time":"2021-11-30","open":1677.5,"high":1808.949951171875,"low":1669.1500244140625,"close":1712.6500244140625},{"time":"2021-12-31","open":1715.0,"high":1909.800048828125,"low":1691.5,"close":1887.75},{"time":"2022-01-31","open":1887.75,"high":1953.9000244140625,"low":1665.0,"close":1736.199951171875},{"time":"2022-02-28","open":1766.0999755859375,"high":1792.800048828125,"low":1665.0,"close":1715.5999755859375},{"time":"2022-03-31","open":1710.0,"high":1923.300048828125,"low":1681.0,"close":1906.8499755859375},{"time":"2022-04-30","open":1886.8499755859375,"high":1910.300048828125,"low":1550.0,"close":1567.550048828125},{"time":"2022-05-31","open":1550.9000244140625,"high":1589.4000244140625,"low":1399.25,"close":1503.5999755859375},{"time":"2022-06-30","open":1513.0,"high":1555.0,"low":1367.1500244140625,"close":1461.9000244140625},{"time":"2022-07-31","open":1454.0,"high":1555.699951171875,"low":1410.6500244140625,"close":1549.699951171875},{"time":"2022-08-31","open":1564.0,"high":1631.3499755859375,"low":1450.0,"close":1492.949951171875},{"time":"2022-09-30","open":1460.050048828125,"high":1553.0,"low":1355.0,"close":1413.449951171875},{"time":"2022-10-31","open":1412.0,"high":1546.4000244140625,"low":1386.0,"close":1537.6500244140625},{"time":"2022-11-30","open":1553.050048828125,"high":1653.5,"low":1485.0,"close":1634.949951171875},{"time":"2022-12-31","open":1656.199951171875,"high":1672.5999755859375,"low":1482.449951171875,"close":1508.199951171875},{"time":"2023-01-31","open":1514.0,"high":1568.800048828125,"low":1446.5,"close":1533.75},{"time":"2023-02-28","open":1542.199951171875,"high":1619.75,"low":1481.300048828125,"close":1487.550048828125},{"time":"2023-03-31","open":1492.4000244140625,"high":1520.4000244140625,"low":1364.550048828125,"close":1427.949951171875},{"time":"2023-04-30","open":1435.0,"high":1435.0,"low":1185.300048828125,"close":1252.75},{"time":"2023-05-31","open":1254.550048828125,"high":1332.699951171875,"low":1239.050048828125,"close":1318.300048828125},{"time":"2023-06-30","open":1322.550048828125,"high":1338.9000244140625,"low":1262.25,"close":1335.5},{"time":"2023-07-31","open":1330.0,"high":1498.800048828125,"low":1305.0,"close":1355.699951171875},{"time":"2023-08-31","open":1362.0,"high":1444.9000244140625,"low":1348.449951171875,"close":1435.449951171875},{"time":"2023-09-30","open":1430.949951171875,"high":1518.4000244140625,"low":1416.0,"close":1435.449951171875},{"time":"2023-10-31","open":1436.050048828125,"high":1518.25,"low":1353.0999755859375,"close":1368.4000244140625},{"time":"2023-11-30","open":1373.050048828125,"high":1467.9000244140625,"low":1351.6500244140625,"close":1455.1500244140625},{"time":"2023-12-31","open":1459.9000244140625,"high":1593.0,"low":1433.1500244140625,"close":1542.9000244140625},{"time":"2024-01-31","open":1539.0,"high":1690.0,"low":1486.5999755859375,"close":1660.9000244140625},{"time":"2024-02-29","open":1659.550048828125,"high":1733.0,"low":1635.5,"close":1673.9000244140625},{"time":"2024-03-31","open":1669.0,"high":1671.949951171875,"low":1481.550048828125,"close":1498.050048828125},{"time":"2024-04-30","open":1525.0,"high":1529.949951171875,"low":1378.75,"close":1420.550048828125},{"time":"2024-05-31","open":1413.0,"high":1479.5999755859375,"low":1400.0,"close":1406.9000244140625},{"time":"2024-06-30","open":1440.0,"high":1588.5,"low":1358.3499755859375,"close":1566.75},{"time":"2024-07-31","open":1559.5,"high":1903.0,"low":1559.5,"close":1868.25},{"time":"2024-08-31","open":1856.0999755859375,"high":1951.0,"low":1718.550048828125,"close":1943.699951171875},{"time":"2024-09-30","open":1943.3499755859375,"high":1975.75,"low":1867.4000244140625,"close":1875.5999755859375},{"time":"2024-10-31","open":1875.0,"high":1991.449951171875,"low":1746.5,"close":1757.25},{"time":"2024-11-30","open":1764.5,"high":1941.4000244140625,"low":1718.0,"close":1857.8499755859375},{"time":"2024-12-31","open":1859.0,"high":2006.449951171875,"low":1835.199951171875,"close":1880.0},{"time":"2025-01-31","open":1874.0,"high":1982.800048828125,"low":1793.050048828125,"close":1879.800048828125},{"time":"2025-02-28","open":1880.300048828125,"high":1924.0,"low":1682.449951171875,"close":1687.699951171875},{"time":"2025-03-31","open":1692.300048828125,"high":1732.949951171875,"low":1545.1500244140625,"close":1570.6500244140625},{"time":"2025-04-30","open":1539.25,"high":1555.6500244140625,"low":1307.0,"close":1500.0999755859375},{"time":"2025-05-31","open":1499.699951171875,"high":1632.0,"low":1494.0999755859375,"close":1562.699951171875},{"time":"2025-06-30","open":1560.0,"high":1647.4000244140625,"low":1535.5999755859375,"close":1601.800048828125},{"time":"2025-07-31","open":1609.0,"high":1649.0,"low":1482.5,"close":1509.0},{"time":"2025-08-31","open":1493.9000244140625,"high":1539.0,"low":1414.0,"close":1469.5999755859375},{"time":"2025-09-30","open":1476.699951171875,"high":1555.0,"low":1428.300048828125,"close":1441.800048828125},{"time":"2025-10-31","open":1446.0,"high":1546.0,"low":1427.4000244140625,"close":1482.300048828125},{"time":"2025-11-30","open":1482.300048828125,"high":1585.0,"low":1449.0999755859375,"close":1560.0999755859375},{"time":"2025-12-31","open":1562.5,"high":1693.199951171875,"low":1554.0999755859375,"close":1615.4000244140625},{"time":"2026-01-31","open":1615.4000244140625,"high":1694.0,"low":1583.0999755859375,"close":1641.0},{"time":"2026-02-28","open":1662.0,"high":1728.0,"low":1264.0999755859375,"close":1300.0999755859375},{"time":"2026-03-31","open":1291.0,"high":1327.199951171875,"low":1215.0999755859375,"close":1250.5999755859375},{"time":"2026-04-30","open":1290.0,"high":1376.9000244140625,"low":1149.800048828125,"close":1181.800048828125},{"time":"2026-05-31","open":1181.800048828125,"high":1210.0,"low":1089.0,"close":1160.9000244140625},{"time":"2026-06-30","open":1175.0,"high":1278.9000244140625,"low":996.0,"close":1000.4000244140625},{"time":"2026-07-31","open":1006.0,"high":1187.699951171875,"low":982.4000244140625,"close":1130.0999755859375},{"time":"2026-08-31","open":1145.0999755859375,"high":1195.0,"low":1107.199951171875,"close":1133.800048828125},{"time":"2026-09-30","open":1128.0,"high":1156.0,"low":1026.5,"close":1051.4000244140625}],"volumes":[{"time":"2021-09-30","value":53302506.0,"color":"rgba(239,83,80,0.45)"},{"time":"2021-10-31","value":144440594.0,"color":"rgba(38,166,154,0.45)"},{"time":"2021-11-30","value":104526424.0,"color":"rgba(38,166,154,0.45)"},{"time":"2021-12-31","value":109472023.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-01-31","value":141619689.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-02-28","value":128928283.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-03-31","value":154420688.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-04-30","value":170696670.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-05-31","value":176039201.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-06-30","value":139144802.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-07-31","value":115124683.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-08-31","value":92398681.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-09-30","value":171480153.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-10-31","value":105106395.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-11-30","value":91935458.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-12-31","value":127679808.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-01-31","value":142093979.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-02-28","value":99346960.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-03-31","value":142669535.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-04-30","value":181895956.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-05-31","value":153758884.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-06-30","value":125302884.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-07-31","value":212488786.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-08-31","value":107163346.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-09-30","value":101541064.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-10-31","value":115659556.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-11-30","value":85186084.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-12-31","value":130077843.0,"color":"rgba(38,166,154,0.45)"},{"time":"2024-01-31","value":165823157.0,"color":"rgba(38,166,154,0.45)"},{"time":"2024-02-29","value":101673806.0,"color":"rgba(38,166,154,0.45)"},{"time":"2024-03-31","value":135900753.0,"color":"rgba(239,83,80,0.45)"},{"time":"2024-04-30","value":185453567.0,"color":"rgba(239,83,80,0.45)"},{"time":"2024-05-31","value":174897064.0,"color":"rgba(239,83,80,0.45)"},{"time":"2024-06-30","value":177134468.0,"color":"rgba(38,166,154,0.45)"},{"time":"2024-07-31","value":192519323.0,"color":"rgba(38,166,154,0.45)"},{"time":"2024-08-31","value":124670491.0,"color":"rgba(38,166,154,0.45)"},{"time":"2024-09-30","value":134369302.0,"color":"rgba(239,83,80,0.45)"},{"time":"2024-10-31","value":124181223.0,"color":"rgba(239,83,80,0.45)"},{"time":"2024-11-30","value":106461012.0,"color":"rgba(38,166,154,0.45)"},{"time":"2024-12-31","value":104692952.0,"color":"rgba(38,166,154,0.45)"},{"time":"2025-01-31","value":149101080.0,"color":"rgba(38,166,154,0.45)"},{"time":"2025-02-28","value":101783118.0,"color":"rgba(239,83,80,0.45)"},{"time":"2025-03-31","value":157797728.0,"color":"rgba(239,83,80,0.45)"},{"time":"2025-04-30","value":204300813.0,"color":"rgba(239,83,80,0.45)"},{"time":"2025-05-31","value":147048530.0,"color":"rgba(38,166,154,0.45)"},{"time":"2025-06-30","value":144990624.0,"color":"rgba(38,166,154,0.45)"},{"time":"2025-07-31","value":158532995.0,"color":"rgba(239,83,80,0.45)"},{"time":"2025-08-31","value":171842862.0,"color":"rgba(239,83,80,0.45)"},{"time":"2025-09-30","value":179457434.0,"color":"rgba(239,83,80,0.45)"},{"time":"2025-10-31","value":150666519.0,"color":"rgba(38,166,154,0.45)"},{"time":"2025-11-30","value":188333389.0,"color":"rgba(38,166,154,0.45)"},{"time":"2025-12-31","value":167145619.0,"color":"rgba(38,166,154,0.45)"},{"time":"2026-01-31","value":136846621.0,"color":"rgba(38,166,154,0.45)"},{"time":"2026-02-28","value":345119872.0,"color":"rgba(239,83,80,0.45)"},{"time":"2026-03-31","value":222863751.0,"color":"rgba(239,83,80,0.45)"},{"time":"2026-04-30","value":296788125.0,"color":"rgba(239,83,80,0.45)"},{"time":"2026-05-31","value":278179673.0,"color":"rgba(239,83,80,0.45)"},{"time":"2026-06-30","value":325083440.0,"color":"rgba(239,83,80,0.45)"},{"time":"2026-07-31","value":346748931.0,"color":"rgba(38,166,154,0.45)"},{"time":"2026-08-31","value":169144641.0,"color":"rgba(239,83,80,0.45)"},{"time":"2026-09-30","value":125024101.0,"color":"rgba(239,83,80,0.45)"}],"rsi":[{"time":"2022-11-30","value":48.54324785175043},{"time":"2022-12-31","value":42.65020228361758},{"time":"2023-01-31","value":44.12276673843125},{"time":"2023-02-28","value":42.021650889950564},{"time":"2023-03-31","value":39.41412128375331},{"time":"2023-04-30","value":32.942857559581626},{"time":"2023-05-31","value":37.10374313299156},{"time":"2023-06-30","value":38.18755899402239},{"time":"2023-07-31","value":39.50597056094},{"time":"2023-08-31","value":44.5357963938493},{"time":"2023-09-30","value":44.5357963938493},{"time":"2023-10-31","value":41.1959112615724},{"time":"2023-11-30","value":46.75909722626027},{"time":"2023-12-31","value":51.733325960220945},{"time":"2024-01-31","value":57.4855579194682},{"time":"2024-02-29","value":58.07831099689676},{"time":"2024-03-31","value":48.273677551299414},{"time":"2024-04-30","value":44.69272709073066},{"time":"2024-05-31","value":44.07261083599646},{"time":"2024-06-30","value":52.401602393343985},{"time":"2024-07-31","value":63.45616225124312},{"time":"2024-08-31","value":65.6087152495608},{"time":"2024-09-30","value":62.05572334549298},{"time":"2024-10-31","value":56.344966019594985},{"time":"2024-11-30","value":59.73679964631512},{"time":"2024-12-31","value":60.465151627117166},{"time":"2025-01-31","value":60.45452008609421},{"time":"2025-02-28","value":51.1494371685682},{"time":"2025-03-31","value":46.457270758891546},{"time":"2025-04-30","value":43.846445561582506},{"time":"2025-05-31","value":46.70828539884857},{"time":"2025-06-30","value":48.47463833125457},{"time":"2025-07-31","value":44.68872393356422},{"time":"2025-08-31","value":43.14791428474403},{"time":"2025-09-30","value":42.04634670204568},{"time":"2025-10-31","value":44.27823402970122},{"time":"2025-11-30","value":48.390050575374694},{"time":"2025-12-31","value":51.14941846374592},{"time":"2026-01-31","value":52.41771323569365},{"time":"2026-02-28","value":38.196272120093674},{"time":"2026-03-31","value":36.64172360161686},{"time":"2026-04-30","value":34.53772936919077},{"time":"2026-05-31","value":33.900899574596},{"time":"2026-06-30","value":29.415342132352194},{"time":"2026-07-31","value":36.70374957805804},{"time":"2026-08-31","value":36.9039108087313},{"time":"2026-09-30","value":34.30238578009498}],"markers":[{"time":"2022-02-28","position":"aboveBar","color":"#38bdf8","shape":"circle","text":"Left Rim"},{"time":"2023-04-30","position":"belowBar","color":"#38bdf8","shape":"circle","text":"Cup Bottom"},{"time":"2025-02-28","position":"aboveBar","color":"#38bdf8","shape":"circle","text":"Right Rim"}],"priceLines":[{"price":1795.147717285156,"title":"Breakout / Resistance","color":"#f59e0b"}],"divergence":null,"rsiDivergence":null,"pattern":"Cup","status":"BEFORE BREAKOUT"}};
-let chart=null,rsiChart=null;
-function addCandleSeriesCompat(ch, opts){
-  if(ch.addCandlestickSeries) return ch.addCandlestickSeries(opts);
-  return ch.addSeries(LightweightCharts.CandlestickSeries,opts);
-}
-function addHistogramSeriesCompat(ch, opts){
-  if(ch.addHistogramSeries) return ch.addHistogramSeries(opts);
-  return ch.addSeries(LightweightCharts.HistogramSeries,opts);
-}
-function addLineSeriesCompat(ch, opts){
-  if(ch.addLineSeries) return ch.addLineSeries(opts);
-  return ch.addSeries(LightweightCharts.LineSeries,opts);
-}
-function destroyCharts(){
-  if(chart) chart.remove(); if(rsiChart) rsiChart.remove();
-  chart=null;rsiChart=null;
-}
-function render(tf){
-  destroyCharts();
-  const d=DATA[tf];
-  document.getElementById('patternTitle').textContent=tf+' · '+d.pattern+(d.status?' · '+d.status:'');
-  const common={
-    layout:{background:{color:'#08131f'},textColor:'#9fb0c3'},
-    grid:{vertLines:{color:'#162738'},horzLines:{color:'#162738'}},
-    rightPriceScale:{borderColor:'#29445a'},
-    timeScale:{borderColor:'#29445a',timeVisible:true},
-    crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
-    handleScroll:true,handleScale:true,
-  };
-  chart=LightweightCharts.createChart(document.getElementById('chart'),{...common,width:document.getElementById('chart').clientWidth,height:610});
-  const candles=addCandleSeriesCompat(chart,{upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
-  candles.setData(d.candles);
-  const vol=addHistogramSeriesCompat(chart,{priceFormat:{type:'volume'},priceScaleId:'volume'});
-  vol.priceScale().applyOptions({scaleMargins:{top:.82,bottom:0}});
-  vol.setData(d.volumes);
-  d.priceLines.forEach(x=>candles.createPriceLine({price:x.price,color:x.color,lineWidth:2,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:x.title}));
-  if(d.markers.length){
-    if(LightweightCharts.createSeriesMarkers) LightweightCharts.createSeriesMarkers(candles,d.markers);
-    else if(candles.setMarkers) candles.setMarkers(d.markers);
-  }
-  if(d.divergence){
-    const dl=addLineSeriesCompat(chart,{color:'#f87171',lineWidth:3,priceLineVisible:false,lastValueVisible:false});
-    dl.setData(d.divergence);
-  }
-  chart.timeScale().fitContent();
+<div class="page">
+  <div class="scanner">
+    <div class="cell">
+      <h1>INFY (INFY)</h1>
+      <div class="label">Scanner-marked setup</div>
+      <div class="summary">Monthly: Cup · BEFORE BREAKOUT</div>
+    </div>
+    <div class="cell">
+      <div class="label">CMP</div>
+      <div class="value cmp">₹ 1,051.40</div>
+    </div>
+    <div class="cell">
+      <div class="label">Detected setup</div>
+      <div class="value setup">Cup Pattern</div>
+      <div class="summary">TradingView opens on scanner timeframe: Monthly</div>
+    </div>
+  </div>
 
-  rsiChart=LightweightCharts.createChart(document.getElementById('rsi'),{...common,width:document.getElementById('rsi').clientWidth,height:220,rightPriceScale:{borderColor:'#29445a',autoScale:false}});
-  const rs=addLineSeriesCompat(rsiChart,{color:'#a970ff',lineWidth:2,priceLineVisible:false});
-  rs.setData(d.rsi);
-  [30,70].forEach(v=>rs.createPriceLine({price:v,color:'#64748b',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'RSI '+v}));
-  if(d.rsiDivergence){
-    const rd=addLineSeriesCompat(rsiChart,{color:'#22c55e',lineWidth:3,priceLineVisible:false,lastValueVisible:false});
-    rd.setData(d.rsiDivergence);
-  }
-  rsiChart.timeScale().fitContent();
-
-  chart.subscribeCrosshairMove(p=>{
-    const bar=p.seriesData.get(candles);
-    document.getElementById('ohlc').textContent=bar ? `O ${bar.open.toFixed(2)}  H ${bar.high.toFixed(2)}  L ${bar.low.toFixed(2)}  C ${bar.close.toFixed(2)}` : 'Move mouse over candles for OHLC';
-  });
-}
-const tabs=document.getElementById('tabs');
-Object.keys(DATA).forEach(tf=>{
- const b=document.createElement('button');b.className='tab'+(tf==='Monthly'?' active':'');b.textContent=tf;
- b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');render(tf)};
- tabs.appendChild(b);
-});
-render('Monthly');
-window.addEventListener('resize',()=>{
- if(chart) chart.applyOptions({width:document.getElementById('chart').clientWidth});
- if(rsiChart) rsiChart.applyOptions({width:document.getElementById('rsi').clientWidth});
-});
-</script>
-</body></html>
+  <div class="tvwrap">
+    <div class="tradingview-widget-container">
+      <div class="tradingview-widget-container__widget"></div>
+      <div class="tradingview-widget-copyright">
+        <a href="https://www.tradingview.com/symbols/INFY/" rel="noopener nofollow" target="_blank">
+          INFY chart
+        </a> by TradingView
+      </div>
+      <script type="text/javascript"
+        src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
+        async>
+      {
+        "autosize": true,
+        "symbol": "NSE:INFY",
+        "interval": "M",
+        "timezone": "Asia/Kolkata",
+        "theme": "dark",
+        "backgroundColor": "rgba(11, 14, 17, 1)",
+        "style": "1",
+        "locale": "en",
+        "withdateranges": true,
+        "hide_side_toolbar": false,
+        "allow_symbol_change": true,
+        "save_image": false,
+        "calendar": false,
+        "details": true,
+        "hotlist": false,
+        "show_popup_button": true,
+        "popup_width": "1200",
+        "popup_height": "750",
+        "studies": [
+          "RSI@tv-basicstudies",
+          "Volume@tv-basicstudies"
+        ],
+        "support_host": "https://www.tradingview.com"
+      }
+      </script>
+    </div>
+  </div>
+</div>
+</body>
+</html>

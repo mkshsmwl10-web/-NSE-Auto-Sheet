@@ -1,115 +1,92 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>FCL Interactive Pattern Chart</title>
-<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<title>FCL · TradingView</title>
 <style>
-*{box-sizing:border-box} body{margin:0;background:#07111c;color:#d9e3ee;font-family:Arial,sans-serif}
-.wrap{max-width:1600px;margin:auto;padding:12px}
-.header{display:grid;grid-template-columns:1.4fr .6fr 1fr;background:#0c1a28;border:1px solid #1d3449;border-radius:9px;overflow:hidden}
-.header>div{padding:15px 20px} .metric{border-left:1px solid #29445a}
-h1{margin:0 0 5px;font-size:29px} .muted{color:#8fa4b8;font-size:13px}
-.cmp{font-size:25px;font-weight:800;color:#26c6aa;margin-top:6px}
-.setup{font-size:17px;font-weight:800;color:#f4b942;margin-top:6px}
-.tabs{display:flex;gap:7px;padding:8px;margin:10px 0;background:#0a1724;border:1px solid #1c344a;border-radius:8px}
-.tab{border:1px solid #2c4962;background:#102336;color:#d7e4ef;padding:9px 22px;border-radius:6px;font-weight:700;cursor:pointer}
-.tab.active{background:#1268ce;border-color:#4396ef;color:white}
-.toolbar{display:flex;justify-content:space-between;align-items:center;background:#0a1724;border:1px solid #1c344a;border-bottom:0;padding:9px 12px;border-radius:8px 8px 0 0}
-#patternTitle{font-weight:700} #ohlc{color:#9fb0c3;font-size:13px}
-.chartbox{height:610px;border:1px solid #1c344a;background:#08131f}
-.rsibox{height:220px;border:1px solid #1c344a;border-top:0;background:#08131f}
-.help{margin-top:10px;padding:12px 15px;background:#0b2924;border:1px solid #146b5b;border-radius:8px;color:#bdf4e8}
-@media(max-width:800px){.header{grid-template-columns:1fr}.metric{border-left:0;border-top:1px solid #29445a}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#0b0e11;color:#d1d4dc;font-family:Arial,Helvetica,sans-serif}
+.page{height:100vh;display:flex;flex-direction:column}
+.scanner{display:grid;grid-template-columns:1.2fr .45fr 1.35fr;min-height:82px;background:#131722;border-bottom:1px solid #2a2e39}
+.cell{padding:13px 18px}
+.cell+.cell{border-left:1px solid #2a2e39}
+h1{font-size:23px;margin:0 0 5px;color:#f0f3fa}
+.label{font-size:11px;color:#787b86;text-transform:uppercase;letter-spacing:.7px}
+.value{margin-top:5px;font-size:18px;font-weight:700;color:#f0f3fa}
+.cmp{color:#26a69a}
+.setup{color:#f0b90b}
+.summary{font-size:12px;color:#b2b5be;margin-top:5px;line-height:1.35}
+.tvwrap{flex:1;min-height:650px}
+.tradingview-widget-container{height:100%;width:100%}
+.tradingview-widget-container__widget{height:calc(100% - 28px);width:100%}
+.tradingview-widget-copyright{height:28px;padding:5px 10px;font-size:12px;background:#131722;color:#787b86}
+.tradingview-widget-copyright a{color:#2962ff;text-decoration:none}
+@media(max-width:850px){
+ .scanner{grid-template-columns:1fr}
+ .cell+.cell{border-left:0;border-top:1px solid #2a2e39}
+ .tvwrap{min-height:700px}
+}
 </style>
 </head>
 <body>
-<div class="wrap">
-<div class="header">
-<div><h1>FCL (FCL)</h1><div class="muted">Interactive scanner-marked candlestick chart</div></div>
-<div class="metric"><div class="muted">CMP</div><div class="cmp">₹ 57.02</div></div>
-<div class="metric"><div class="muted">Detected Setup</div><div class="setup">Cup Pattern</div></div>
-</div>
-<div class="tabs" id="tabs"></div>
-<div class="toolbar"><span id="patternTitle"></span><span id="ohlc">Move mouse over candles for OHLC</span></div>
-<div id="chart" class="chartbox"></div>
-<div id="rsi" class="rsibox"></div>
-<div class="help">Mouse wheel = zoom · drag = move chart · hover = OHLC · Daily / Weekly / Monthly buttons show the exact scanner timeframe.</div>
-</div>
-<script>
-const DATA={"Monthly":{"candles":[{"time":"2021-09-30","open":13.100000381469727,"high":14.149999618530273,"low":12.104999542236328,"close":12.635000228881836},{"time":"2021-10-31","open":12.59000015258789,"high":13.819999694824219,"low":11.045000076293945,"close":11.800000190734863},{"time":"2021-11-30","open":12.045000076293945,"high":13.34000015258789,"low":10.399999618530273,"close":10.579999923706055},{"time":"2021-12-31","open":10.880000114440918,"high":14.765000343322754,"low":10.550000190734863,"close":13.854999542236328},{"time":"2022-01-31","open":13.925000190734863,"high":16.7549991607666,"low":13.225000381469727,"close":15.84000015258789},{"time":"2022-02-28","open":16.010000228881836,"high":18.040000915527344,"low":14.010000228881836,"close":15.829999923706055},{"time":"2022-03-31","open":15.399999618530273,"high":18.450000762939453,"low":14.529999732971191,"close":18.06999969482422},{"time":"2022-04-30","open":18.200000762939453,"high":23.530000686645508,"low":18.149999618530273,"close":19.344999313354492},{"time":"2022-05-31","open":18.90999984741211,"high":19.950000762939453,"low":14.970000267028809,"close":18.170000076293945},{"time":"2022-06-30","open":18.110000610351562,"high":18.989999771118164,"low":15.524999618530273,"close":18.530000686645508},{"time":"2022-07-31","open":18.334999084472656,"high":22.799999237060547,"low":18.0,"close":21.079999923706055},{"time":"2022-08-31","open":21.299999237060547,"high":28.389999389648438,"low":21.139999389648438,"close":27.55500030517578},{"time":"2022-09-30","open":27.69499969482422,"high":40.900001525878906,"low":27.600000381469727,"close":35.18000030517578},{"time":"2022-10-31","open":35.18000030517578,"high":40.35499954223633,"low":35.18000030517578,"close":36.334999084472656},{"time":"2022-11-30","open":36.20000076293945,"high":36.4900016784668,"low":31.020000457763672,"close":32.06999969482422},{"time":"2022-12-31","open":32.32500076293945,"high":32.79999923706055,"low":20.915000915527344,"close":25.264999389648438},{"time":"2023-01-31","open":25.559999465942383,"high":26.059999465942383,"low":22.18000030517578,"close":24.34000015258789},{"time":"2023-02-28","open":24.579999923706055,"high":26.344999313354492,"low":22.5,"close":22.75},{"time":"2023-03-31","open":22.71500015258789,"high":24.200000762939453,"low":20.299999237060547,"close":23.309999465942383},{"time":"2023-04-30","open":23.489999771118164,"high":25.239999771118164,"low":23.110000610351562,"close":23.93000030517578},{"time":"2023-05-31","open":24.204999923706055,"high":31.079999923706055,"low":24.204999923706055,"close":29.5},{"time":"2023-06-30","open":29.639999389648438,"high":32.48500061035156,"low":28.604999542236328,"close":30.094999313354492},{"time":"2023-07-31","open":30.364999771118164,"high":31.170000076293945,"low":26.600000381469727,"close":29.885000228881836},{"time":"2023-08-31","open":29.885000228881836,"high":32.77000045776367,"low":27.5,"close":31.30500030517578},{"time":"2023-09-30","open":31.209999084472656,"high":35.2400016784668,"low":29.5,"close":31.9950008392334},{"time":"2023-10-31","open":32.13999938964844,"high":33.689998626708984,"low":28.155000686645508,"close":29.774999618530273},{"time":"2023-11-30","open":29.799999237060547,"high":37.68000030517578,"low":29.295000076293945,"close":36.25},{"time":"2023-12-31","open":36.400001525878906,"high":39.189998626708984,"low":33.0,"close":36.130001068115234},{"time":"2024-01-31","open":36.380001068115234,"high":37.400001525878906,"low":31.709999084472656,"close":34.06999969482422},{"time":"2024-02-29","open":34.29999923706055,"high":45.8849983215332,"low":32.02000045776367,"close":42.810001373291016},{"time":"2024-03-31","open":43.40999984741211,"high":44.55500030517578,"low":33.459999084472656,"close":36.79499816894531},{"time":"2024-04-30","open":36.91999816894531,"high":41.125,"low":35.90999984741211,"close":37.814998626708984},{"time":"2024-05-31","open":38.275001525878906,"high":38.400001525878906,"low":34.025001525878906,"close":35.404998779296875},{"time":"2024-06-30","open":36.599998474121094,"high":40.4900016784668,"low":30.3799991607666,"close":38.30500030517578},{"time":"2024-07-31","open":38.33000183105469,"high":40.154998779296875,"low":34.584999084472656,"close":38.15999984741211},{"time":"2024-08-31","open":38.20500183105469,"high":39.70000076293945,"low":34.67499923706055,"close":37.060001373291016},{"time":"2024-09-30","open":37.400001525878906,"high":42.525001525878906,"low":35.70500183105469,"close":40.53499984741211},{"time":"2024-10-31","open":40.70000076293945,"high":43.89500045776367,"low":35.560001373291016,"close":37.43000030517578},{"time":"2024-11-30","open":37.369998931884766,"high":38.38999938964844,"low":32.1349983215332,"close":35.20000076293945},{"time":"2024-12-31","open":35.13999938964844,"high":36.25,"low":32.275001525878906,"close":33.02000045776367},{"time":"2025-01-31","open":33.14500045776367,"high":35.400001525878906,"low":27.799999237060547,"close":32.47999954223633},{"time":"2025-02-28","open":32.79999923706055,"high":32.900001525878906,"low":22.454999923706055,"close":22.844999313354492},{"time":"2025-03-31","open":22.99799919128418,"high":24.969999313354492,"low":21.309999465942383,"close":22.982999801635742},{"time":"2025-04-30","open":23.329999923706055,"high":25.479999542236328,"low":20.700000762939453,"close":23.768999099731445},{"time":"2025-05-31","open":23.920000076293945,"high":26.979999542236328,"low":22.160999298095703,"close":23.86400032043457},{"time":"2025-06-30","open":23.8799991607666,"high":29.06599998474121,"low":23.663999557495117,"close":27.968000411987305},{"time":"2025-07-31","open":28.040000915527344,"high":28.700000762939453,"low":25.65999984741211,"close":26.084999084472656},{"time":"2025-08-31","open":26.135000228881836,"high":26.4950008392334,"low":22.600000381469727,"close":23.844999313354492},{"time":"2025-09-30","open":23.844999313354492,"high":27.079999923706055,"low":23.100000381469727,"close":24.94700050354004},{"time":"2025-10-31","open":24.920000076293945,"high":29.829999923706055,"low":23.559999465942383,"close":29.829999923706055},{"time":"2025-11-30","open":28.899999618530273,"high":35.790000915527344,"low":23.950000762939453,"close":25.170000076293945},{"time":"2025-12-31","open":25.489999771118164,"high":26.040000915527344,"low":23.850000381469727,"close":24.65999984741211},{"time":"2026-01-31","open":24.65999984741211,"high":24.809999465942383,"low":20.950000762939453,"close":22.31999969482422},{"time":"2026-02-28","open":22.270000457763672,"high":25.920000076293945,"low":21.309999465942383,"close":23.610000610351562},{"time":"2026-03-31","open":22.549999237060547,"high":23.3700008392334,"low":19.100000381469727,"close":19.239999771118164},{"time":"2026-04-30","open":20.729999542236328,"high":24.299999237060547,"low":19.75,"close":22.979999542236328},{"time":"2026-05-31","open":22.979999542236328,"high":41.25,"low":22.649999618530273,"close":39.9900016784668},{"time":"2026-06-30","open":40.349998474121094,"high":47.18000030517578,"low":36.65999984741211,"close":38.79999923706055},{"time":"2026-07-31","open":39.189998626708984,"high":43.400001525878906,"low":35.130001068115234,"close":39.31999969482422},{"time":"2026-08-31","open":39.7400016784668,"high":52.209999084472656,"low":38.25,"close":50.790000915527344},{"time":"2026-09-30","open":51.0,"high":62.400001525878906,"low":48.0,"close":57.02000045776367}],"volumes":[{"time":"2021-09-30","value":93020180.0,"color":"rgba(239,83,80,0.45)"},{"time":"2021-10-31","value":135696210.0,"color":"rgba(239,83,80,0.45)"},{"time":"2021-11-30","value":127980560.0,"color":"rgba(239,83,80,0.45)"},{"time":"2021-12-31","value":278478850.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-01-31","value":381298000.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-02-28","value":340375510.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-03-31","value":204516830.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-04-30","value":354540490.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-05-31","value":110052910.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-06-30","value":67431650.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-07-31","value":125362200.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-08-31","value":270255490.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-09-30","value":296955340.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-10-31","value":121630990.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-11-30","value":152678790.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-12-31","value":172045000.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-01-31","value":67295270.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-02-28","value":78720220.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-03-31","value":44378070.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-04-30","value":28025550.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-05-31","value":135092780.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-06-30","value":79708350.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-07-31","value":84633360.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-08-31","value":87740800.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-09-30","value":120695080.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-10-31","value":64253700.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-11-30","value":143490230.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-12-31","value":121249220.0,"color":"rgba(239,83,80,0.45)"},{"time":"2024-01-31","value":67457650.0,"color":"rgba(239,83,80,0.45)"},{"time":"2024-02-29","value":279731540.0,"color":"rgba(38,166,154,0.45)"},{"time":"2024-03-31","value":132770220.0,"color":"rgba(239,83,80,0.45)"},{"time":"2024-04-30","value":77628280.0,"color":"rgba(38,166,154,0.45)"},{"time":"2024-05-31","value":68114590.0,"color":"rgba(239,83,80,0.45)"},{"time":"2024-06-30","value":86012400.0,"color":"rgba(38,166,154,0.45)"},{"time":"2024-07-31","value":56220480.0,"color":"rgba(239,83,80,0.45)"},{"time":"2024-08-31","value":63816220.0,"color":"rgba(239,83,80,0.45)"},{"time":"2024-09-30","value":176013230.0,"color":"rgba(38,166,154,0.45)"},{"time":"2024-10-31","value":104569810.0,"color":"rgba(239,83,80,0.45)"},{"time":"2024-11-30","value":34529230.0,"color":"rgba(239,83,80,0.45)"},{"time":"2024-12-31","value":32174320.0,"color":"rgba(239,83,80,0.45)"},{"time":"2025-01-31","value":93628480.0,"color":"rgba(239,83,80,0.45)"},{"time":"2025-02-28","value":124890500.0,"color":"rgba(239,83,80,0.45)"},{"time":"2025-03-31","value":102429110.0,"color":"rgba(239,83,80,0.45)"},{"time":"2025-04-30","value":59881730.0,"color":"rgba(38,166,154,0.45)"},{"time":"2025-05-31","value":81356200.0,"color":"rgba(239,83,80,0.45)"},{"time":"2025-06-30","value":238363920.0,"color":"rgba(38,166,154,0.45)"},{"time":"2025-07-31","value":61452680.0,"color":"rgba(239,83,80,0.45)"},{"time":"2025-08-31","value":50125120.0,"color":"rgba(239,83,80,0.45)"},{"time":"2025-09-30","value":622720810.0,"color":"rgba(38,166,154,0.45)"},{"time":"2025-10-31","value":101847983.0,"color":"rgba(38,166,154,0.45)"},{"time":"2025-11-30","value":148794076.0,"color":"rgba(239,83,80,0.45)"},{"time":"2025-12-31","value":55549988.0,"color":"rgba(239,83,80,0.45)"},{"time":"2026-01-31","value":37003990.0,"color":"rgba(239,83,80,0.45)"},{"time":"2026-02-28","value":43584003.0,"color":"rgba(38,166,154,0.45)"},{"time":"2026-03-31","value":37000913.0,"color":"rgba(239,83,80,0.45)"},{"time":"2026-04-30","value":72056824.0,"color":"rgba(38,166,154,0.45)"},{"time":"2026-05-31","value":887872947.0,"color":"rgba(38,166,154,0.45)"},{"time":"2026-06-30","value":391244639.0,"color":"rgba(239,83,80,0.45)"},{"time":"2026-07-31","value":283336570.0,"color":"rgba(38,166,154,0.45)"},{"time":"2026-08-31","value":297671417.0,"color":"rgba(38,166,154,0.45)"},{"time":"2026-09-30","value":367841929.0,"color":"rgba(38,166,154,0.45)"}],"rsi":[{"time":"2022-11-30","value":65.98214140027811},{"time":"2022-12-31","value":52.80007916534217},{"time":"2023-01-31","value":51.29980518819444},{"time":"2023-02-28","value":48.73632898206535},{"time":"2023-03-31","value":49.68988026753912},{"time":"2023-04-30","value":50.78145253522779},{"time":"2023-05-31","value":59.32067711259219},{"time":"2023-06-30","value":60.1167020660824},{"time":"2023-07-31","value":59.67287320883233},{"time":"2023-08-31","value":61.73033014478162},{"time":"2023-09-30","value":62.72548622935752},{"time":"2023-10-31","value":57.54103683149139},{"time":"2023-11-30","value":66.2921119975176},{"time":"2023-12-31","value":66.02053478097457},{"time":"2024-01-31","value":61.37239318971368},{"time":"2024-02-29","value":70.77393933599049},{"time":"2024-03-31","value":59.95813913615494},{"time":"2024-04-30","value":61.045301284673116},{"time":"2024-05-31","value":57.10053243007087},{"time":"2024-06-30","value":60.4153668398588},{"time":"2024-07-31","value":60.16503853083823},{"time":"2024-08-31","value":58.195083829544124},{"time":"2024-09-30","value":62.38513014024684},{"time":"2024-10-31","value":56.89759883656874},{"time":"2024-11-30","value":53.273226220067464},{"time":"2024-12-31","value":49.92515428033713},{"time":"2025-01-31","value":49.10195088070495},{"time":"2025-02-28","value":37.28792593591129},{"time":"2025-03-31","value":37.51980156929097},{"time":"2025-04-30","value":38.90538630570297},{"time":"2025-05-31","value":39.08123271630742},{"time":"2025-06-30","value":46.27519697961737},{"time":"2025-07-31","value":43.72388337727881},{"time":"2025-08-31","value":40.839344713357676},{"time":"2025-09-30","value":42.837315022188335},{"time":"2025-10-31","value":50.770864838573004},{"time":"2025-11-30","value":44.432980715306485},{"time":"2025-12-31","value":43.78872075262386},{"time":"2026-01-31","value":40.86121869840821},{"time":"2026-02-28","value":43.11889558555672},{"time":"2026-03-31","value":37.84774300466781},{"time":"2026-04-30","value":44.141395756072356},{"time":"2026-05-31","value":62.66083837358863},{"time":"2026-06-30","value":61.13380878007901},{"time":"2026-07-31","value":61.57447686499178},{"time":"2026-08-31","value":69.72770188058288},{"time":"2026-09-30","value":73.07006875266546}],"markers":[{"time":"2022-10-31","position":"aboveBar","color":"#38bdf8","shape":"circle","text":"Left Rim"},{"time":"2023-03-31","position":"belowBar","color":"#38bdf8","shape":"circle","text":"Cup Bottom"},{"time":"2024-11-30","position":"aboveBar","color":"#38bdf8","shape":"circle","text":"Right Rim"},{"time":"2026-05-31","position":"belowBar","color":"#22c55e","shape":"circle","text":"Breakout"}],"priceLines":[{"price":35.39275051116943,"title":"Breakout / Resistance","color":"#f59e0b"}],"divergence":null,"rsiDivergence":null,"pattern":"Cup","status":"AFTER BREAKOUT"}};
-let chart=null,rsiChart=null;
-function addCandleSeriesCompat(ch, opts){
-  if(ch.addCandlestickSeries) return ch.addCandlestickSeries(opts);
-  return ch.addSeries(LightweightCharts.CandlestickSeries,opts);
-}
-function addHistogramSeriesCompat(ch, opts){
-  if(ch.addHistogramSeries) return ch.addHistogramSeries(opts);
-  return ch.addSeries(LightweightCharts.HistogramSeries,opts);
-}
-function addLineSeriesCompat(ch, opts){
-  if(ch.addLineSeries) return ch.addLineSeries(opts);
-  return ch.addSeries(LightweightCharts.LineSeries,opts);
-}
-function destroyCharts(){
-  if(chart) chart.remove(); if(rsiChart) rsiChart.remove();
-  chart=null;rsiChart=null;
-}
-function render(tf){
-  destroyCharts();
-  const d=DATA[tf];
-  document.getElementById('patternTitle').textContent=tf+' · '+d.pattern+(d.status?' · '+d.status:'');
-  const common={
-    layout:{background:{color:'#08131f'},textColor:'#9fb0c3'},
-    grid:{vertLines:{color:'#162738'},horzLines:{color:'#162738'}},
-    rightPriceScale:{borderColor:'#29445a'},
-    timeScale:{borderColor:'#29445a',timeVisible:true},
-    crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
-    handleScroll:true,handleScale:true,
-  };
-  chart=LightweightCharts.createChart(document.getElementById('chart'),{...common,width:document.getElementById('chart').clientWidth,height:610});
-  const candles=addCandleSeriesCompat(chart,{upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
-  candles.setData(d.candles);
-  const vol=addHistogramSeriesCompat(chart,{priceFormat:{type:'volume'},priceScaleId:'volume'});
-  vol.priceScale().applyOptions({scaleMargins:{top:.82,bottom:0}});
-  vol.setData(d.volumes);
-  d.priceLines.forEach(x=>candles.createPriceLine({price:x.price,color:x.color,lineWidth:2,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:x.title}));
-  if(d.markers.length){
-    if(LightweightCharts.createSeriesMarkers) LightweightCharts.createSeriesMarkers(candles,d.markers);
-    else if(candles.setMarkers) candles.setMarkers(d.markers);
-  }
-  if(d.divergence){
-    const dl=addLineSeriesCompat(chart,{color:'#f87171',lineWidth:3,priceLineVisible:false,lastValueVisible:false});
-    dl.setData(d.divergence);
-  }
-  chart.timeScale().fitContent();
+<div class="page">
+  <div class="scanner">
+    <div class="cell">
+      <h1>FCL (FCL)</h1>
+      <div class="label">Scanner-marked setup</div>
+      <div class="summary">Monthly: Cup · AFTER BREAKOUT</div>
+    </div>
+    <div class="cell">
+      <div class="label">CMP</div>
+      <div class="value cmp">₹ 57.02</div>
+    </div>
+    <div class="cell">
+      <div class="label">Detected setup</div>
+      <div class="value setup">Cup Pattern</div>
+      <div class="summary">TradingView opens on scanner timeframe: Monthly</div>
+    </div>
+  </div>
 
-  rsiChart=LightweightCharts.createChart(document.getElementById('rsi'),{...common,width:document.getElementById('rsi').clientWidth,height:220,rightPriceScale:{borderColor:'#29445a',autoScale:false}});
-  const rs=addLineSeriesCompat(rsiChart,{color:'#a970ff',lineWidth:2,priceLineVisible:false});
-  rs.setData(d.rsi);
-  [30,70].forEach(v=>rs.createPriceLine({price:v,color:'#64748b',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'RSI '+v}));
-  if(d.rsiDivergence){
-    const rd=addLineSeriesCompat(rsiChart,{color:'#22c55e',lineWidth:3,priceLineVisible:false,lastValueVisible:false});
-    rd.setData(d.rsiDivergence);
-  }
-  rsiChart.timeScale().fitContent();
-
-  chart.subscribeCrosshairMove(p=>{
-    const bar=p.seriesData.get(candles);
-    document.getElementById('ohlc').textContent=bar ? `O ${bar.open.toFixed(2)}  H ${bar.high.toFixed(2)}  L ${bar.low.toFixed(2)}  C ${bar.close.toFixed(2)}` : 'Move mouse over candles for OHLC';
-  });
-}
-const tabs=document.getElementById('tabs');
-Object.keys(DATA).forEach(tf=>{
- const b=document.createElement('button');b.className='tab'+(tf==='Monthly'?' active':'');b.textContent=tf;
- b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');render(tf)};
- tabs.appendChild(b);
-});
-render('Monthly');
-window.addEventListener('resize',()=>{
- if(chart) chart.applyOptions({width:document.getElementById('chart').clientWidth});
- if(rsiChart) rsiChart.applyOptions({width:document.getElementById('rsi').clientWidth});
-});
-</script>
-</body></html>
+  <div class="tvwrap">
+    <div class="tradingview-widget-container">
+      <div class="tradingview-widget-container__widget"></div>
+      <div class="tradingview-widget-copyright">
+        <a href="https://www.tradingview.com/symbols/FCL/" rel="noopener nofollow" target="_blank">
+          FCL chart
+        </a> by TradingView
+      </div>
+      <script type="text/javascript"
+        src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
+        async>
+      {
+        "autosize": true,
+        "symbol": "NSE:FCL",
+        "interval": "M",
+        "timezone": "Asia/Kolkata",
+        "theme": "dark",
+        "backgroundColor": "rgba(11, 14, 17, 1)",
+        "style": "1",
+        "locale": "en",
+        "withdateranges": true,
+        "hide_side_toolbar": false,
+        "allow_symbol_change": true,
+        "save_image": false,
+        "calendar": false,
+        "details": true,
+        "hotlist": false,
+        "show_popup_button": true,
+        "popup_width": "1200",
+        "popup_height": "750",
+        "studies": [
+          "RSI@tv-basicstudies",
+          "Volume@tv-basicstudies"
+        ],
+        "support_host": "https://www.tradingview.com"
+      }
+      </script>
+    </div>
+  </div>
+</div>
+</body>
+</html>
