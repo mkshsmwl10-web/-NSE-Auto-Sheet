@@ -1872,6 +1872,74 @@ def main():
     print("H  Monthly Pattern")
     print("I  Monthly Status")
     print("J  CMP")
+    # Make Column K a TRUE clickable Google Sheets rich-text link.
+    # The visible cell text is OPEN CHART; the URL is attached to the text.
+    try:
+        rich_link_requests = []
+
+        for row_index, row in enumerate(results, start=2):
+            chart_url = str(row.get("Chart Link", "") or "").strip()
+
+            if not chart_url.startswith(("http://", "https://")):
+                continue
+
+            rich_link_requests.append(
+                {
+                    "updateCells": {
+                        "range": {
+                            "sheetId": worksheet.id,
+                            "startRowIndex": row_index - 1,
+                            "endRowIndex": row_index,
+                            "startColumnIndex": 10,
+                            "endColumnIndex": 11,
+                        },
+                        "rows": [
+                            {
+                                "values": [
+                                    {
+                                        "userEnteredValue": {
+                                            "stringValue": "OPEN CHART"
+                                        },
+                                        "textFormatRuns": [
+                                            {
+                                                "startIndex": 0,
+                                                "format": {
+                                                    "link": {
+                                                        "uri": chart_url
+                                                    },
+                                                    "underline": True,
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ]
+                            }
+                        ],
+                        "fields": "userEnteredValue,textFormatRuns",
+                    }
+                }
+            )
+
+        for start in range(0, len(rich_link_requests), 100):
+            spreadsheet.batch_update(
+                {
+                    "requests": rich_link_requests[
+                        start : start + 100
+                    ]
+                }
+            )
+
+        print(
+            "Clickable rich-text chart links applied:",
+            len(rich_link_requests),
+        )
+
+    except Exception as exc:
+        print(
+            "WARNING: Rich-text chart link formatting failed:",
+            exc,
+        )
+
     print("K  Chart Link")
     print("")
 
