@@ -39,6 +39,8 @@ import os
 import sys
 import json
 import re
+import html
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -60,6 +62,16 @@ FINAL_LIST_SHEET = os.environ.get("FINAL_LIST_SHEET", "Final List")
 INPUT_SHEET = os.environ.get("INPUT_SHEET", "NIFTY200")
 
 MIN_HISTORY_ROWS = 100
+
+# -------------------------
+# Pattern chart publishing
+# -------------------------
+CHART_OUTPUT_DIR = Path(os.environ.get("CHART_OUTPUT_DIR", "docs/charts"))
+CHART_BASE_URL = os.environ.get(
+    "CHART_BASE_URL",
+    "https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/charts",
+).strip().rstrip("/")
+
 
 # -------------------------
 # Cup configuration
@@ -804,91 +816,60 @@ def local_lows(series, left=3, right=3):
 # POSITIVE DIVERGENCE
 # ============================================================
 
-def find_divergence_setups(df):
-    """
-    Returns separate setups.
-
-    Possible output:
-        ["RSI Positive Divergence"]
-        ["Classic Positive Divergence"]
-        ["RSI Positive Divergence",
-         "Classic Positive Divergence"]
-        []
-
-    RSI Positive Divergence:
-        Price makes lower low by >= 0.5%
-        RSI makes higher low by >= 2 points.
-
-    Classic Positive Divergence:
-        Price makes lower low by >= 0.5%
-        RSI makes a higher low.
-
-    Both are deliberately allowed to produce separate rows.
-    """
-
+def find_divergence_details(df):
+    """Return divergence setup names plus the exact two swing-low points."""
     found = []
+    details = {}
 
-    if df is None:
-        return found
-
-    if len(df) < MIN_HISTORY_ROWS:
-        return found
+    if df is None or len(df) < MIN_HISTORY_ROWS:
+        return found, details
 
     close = df["close"].astype(float)
-
-    rsi_values = calculate_rsi(
-        close,
-        period=14,
-    )
-
-    lows = local_lows(
-        close,
-        left=3,
-        right=3,
-    )
+    rsi_values = calculate_rsi(close, period=14)
+    lows = local_lows(close, left=3, right=3)
 
     if len(lows) < 2:
-        return found
+        return found, details
 
-    # Look at the latest two confirmed swing lows.
     i1, i2 = lows[-2], lows[-1]
-
     price1 = float(close.iloc[i1])
     price2 = float(close.iloc[i2])
-
     rsi1 = rsi_values.iloc[i1]
     rsi2 = rsi_values.iloc[i2]
 
     if pd.isna(rsi1) or pd.isna(rsi2):
-        return found
+        return found, details
 
     rsi1 = float(rsi1)
     rsi2 = float(rsi2)
 
-    lower_price = (
-        price2 <= price1 * 0.995
-    )
+    lower_price = price2 <= price1 * 0.995
+    higher_rsi = rsi2 > rsi1
+    strong_rsi = rsi2 >= rsi1 + 2
 
-    higher_rsi = (
-        rsi2 > rsi1
-    )
+    details = {
+        "i1": int(i1),
+        "i2": int(i2),
+        "price1": price1,
+        "price2": price2,
+        "rsi1": rsi1,
+        "rsi2": rsi2,
+    }
 
-    strong_rsi = (
-        rsi2 >= rsi1 + 2
-    )
-
-    # Strong RSI positive divergence.
     if lower_price and strong_rsi:
-        found.append(
-            "RSI Positive Divergence"
-        )
+        found.append("RSI Positive Divergence")
 
-    # Classic positive divergence.
     if lower_price and higher_rsi:
-        found.append(
-            "Classic Positive Divergence"
-        )
+        found.append("Classic Positive Divergence")
 
+    if not found:
+        details = {}
+
+    return found, details
+
+
+def find_divergence_setups(df):
+    found, _ = find_divergence_details(df)
     return found
 
 
@@ -926,7 +907,7 @@ def smooth(values, window):
 # CUP / CUP WITH HANDLE
 # ============================================================
 
-def detect_cup(df, timeframe):
+def detect_cup(df, timeframe, return_details=False):
     """
     Returns:
         (pattern, status)
@@ -943,13 +924,13 @@ def detect_cup(df, timeframe):
     """
 
     if df is None:
-        return None, ""
+        return (None, "", {}) if return_details else (None, "")
 
     min_bars = CUP_MIN_BARS[timeframe]
     max_bars = CUP_MAX_BARS[timeframe]
 
     if len(df) < min_bars:
-        return None, ""
+        return (None, "", {}) if return_details else (None, "")
 
     # Keep the recent relevant window.
     data = df.tail(
@@ -960,7 +941,7 @@ def detect_cup(df, timeframe):
     ).copy()
 
     if len(data) < min_bars:
-        return None, ""
+        return (None, "", {}) if return_details else (None, "")
 
     close = data["close"].astype(
         float
@@ -997,7 +978,7 @@ def detect_cup(df, timeframe):
         left_zone_end < 5
         or right_zone_start >= n - 5
     ):
-        return None, ""
+        return (None, "", {}) if return_details else (None, "")
 
     left_candidates = (
         np.argsort(
@@ -1117,7 +1098,7 @@ def detect_cup(df, timeframe):
                 best = candidate
 
     if best is None:
-        return None, ""
+        return (None, "", {}) if return_details else (None, "")
 
     li = best["li"]
     bi = best["bi"]
@@ -1232,6 +1213,29 @@ def detect_cup(df, timeframe):
         else:
             status = "AFTER BREAKOUT"
 
+    details = {
+        "data": data.copy(),
+        "li": int(li),
+        "bi": int(bi),
+        "ri": int(ri),
+        "left_rim": float(best["left_rim"]),
+        "right_rim": float(best["right_rim"]),
+        "bottom": float(best["bottom"]),
+        "rim": float(rim),
+        "breakout_level": float(breakout_level),
+        "breakout_index": (
+            int(breakout_index)
+            if breakout_index is not None
+            else None
+        ),
+        "pattern": pattern,
+        "status": status,
+        "timeframe": timeframe,
+    }
+
+    if return_details:
+        return pattern, status, details
+
     return pattern, status
 
 
@@ -1239,15 +1243,250 @@ def detect_cup(df, timeframe):
 # CHART LINK
 # ============================================================
 
-def tradingview_link(nse_code):
-    code = str(
-        nse_code
-    ).strip().upper()
+def _date_col(df):
+    if "date" in df.columns:
+        return "date"
+    return "datetime"
 
-    return (
-        "https://in.tradingview.com/chart/"
-        "?symbol=NSE%3A"
-        + code
+
+def _safe_slug(value):
+    value = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value).strip())
+    return value.strip("-") or "chart"
+
+
+def pattern_chart_url(filename):
+    return f"{CHART_BASE_URL}/{filename}"
+
+
+def _svg_price_chart(df, marks=None, title="", max_bars=220):
+    """Create a dependency-free SVG close-price chart with scanner markers."""
+    marks = marks or {}
+    data = df.copy().tail(max_bars).reset_index(drop=False)
+    if data.empty:
+        return "<p>No chart data.</p>"
+
+    # If original indices were supplied, convert them to the displayed tail.
+    original_start = max(0, len(df) - len(data))
+    close = data["close"].astype(float).to_numpy()
+    high = data["high"].astype(float).to_numpy()
+    low = data["low"].astype(float).to_numpy()
+
+    width, height = 1120, 520
+    ml, mr, mt, mb = 72, 28, 50, 58
+    pw, ph = width - ml - mr, height - mt - mb
+
+    y_min = float(np.nanmin(low))
+    y_max = float(np.nanmax(high))
+    pad = max((y_max - y_min) * 0.08, max(abs(y_max), 1) * 0.005)
+    y_min -= pad
+    y_max += pad
+
+    def xpix(i):
+        return ml + (i / max(len(data) - 1, 1)) * pw
+
+    def ypix(v):
+        return mt + (y_max - float(v)) / max(y_max - y_min, 1e-9) * ph
+
+    pts = " ".join(f"{xpix(i):.1f},{ypix(v):.1f}" for i, v in enumerate(close))
+    out = [
+        f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="{html.escape(title)}">',
+        '<rect width="100%" height="100%" fill="#ffffff"/>',
+        f'<text x="{ml}" y="28" font-size="20" font-weight="700" fill="#172033">{html.escape(title)}</text>',
+    ]
+
+    # Horizontal grid + labels.
+    for k in range(6):
+        v = y_min + (y_max - y_min) * k / 5
+        y = ypix(v)
+        out.append(f'<line x1="{ml}" y1="{y:.1f}" x2="{width-mr}" y2="{y:.1f}" stroke="#e8edf3" stroke-width="1"/>')
+        out.append(f'<text x="{ml-8}" y="{y+4:.1f}" text-anchor="end" font-size="12" fill="#667085">{v:.2f}</text>')
+
+    out.append(f'<polyline points="{pts}" fill="none" stroke="#1f5fbf" stroke-width="2.2"/>')
+
+    # Breakout level.
+    if marks.get("breakout_level") is not None:
+        by = ypix(marks["breakout_level"])
+        out.append(f'<line x1="{ml}" y1="{by:.1f}" x2="{width-mr}" y2="{by:.1f}" stroke="#d97706" stroke-width="2" stroke-dasharray="8 6"/>')
+        out.append(f'<text x="{width-mr-4}" y="{by-7:.1f}" text-anchor="end" font-size="12" font-weight="700" fill="#b45309">Breakout {marks["breakout_level"]:.2f}</text>')
+
+    # Scanner points.
+    point_specs = [
+        ("li", "Left Rim", "#7c3aed"),
+        ("bi", "Cup Bottom", "#dc2626"),
+        ("ri", "Right Rim", "#7c3aed"),
+        ("breakout_index", "Breakout", "#059669"),
+        ("i1", "Low 1", "#dc2626"),
+        ("i2", "Low 2", "#dc2626"),
+    ]
+    mapped = {}
+    for key, label, color in point_specs:
+        idx = marks.get(key)
+        if idx is None:
+            continue
+        di = int(idx) - original_start
+        if di < 0 or di >= len(data):
+            continue
+        mapped[key] = di
+        val = float(close[di])
+        if key == "bi":
+            val = float(low[di])
+        out.append(f'<circle cx="{xpix(di):.1f}" cy="{ypix(val):.1f}" r="6" fill="{color}" stroke="#fff" stroke-width="2"/>')
+        out.append(f'<text x="{xpix(di):.1f}" y="{ypix(val)-12:.1f}" text-anchor="middle" font-size="12" font-weight="700" fill="{color}">{label}</text>')
+
+    # Price divergence line.
+    if "i1" in mapped and "i2" in mapped:
+        a, b = mapped["i1"], mapped["i2"]
+        out.append(f'<line x1="{xpix(a):.1f}" y1="{ypix(close[a]):.1f}" x2="{xpix(b):.1f}" y2="{ypix(close[b]):.1f}" stroke="#dc2626" stroke-width="3"/>')
+
+    # Cup guide lines.
+    if all(k in mapped for k in ("li", "bi", "ri")):
+        a, b, c = mapped["li"], mapped["bi"], mapped["ri"]
+        guide = f"{xpix(a):.1f},{ypix(close[a]):.1f} {xpix(b):.1f},{ypix(low[b]):.1f} {xpix(c):.1f},{ypix(close[c]):.1f}"
+        out.append(f'<polyline points="{guide}" fill="none" stroke="#7c3aed" stroke-width="3" stroke-dasharray="7 5"/>')
+
+    # X-axis dates.
+    dc = _date_col(data)
+    dates = pd.to_datetime(data[dc], errors="coerce")
+    for i in np.linspace(0, len(data)-1, min(6, len(data)), dtype=int):
+        label = dates.iloc[i].strftime("%Y-%m-%d") if not pd.isna(dates.iloc[i]) else ""
+        out.append(f'<text x="{xpix(i):.1f}" y="{height-20}" text-anchor="middle" font-size="11" fill="#667085">{label}</text>')
+
+    out.append("</svg>")
+    return "".join(out)
+
+
+def _svg_rsi_chart(df, details, title="RSI (14)", max_bars=220):
+    data = df.copy()
+    data["rsi14"] = calculate_rsi(data["close"].astype(float), 14)
+    original_start = max(0, len(data) - max_bars)
+    data = data.tail(max_bars).reset_index(drop=True)
+
+    width, height = 1120, 300
+    ml, mr, mt, mb = 72, 28, 45, 45
+    pw, ph = width - ml - mr, height - mt - mb
+
+    def xpix(i):
+        return ml + (i / max(len(data)-1, 1)) * pw
+    def ypix(v):
+        return mt + (100-float(v))/100 * ph
+
+    vals = data["rsi14"].to_numpy(dtype=float)
+    pts = " ".join(
+        f"{xpix(i):.1f},{ypix(v):.1f}"
+        for i, v in enumerate(vals) if np.isfinite(v)
+    )
+
+    out = [
+        f'<svg viewBox="0 0 {width} {height}">',
+        '<rect width="100%" height="100%" fill="#fff"/>',
+        f'<text x="{ml}" y="26" font-size="18" font-weight="700" fill="#172033">{html.escape(title)}</text>',
+    ]
+    for level in (30, 50, 70):
+        y = ypix(level)
+        out.append(f'<line x1="{ml}" y1="{y:.1f}" x2="{width-mr}" y2="{y:.1f}" stroke="#e5e7eb" stroke-dasharray="6 5"/>')
+        out.append(f'<text x="{ml-8}" y="{y+4:.1f}" text-anchor="end" font-size="12" fill="#667085">{level}</text>')
+    out.append(f'<polyline points="{pts}" fill="none" stroke="#2563eb" stroke-width="2.2"/>')
+
+    i1 = int(details["i1"]) - original_start
+    i2 = int(details["i2"]) - original_start
+    if 0 <= i1 < len(data) and 0 <= i2 < len(data):
+        r1, r2 = float(details["rsi1"]), float(details["rsi2"])
+        out.append(f'<line x1="{xpix(i1):.1f}" y1="{ypix(r1):.1f}" x2="{xpix(i2):.1f}" y2="{ypix(r2):.1f}" stroke="#059669" stroke-width="3"/>')
+        for i, r, lab in ((i1, r1, "RSI Low 1"), (i2, r2, "RSI Low 2")):
+            out.append(f'<circle cx="{xpix(i):.1f}" cy="{ypix(r):.1f}" r="6" fill="#059669" stroke="#fff" stroke-width="2"/>')
+            out.append(f'<text x="{xpix(i):.1f}" y="{ypix(r)-12:.1f}" text-anchor="middle" font-size="12" font-weight="700" fill="#047857">{lab}: {r:.1f}</text>')
+    out.append("</svg>")
+    return "".join(out)
+
+
+def _write_chart_page(filename, stock_name, nse_code, setup, sections):
+    CHART_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    cards = "\n".join(
+        f'<section class="card">{section}</section>'
+        for section in sections
+    )
+    page = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{html.escape(nse_code)} - {html.escape(setup)}</title>
+<style>
+body{{margin:0;background:#f5f7fb;color:#172033;font-family:Arial,Helvetica,sans-serif}}
+.wrap{{max-width:1200px;margin:24px auto;padding:0 14px}}
+.head{{background:#172033;color:white;padding:20px 24px;border-radius:14px}}
+.head h1{{margin:0 0 6px;font-size:26px}}
+.head p{{margin:4px 0;color:#dbe7ff}}
+.card{{background:white;margin-top:18px;padding:14px;border-radius:14px;box-shadow:0 2px 12px rgba(16,24,40,.08);overflow:auto}}
+svg{{display:block;width:100%;min-width:850px;height:auto}}
+.note{{font-size:13px;color:#667085;margin-top:16px}}
+</style>
+</head>
+<body><div class="wrap">
+<div class="head">
+<h1>{html.escape(stock_name)} ({html.escape(nse_code)})</h1>
+<p>Scanner setup: {html.escape(setup)}</p>
+</div>
+{cards}
+<p class="note">Markers are generated from the same Python scanner logic that qualified this row.</p>
+</div></body></html>"""
+    (CHART_OUTPUT_DIR / filename).write_text(page, encoding="utf-8")
+    return pattern_chart_url(filename)
+
+
+def generate_divergence_chart(stock_name, nse_code, setup, daily, details):
+    filename = f"{_safe_slug(nse_code)}-{_safe_slug(setup).lower()}.html"
+    price_marks = {
+        "i1": details["i1"],
+        "i2": details["i2"],
+    }
+    sections = [
+        _svg_price_chart(
+            daily,
+            marks=price_marks,
+            title=f"{nse_code} Daily Price - {setup}",
+        ),
+        _svg_rsi_chart(
+            daily,
+            details,
+            title=f"{nse_code} RSI(14) - Positive Divergence",
+        ),
+    ]
+    return _write_chart_page(
+        filename, stock_name, nse_code, setup, sections
+    )
+
+
+def generate_cup_chart(stock_name, nse_code, cup_details):
+    filename = f"{_safe_slug(nse_code)}-cup-pattern.html"
+    sections = []
+
+    for timeframe in ("Daily", "Weekly", "Monthly"):
+        details = cup_details.get(timeframe) or {}
+        if not details:
+            continue
+        title = (
+            f"{nse_code} {timeframe} - "
+            f"{details['pattern']} | {details['status']}"
+        )
+        marks = {
+            "li": details["li"],
+            "bi": details["bi"],
+            "ri": details["ri"],
+            "breakout_index": details["breakout_index"],
+            "breakout_level": details["breakout_level"],
+        }
+        sections.append(
+            _svg_price_chart(
+                details["data"],
+                marks=marks,
+                title=title,
+                max_bars=260,
+            )
+        )
+
+    return _write_chart_page(
+        filename, stock_name, nse_code, "Cup Pattern", sections
     )
 
 
@@ -1266,6 +1505,7 @@ def make_row(
     weekly_status="",
     monthly_pattern="",
     monthly_status="",
+    chart_url="",
 ):
     return {
         "Stock Name": stock_name,
@@ -1286,7 +1526,12 @@ def make_row(
             2,
         ),
 
-        "Chart Link": f'=HYPERLINK("{tradingview_link(nse_code)}","TradingView")',
+        "Chart Link": (
+            f'=HYPERLINK("{chart_url}","Pattern Chart")'
+            if chart_url
+            else ""
+        ),
+    }
 
 
 # ============================================================
@@ -1333,21 +1578,26 @@ def scan_stock(stock):
     # SETUP A - DIVERGENCE
     # ========================================================
 
-    divergence_setups = (
-        find_divergence_setups(
-            daily
-        )
+    divergence_setups, divergence_details = (
+        find_divergence_details(daily)
     )
 
     for setup in divergence_setups:
-        # Divergence is a separate setup row.
-        # Cup fields remain blank.
+        chart_url = generate_divergence_chart(
+            stock_name=stock_name,
+            nse_code=nse_code,
+            setup=setup,
+            daily=daily,
+            details=divergence_details,
+        )
+
         results.append(
             make_row(
                 stock_name=stock_name,
                 nse_code=nse_code,
                 setup=setup,
                 cmp_price=cmp_price,
+                chart_url=chart_url,
             )
         )
 
@@ -1367,35 +1617,49 @@ def scan_stock(stock):
             timeframe,
         )
 
-        pattern, status = detect_cup(
+        pattern, status, details = detect_cup(
             tf_df,
             timeframe,
+            return_details=True,
         )
 
         cup_results[timeframe] = (
             pattern,
             status,
+            details,
         )
 
     daily_pattern, daily_status = (
-        cup_results["Daily"]
+        cup_results["Daily"][:2]
     )
 
     weekly_pattern, weekly_status = (
-        cup_results["Weekly"]
+        cup_results["Weekly"][:2]
     )
 
     monthly_pattern, monthly_status = (
-        cup_results["Monthly"]
+        cup_results["Monthly"][:2]
     )
 
     cup_found = any(
         pattern is not None
-        for pattern, status
+        for pattern, status, details
         in cup_results.values()
     )
 
     if cup_found:
+        cup_details = {
+            timeframe: values[2]
+            for timeframe, values in cup_results.items()
+            if values[0] is not None and values[2]
+        }
+
+        chart_url = generate_cup_chart(
+            stock_name=stock_name,
+            nse_code=nse_code,
+            cup_details=cup_details,
+        )
+
         # Exactly ONE Cup Pattern row.
         #
         # It can contain:
@@ -1410,6 +1674,7 @@ def scan_stock(stock):
                 nse_code=nse_code,
                 setup="Cup Pattern",
                 cmp_price=cmp_price,
+                chart_url=chart_url,
 
                 daily_pattern=(
                     daily_pattern
@@ -1448,6 +1713,13 @@ def scan_stock(stock):
 # ============================================================
 
 def main():
+    CHART_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    for old_chart in CHART_OUTPUT_DIR.glob("*.html"):
+        try:
+            old_chart.unlink()
+        except OSError:
+            pass
+
     print("")
     print("==========================================")
     print("NIFTY 200 DIVERGENCE + CUP SCANNER V2.0")
