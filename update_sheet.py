@@ -1551,245 +1551,144 @@ def generate_cup_chart(stock_name, nse_code, cup_details):
 
 
 def generate_unified_stock_chart(stock_name, nse_code, cmp_price, daily, cup_details, divergence_details, divergence_setups):
-    """Interactive TradingView-style page using Lightweight Charts."""
+    """
+    Generate one page per stock containing the OFFICIAL TradingView Advanced Chart widget.
+    The default interval follows the scanner-detected timeframe:
+      Daily -> D, Weekly -> W, Monthly -> M
+    Scanner detection itself is unchanged.
+    """
     filename = f"{_safe_slug(nse_code)}-all-patterns.html"
 
-    tf_data = {
-        "Daily": daily,
-        "Weekly": resample_ohlcv(daily, "Weekly"),
-        "Monthly": resample_ohlcv(daily, "Monthly"),
-    }
+    detected_tfs = []
+    for tf in ("Daily", "Weekly", "Monthly"):
+        if cup_details.get(tf):
+            detected_tfs.append(tf)
+    if divergence_setups and "Daily" not in detected_tfs:
+        detected_tfs.insert(0, "Daily")
+    if not detected_tfs:
+        detected_tfs = ["Daily"]
 
-    payload = {}
-    for timeframe in ("Daily", "Weekly", "Monthly"):
-        details = cup_details.get(timeframe) or {}
-        has_div = timeframe == "Daily" and bool(divergence_setups)
-
-        if not details and not has_div:
-            continue
-
-        df = details.get("data") if details else tf_data[timeframe]
-        d = df.copy().reset_index(drop=False)
-        dc = _date_col(d)
-
-        candles, volumes, rsi_points = [], [], []
-        rsi_series = calculate_rsi(d["close"].astype(float), 14)
-
-        for i, row in d.iterrows():
-            dt = pd.to_datetime(row[dc], errors="coerce")
-            if pd.isna(dt):
-                continue
-            t = dt.strftime("%Y-%m-%d")
-            o, h, l, c = map(float, (row["open"], row["high"], row["low"], row["close"]))
-            candles.append({"time": t, "open": o, "high": h, "low": l, "close": c})
-            if "volume" in d.columns and pd.notna(row.get("volume")):
-                volumes.append({
-                    "time": t,
-                    "value": float(row["volume"]),
-                    "color": "rgba(38,166,154,0.45)" if c >= o else "rgba(239,83,80,0.45)",
-                })
-            rv = rsi_series.iloc[i]
-            if pd.notna(rv):
-                rsi_points.append({"time": t, "value": float(rv)})
-
-        markers = []
-        lines = []
-        pattern = ""
-        status = ""
-
-        def time_at(idx):
-            if idx is None:
-                return None
-            idx = int(idx)
-            if not (0 <= idx < len(d)):
-                return None
-            dt = pd.to_datetime(d.iloc[idx][dc], errors="coerce")
-            return None if pd.isna(dt) else dt.strftime("%Y-%m-%d")
-
-        if details:
-            pattern = details.get("pattern", "")
-            status = details.get("status", "")
-            for key, label, position, color in (
-                ("li", "Left Rim", "aboveBar", "#38bdf8"),
-                ("bi", "Cup Bottom", "belowBar", "#38bdf8"),
-                ("ri", "Right Rim", "aboveBar", "#38bdf8"),
-                ("breakout_index", "Breakout", "belowBar", "#22c55e"),
-            ):
-                tm = time_at(details.get(key))
-                if tm:
-                    markers.append({
-                        "time": tm, "position": position,
-                        "color": color, "shape": "circle", "text": label
-                    })
-            if details.get("breakout_level") is not None:
-                lines.append({
-                    "price": float(details["breakout_level"]),
-                    "title": "Breakout / Resistance",
-                    "color": "#f59e0b",
-                })
-
-        div_line = None
-        rsi_div_line = None
-        if has_div and divergence_details:
-            i1, i2 = divergence_details.get("i1"), divergence_details.get("i2")
-            t1, t2 = time_at(i1), time_at(i2)
-            if t1 and t2:
-                p1 = float(d.iloc[int(i1)]["low"])
-                p2 = float(d.iloc[int(i2)]["low"])
-                div_line = [{"time": t1, "value": p1}, {"time": t2, "value": p2}]
-                rsi_div_line = [
-                    {"time": t1, "value": float(divergence_details["rsi1"])},
-                    {"time": t2, "value": float(divergence_details["rsi2"])},
-                ]
-                markers.extend([
-                    {"time": t1, "position": "belowBar", "color": "#ef4444", "shape": "arrowUp", "text": "Price Low 1"},
-                    {"time": t2, "position": "belowBar", "color": "#22c55e", "shape": "arrowUp", "text": "Price Low 2"},
-                ])
-
-        payload[timeframe] = {
-            "candles": candles,
-            "volumes": volumes,
-            "rsi": rsi_points,
-            "markers": markers,
-            "priceLines": lines,
-            "divergence": div_line,
-            "rsiDivergence": rsi_div_line,
-            "pattern": pattern or ("RSI Positive Divergence" if has_div else ""),
-            "status": status,
-        }
+    default_tf = detected_tfs[0]
+    interval_map = {"Daily": "D", "Weekly": "W", "Monthly": "M"}
+    interval = interval_map[default_tf]
 
     setups = list(divergence_setups or [])
     if cup_details:
         setups.append("Cup Pattern")
     setup_text = " + ".join(dict.fromkeys(setups)) or "Pattern"
-    first_tf = next(iter(payload.keys()), "Daily")
-    js_payload = json.dumps(payload, separators=(",", ":"))
+
+    status_bits = []
+    for tf in ("Daily", "Weekly", "Monthly"):
+        det = cup_details.get(tf)
+        if det:
+            pat = det.get("pattern", "Cup")
+            st = det.get("status", "")
+            status_bits.append(f"{tf}: {pat}" + (f" · {st}" if st else ""))
+    if divergence_setups:
+        status_bits.append("Daily: " + " + ".join(divergence_setups))
+    scanner_summary = " | ".join(status_bits)
+
+    # TradingView NSE symbols use the NSE:SYMBOL convention.
+    tv_symbol = f"NSE:{nse_code}"
 
     page = f"""<!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(nse_code)} Interactive Pattern Chart</title>
-<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<title>{html.escape(nse_code)} · TradingView</title>
 <style>
-*{{box-sizing:border-box}} body{{margin:0;background:#07111c;color:#d9e3ee;font-family:Arial,sans-serif}}
-.wrap{{max-width:1600px;margin:auto;padding:12px}}
-.header{{display:grid;grid-template-columns:1.4fr .6fr 1fr;background:#0c1a28;border:1px solid #1d3449;border-radius:9px;overflow:hidden}}
-.header>div{{padding:15px 20px}} .metric{{border-left:1px solid #29445a}}
-h1{{margin:0 0 5px;font-size:29px}} .muted{{color:#8fa4b8;font-size:13px}}
-.cmp{{font-size:25px;font-weight:800;color:#26c6aa;margin-top:6px}}
-.setup{{font-size:17px;font-weight:800;color:#f4b942;margin-top:6px}}
-.tabs{{display:flex;gap:7px;padding:8px;margin:10px 0;background:#0a1724;border:1px solid #1c344a;border-radius:8px}}
-.tab{{border:1px solid #2c4962;background:#102336;color:#d7e4ef;padding:9px 22px;border-radius:6px;font-weight:700;cursor:pointer}}
-.tab.active{{background:#1268ce;border-color:#4396ef;color:white}}
-.toolbar{{display:flex;justify-content:space-between;align-items:center;background:#0a1724;border:1px solid #1c344a;border-bottom:0;padding:9px 12px;border-radius:8px 8px 0 0}}
-#patternTitle{{font-weight:700}} #ohlc{{color:#9fb0c3;font-size:13px}}
-.chartbox{{height:610px;border:1px solid #1c344a;background:#08131f}}
-.rsibox{{height:220px;border:1px solid #1c344a;border-top:0;background:#08131f}}
-.help{{margin-top:10px;padding:12px 15px;background:#0b2924;border:1px solid #146b5b;border-radius:8px;color:#bdf4e8}}
-@media(max-width:800px){{.header{{grid-template-columns:1fr}}.metric{{border-left:0;border-top:1px solid #29445a}}}}
+*{{box-sizing:border-box}}
+html,body{{margin:0;height:100%;background:#0b0e11;color:#d1d4dc;font-family:Arial,Helvetica,sans-serif}}
+.page{{height:100vh;display:flex;flex-direction:column}}
+.scanner{{display:grid;grid-template-columns:1.2fr .45fr 1.35fr;min-height:82px;background:#131722;border-bottom:1px solid #2a2e39}}
+.cell{{padding:13px 18px}}
+.cell+.cell{{border-left:1px solid #2a2e39}}
+h1{{font-size:23px;margin:0 0 5px;color:#f0f3fa}}
+.label{{font-size:11px;color:#787b86;text-transform:uppercase;letter-spacing:.7px}}
+.value{{margin-top:5px;font-size:18px;font-weight:700;color:#f0f3fa}}
+.cmp{{color:#26a69a}}
+.setup{{color:#f0b90b}}
+.summary{{font-size:12px;color:#b2b5be;margin-top:5px;line-height:1.35}}
+.tvwrap{{flex:1;min-height:650px}}
+.tradingview-widget-container{{height:100%;width:100%}}
+.tradingview-widget-container__widget{{height:calc(100% - 28px);width:100%}}
+.tradingview-widget-copyright{{height:28px;padding:5px 10px;font-size:12px;background:#131722;color:#787b86}}
+.tradingview-widget-copyright a{{color:#2962ff;text-decoration:none}}
+@media(max-width:850px){{
+ .scanner{{grid-template-columns:1fr}}
+ .cell+.cell{{border-left:0;border-top:1px solid #2a2e39}}
+ .tvwrap{{min-height:700px}}
+}}
 </style>
 </head>
 <body>
-<div class="wrap">
-<div class="header">
-<div><h1>{html.escape(stock_name)} ({html.escape(nse_code)})</h1><div class="muted">Interactive scanner-marked candlestick chart</div></div>
-<div class="metric"><div class="muted">CMP</div><div class="cmp">₹ {cmp_price:,.2f}</div></div>
-<div class="metric"><div class="muted">Detected Setup</div><div class="setup">{html.escape(setup_text)}</div></div>
-</div>
-<div class="tabs" id="tabs"></div>
-<div class="toolbar"><span id="patternTitle"></span><span id="ohlc">Move mouse over candles for OHLC</span></div>
-<div id="chart" class="chartbox"></div>
-<div id="rsi" class="rsibox"></div>
-<div class="help">Mouse wheel = zoom · drag = move chart · hover = OHLC · Daily / Weekly / Monthly buttons show the exact scanner timeframe.</div>
-</div>
-<script>
-const DATA={js_payload};
-let chart=null,rsiChart=null;
-function addCandleSeriesCompat(ch, opts){{
-  if(ch.addCandlestickSeries) return ch.addCandlestickSeries(opts);
-  return ch.addSeries(LightweightCharts.CandlestickSeries,opts);
-}}
-function addHistogramSeriesCompat(ch, opts){{
-  if(ch.addHistogramSeries) return ch.addHistogramSeries(opts);
-  return ch.addSeries(LightweightCharts.HistogramSeries,opts);
-}}
-function addLineSeriesCompat(ch, opts){{
-  if(ch.addLineSeries) return ch.addLineSeries(opts);
-  return ch.addSeries(LightweightCharts.LineSeries,opts);
-}}
-function destroyCharts(){{
-  if(chart) chart.remove(); if(rsiChart) rsiChart.remove();
-  chart=null;rsiChart=null;
-}}
-function render(tf){{
-  destroyCharts();
-  const d=DATA[tf];
-  document.getElementById('patternTitle').textContent=tf+' · '+d.pattern+(d.status?' · '+d.status:'');
-  const common={{
-    layout:{{background:{{color:'#08131f'}},textColor:'#9fb0c3'}},
-    grid:{{vertLines:{{color:'#162738'}},horzLines:{{color:'#162738'}}}},
-    rightPriceScale:{{borderColor:'#29445a'}},
-    timeScale:{{borderColor:'#29445a',timeVisible:true}},
-    crosshair:{{mode:LightweightCharts.CrosshairMode.Normal}},
-    handleScroll:true,handleScale:true,
-  }};
-  chart=LightweightCharts.createChart(document.getElementById('chart'),{{...common,width:document.getElementById('chart').clientWidth,height:610}});
-  const candles=addCandleSeriesCompat(chart,{{upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350'}});
-  candles.setData(d.candles);
-  const vol=addHistogramSeriesCompat(chart,{{priceFormat:{{type:'volume'}},priceScaleId:'volume'}});
-  vol.priceScale().applyOptions({{scaleMargins:{{top:.82,bottom:0}}}});
-  vol.setData(d.volumes);
-  d.priceLines.forEach(x=>candles.createPriceLine({{price:x.price,color:x.color,lineWidth:2,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:x.title}}));
-  if(d.markers.length){{
-    if(LightweightCharts.createSeriesMarkers) LightweightCharts.createSeriesMarkers(candles,d.markers);
-    else if(candles.setMarkers) candles.setMarkers(d.markers);
-  }}
-  if(d.divergence){{
-    const dl=addLineSeriesCompat(chart,{{color:'#f87171',lineWidth:3,priceLineVisible:false,lastValueVisible:false}});
-    dl.setData(d.divergence);
-  }}
-  chart.timeScale().fitContent();
+<div class="page">
+  <div class="scanner">
+    <div class="cell">
+      <h1>{html.escape(stock_name)} ({html.escape(nse_code)})</h1>
+      <div class="label">Scanner-marked setup</div>
+      <div class="summary">{html.escape(scanner_summary)}</div>
+    </div>
+    <div class="cell">
+      <div class="label">CMP</div>
+      <div class="value cmp">₹ {cmp_price:,.2f}</div>
+    </div>
+    <div class="cell">
+      <div class="label">Detected setup</div>
+      <div class="value setup">{html.escape(setup_text)}</div>
+      <div class="summary">TradingView opens on scanner timeframe: {html.escape(default_tf)}</div>
+    </div>
+  </div>
 
-  rsiChart=LightweightCharts.createChart(document.getElementById('rsi'),{{...common,width:document.getElementById('rsi').clientWidth,height:220,rightPriceScale:{{borderColor:'#29445a',autoScale:false}}}});
-  const rs=addLineSeriesCompat(rsiChart,{{color:'#a970ff',lineWidth:2,priceLineVisible:false}});
-  rs.setData(d.rsi);
-  [30,70].forEach(v=>rs.createPriceLine({{price:v,color:'#64748b',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'RSI '+v}}));
-  if(d.rsiDivergence){{
-    const rd=addLineSeriesCompat(rsiChart,{{color:'#22c55e',lineWidth:3,priceLineVisible:false,lastValueVisible:false}});
-    rd.setData(d.rsiDivergence);
-  }}
-  rsiChart.timeScale().fitContent();
-
-  chart.subscribeCrosshairMove(p=>{{
-    const bar=p.seriesData.get(candles);
-    document.getElementById('ohlc').textContent=bar ? `O ${{bar.open.toFixed(2)}}  H ${{bar.high.toFixed(2)}}  L ${{bar.low.toFixed(2)}}  C ${{bar.close.toFixed(2)}}` : 'Move mouse over candles for OHLC';
-  }});
-}}
-const tabs=document.getElementById('tabs');
-Object.keys(DATA).forEach(tf=>{{
- const b=document.createElement('button');b.className='tab'+(tf==='{first_tf}'?' active':'');b.textContent=tf;
- b.onclick=()=>{{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');render(tf)}};
- tabs.appendChild(b);
-}});
-render('{first_tf}');
-window.addEventListener('resize',()=>{{
- if(chart) chart.applyOptions({{width:document.getElementById('chart').clientWidth}});
- if(rsiChart) rsiChart.applyOptions({{width:document.getElementById('rsi').clientWidth}});
-}});
-</script>
-</body></html>"""
+  <div class="tvwrap">
+    <div class="tradingview-widget-container">
+      <div class="tradingview-widget-container__widget"></div>
+      <div class="tradingview-widget-copyright">
+        <a href="https://www.tradingview.com/symbols/{html.escape(nse_code)}/" rel="noopener nofollow" target="_blank">
+          {html.escape(nse_code)} chart
+        </a> by TradingView
+      </div>
+      <script type="text/javascript"
+        src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
+        async>
+      {{
+        "autosize": true,
+        "symbol": "{html.escape(tv_symbol)}",
+        "interval": "{interval}",
+        "timezone": "Asia/Kolkata",
+        "theme": "dark",
+        "backgroundColor": "rgba(11, 14, 17, 1)",
+        "style": "1",
+        "locale": "en",
+        "withdateranges": true,
+        "hide_side_toolbar": false,
+        "allow_symbol_change": true,
+        "save_image": false,
+        "calendar": false,
+        "details": true,
+        "hotlist": false,
+        "show_popup_button": true,
+        "popup_width": "1200",
+        "popup_height": "750",
+        "studies": [
+          "RSI@tv-basicstudies",
+          "Volume@tv-basicstudies"
+        ],
+        "support_host": "https://www.tradingview.com"
+      }}
+      </script>
+    </div>
+  </div>
+</div>
+</body>
+</html>"""
 
     CHART_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     (CHART_OUTPUT_DIR / filename).write_text(page, encoding="utf-8")
     return pattern_chart_url(filename)
 
 
-
-# ============================================================
-# BUILD OUTPUT ROW
-# ============================================================
 
 def make_row(
     stock_name,
