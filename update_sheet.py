@@ -1523,11 +1523,7 @@ def make_row(
             2,
         ),
 
-        "Chart Link": (
-            f'=HYPERLINK("{chart_url}","Pattern Chart")'
-            if chart_url
-            else ""
-        ),
+        "Chart Link": chart_url if chart_url else "",
     }
 
 
@@ -1710,8 +1706,11 @@ def scan_stock(stock):
 # ============================================================
 
 
-def _extract_hyperlink_url(formula):
-    match = re.search(r'=HYPERLINK\("([^"]+)"', str(formula or ""))
+def _extract_hyperlink_url(value):
+    value = str(value or "").strip()
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    match = re.search(r'=HYPERLINK\("([^"]+)"', value)
     return match.group(1) if match else ""
 
 
@@ -1841,11 +1840,9 @@ def merge_rows_one_per_stock(results):
             rows=rows,
         )
 
-        base["Chart Link"] = (
-            f'=HYPERLINK("{combined_url}","Pattern Chart")'
-            if combined_url
-            else ""
-        )
+        # Use the direct public URL instead of a HYPERLINK formula.
+        # Google Sheets will auto-detect it as a clickable link.
+        base["Chart Link"] = combined_url if combined_url else ""
 
         merged.append(base)
 
