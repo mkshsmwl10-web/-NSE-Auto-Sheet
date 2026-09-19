@@ -194,21 +194,108 @@ def write_final_list(rows):
             row.get("Chart Link", ""),
         ])
 
-    # Clear old data and old dark/black formatting.
+    # --------------------------------------------------------
+    # HARD RESET FINAL LIST BEFORE WRITING
+    # --------------------------------------------------------
+    # This removes old merged cells, stale headers, old values and
+    # formatting so the 11-column schema can never appear shifted.
+    try:
+        meta = sh.fetch_sheet_metadata()
+        target = None
+        for sheet_meta in meta.get("sheets", []):
+            props = sheet_meta.get("properties", {})
+            if props.get("sheetId") == ws.id:
+                target = props
+                break
+
+        if target:
+            grid = target.get("gridProperties", {})
+            row_count = max(int(grid.get("rowCount", 1000)), 100)
+            col_count = max(int(grid.get("columnCount", 26)), 11)
+
+            sh.batch_update({
+                "requests": [
+                    {
+                        "unmergeCells": {
+                            "range": {
+                                "sheetId": ws.id,
+                                "startRowIndex": 0,
+                                "endRowIndex": row_count,
+                                "startColumnIndex": 0,
+                                "endColumnIndex": col_count,
+                            }
+                        }
+                    }
+                ]
+            })
+    except Exception as exc:
+        print("Unmerge warning:", exc)
+
+    # Clear all existing cell values.
     ws.clear()
-    try:
-        ws.clear(format_only=True)
-    except Exception:
-        pass
 
+    # Reset formatting across the used sheet area.
     try:
-        ws.resize(rows=max(len(output) + 10, 100), cols=11)
-    except Exception:
-        pass
+        sh.batch_update({
+            "requests": [
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": ws.id,
+                            "startRowIndex": 0,
+                            "startColumnIndex": 0,
+                        },
+                        "cell": {
+                            "userEnteredFormat": {}
+                        },
+                        "fields": "userEnteredFormat",
+                    }
+                }
+            ]
+        })
+    except Exception as exc:
+        print("Format reset warning:", exc)
 
-    ws.update("A1", output, value_input_option="USER_ENTERED")
+    # Force exactly 11 columns in Final List.
+    try:
+        ws.resize(
+            rows=max(len(output) + 10, 100),
+            cols=len(FINAL_COLUMNS),
+        )
+    except Exception as exc:
+        print("Resize warning:", exc)
+
+    # First write ONLY the exact header row.
+    ws.update(
+        "A1:K1",
+        [FINAL_COLUMNS],
+        value_input_option="RAW",
+    )
+
+    # Then write data starting from row 2.
+    if len(output) > 1:
+        ws.update(
+            f"A2:K{len(output)}",
+            output[1:],
+            value_input_option="USER_ENTERED",
+        )
 
     last_row = max(len(output), 2)
+
+    # Verify that Google Sheet actually contains the exact 11 headers.
+    try:
+        actual_headers = ws.get("A1:K1")
+        actual_headers = actual_headers[0] if actual_headers else []
+
+        if actual_headers != FINAL_COLUMNS:
+            print("Header mismatch detected. Repairing header row...")
+            ws.update(
+                "A1:K1",
+                [FINAL_COLUMNS],
+                value_input_option="RAW",
+            )
+    except Exception as exc:
+        print("Header verification warning:", exc)
 
     try:
         ws.freeze(rows=1, cols=2)
