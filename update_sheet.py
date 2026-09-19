@@ -1351,7 +1351,8 @@ def _svg_price_chart(df, marks=None, title="", max_bars=220):
     out = [
         f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="{html.escape(title)}">',
         '<rect width="100%" height="100%" fill="#08131f"/>',
-        f'<text x="{ml}" y="30" font-size="20" font-weight="700" fill="#e6edf7">{html.escape(title)}</text>',
+        f'<text x="{ml}" y="27" font-size="19" font-weight="800" fill="#e6edf7">{html.escape(title)}</text>',
+        f'<text x="{ml}" y="45" font-size="11" fill="#8fa4b8">O {opn[-1]:,.2f}   H {high[-1]:,.2f}   L {low[-1]:,.2f}   C {close[-1]:,.2f}</text>',
     ]
 
     # Grid / price labels
@@ -1374,7 +1375,14 @@ def _svg_price_chart(df, marks=None, title="", max_bars=220):
         vh = (vol[i]/vmax)*vol_h if vmax else 0
         out.append(f'<rect x="{x-candle_w/2:.1f}" y="{vol_top+vol_h-vh:.1f}" width="{candle_w:.1f}" height="{vh:.1f}" fill="{color}" opacity=".48"/>')
 
-    out.append(f'<text x="{ml}" y="{vol_top+14}" font-size="12" fill="#9fb0c3">Volume</text>')
+    # TradingView-style current price guide + right-side price tag
+    last_price = float(close[-1])
+    last_y = ypix(last_price)
+    out.append(f'<line x1="{ml}" y1="{last_y:.1f}" x2="{width-mr}" y2="{last_y:.1f}" stroke="#18b9a4" stroke-width="1" stroke-dasharray="2 3" opacity=".75"/>')
+    out.append(f'<rect x="{width-mr}" y="{last_y-11:.1f}" width="{mr-4}" height="22" rx="3" fill="#119b8b"/>')
+    out.append(f'<text x="{width-mr+6}" y="{last_y+5:.1f}" font-size="12" font-weight="700" fill="#ffffff">{last_price:,.2f}</text>')
+    out.append(f'<line x1="{ml}" y1="{vol_top-4}" x2="{width-mr}" y2="{vol_top-4}" stroke="#304356" stroke-width="1"/>')
+    out.append(f'<text x="{ml}" y="{vol_top+14}" font-size="12" font-weight="700" fill="#c8d5e3">Volume</text>')
 
     # Breakout level
     if marks.get("breakout_level") is not None:
@@ -1605,13 +1613,25 @@ def generate_unified_stock_chart(stock_name, nse_code, cmp_price, daily, cup_det
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(nse_code)} Pattern Chart</title>
 <style>
-*{{box-sizing:border-box}} body{{margin:0;background:#06111d;color:#e6edf7;font-family:Arial,Helvetica,sans-serif}}
-.wrap{{max-width:1320px;margin:auto;padding:16px}} .head{{display:grid;grid-template-columns:1.4fr .7fr 1fr;gap:12px;background:#0b1b2a;border:1px solid #173149;border-radius:14px;padding:18px}}
-h1{{margin:0;font-size:32px}} .muted{{color:#9fb0c3}} .metric{{padding:10px 14px;border-left:1px solid #244158}} .cmp{{font-size:25px;color:#2dd4bf;font-weight:700}}
-.setup{{color:#fbbf24;font-weight:700}} .tabs{{display:flex;gap:8px;margin:14px 0}} .tab{{background:#102235;color:#d8e4f0;border:1px solid #29445d;padding:10px 22px;border-radius:8px;cursor:pointer;font-size:15px}}
-.tab.active{{background:#0b63ce;border-color:#3b82f6;color:white}} .tfpanel{{display:none;border:1px solid #173149;border-radius:12px;overflow:hidden;background:#08131f;margin-bottom:14px}} .tfpanel.active{{display:block}}
-svg{{display:block;width:100%;height:auto}} .note{{background:#0b2a24;border:1px solid #126c58;color:#b8f5e7;padding:14px 18px;border-radius:10px;margin-top:14px}}
-@media(max-width:800px){{.head{{grid-template-columns:1fr}} .metric{{border-left:0;border-top:1px solid #244158}}}}
+*{{box-sizing:border-box}}
+body{{margin:0;background:#06101a;color:#e6edf7;font-family:Inter,Arial,Helvetica,sans-serif}}
+.wrap{{max-width:1540px;margin:auto;padding:12px}}
+.head{{display:grid;grid-template-columns:1.35fr .62fr 1fr;gap:0;background:linear-gradient(180deg,#0d1d2c,#091724);border:1px solid #1b344a;border-radius:10px;overflow:hidden}}
+.head>div{{padding:16px 20px;min-height:92px}}
+h1{{margin:0 0 7px;font-size:31px;letter-spacing:.2px}}
+.muted{{color:#9fb0c3;font-size:13px}}
+.metric{{border-left:1px solid #29445a}}
+.cmp{{font-size:26px;color:#27d3ad;font-weight:800;margin-top:7px}}
+.setup{{color:#f8bd38;font-weight:800;font-size:18px;margin-top:7px}}
+.tabs{{display:flex;gap:8px;margin:12px 0;background:#081522;padding:8px;border:1px solid #183147;border-radius:9px}}
+.tab{{background:#102236;color:#d8e4f0;border:1px solid #2a455d;padding:10px 24px;border-radius:7px;cursor:pointer;font-size:15px;font-weight:700}}
+.tab:hover{{border-color:#3b82f6}}
+.tab.active{{background:#0867d5;border-color:#3790ff;color:#fff;box-shadow:0 0 0 1px #0759b7 inset}}
+.tfpanel{{display:none;border:1px solid #1b344a;border-radius:8px;overflow:hidden;background:#08131f;margin-bottom:12px;box-shadow:0 10px 35px rgba(0,0,0,.18)}}
+.tfpanel.active{{display:block}}
+svg{{display:block;width:100%;height:auto;background:#08131f}}
+.note{{background:linear-gradient(90deg,#07342c,#09251f);border:1px solid #13846d;color:#bdf7e9;padding:14px 18px;border-radius:8px;margin-top:12px;font-size:14px}}
+@media(max-width:800px){{.head{{grid-template-columns:1fr}}.metric{{border-left:0;border-top:1px solid #29445a}}.tabs{{overflow:auto}}.tab{{white-space:nowrap}}}}
 </style></head><body><div class="wrap">
 <div class="head"><div><h1>{html.escape(stock_name)} ({html.escape(nse_code)})</h1><div class="muted">NSE Auto Sheet · Scanner-marked candlestick chart</div></div>
 <div class="metric"><div class="muted">CMP</div><div class="cmp">₹ {cmp_price:,.2f}</div></div>
