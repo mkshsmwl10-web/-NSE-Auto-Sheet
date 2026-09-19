@@ -1,38 +1,115 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NOVARTIND Pattern Chart</title>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NOVARTIND Interactive Pattern Chart</title>
+<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 <style>
-*{box-sizing:border-box}
-body{margin:0;background:#06101a;color:#e6edf7;font-family:Inter,Arial,Helvetica,sans-serif}
-.wrap{max-width:1540px;margin:auto;padding:12px}
-.head{display:grid;grid-template-columns:1.35fr .62fr 1fr;gap:0;background:linear-gradient(180deg,#0d1d2c,#091724);border:1px solid #1b344a;border-radius:10px;overflow:hidden}
-.head>div{padding:16px 20px;min-height:92px}
-h1{margin:0 0 7px;font-size:31px;letter-spacing:.2px}
-.muted{color:#9fb0c3;font-size:13px}
-.metric{border-left:1px solid #29445a}
-.cmp{font-size:26px;color:#27d3ad;font-weight:800;margin-top:7px}
-.setup{color:#f8bd38;font-weight:800;font-size:18px;margin-top:7px}
-.tabs{display:flex;gap:8px;margin:12px 0;background:#081522;padding:8px;border:1px solid #183147;border-radius:9px}
-.tab{background:#102236;color:#d8e4f0;border:1px solid #2a455d;padding:10px 24px;border-radius:7px;cursor:pointer;font-size:15px;font-weight:700}
-.tab:hover{border-color:#3b82f6}
-.tab.active{background:#0867d5;border-color:#3790ff;color:#fff;box-shadow:0 0 0 1px #0759b7 inset}
-.tfpanel{display:none;border:1px solid #1b344a;border-radius:8px;overflow:hidden;background:#08131f;margin-bottom:12px;box-shadow:0 10px 35px rgba(0,0,0,.18)}
-.tfpanel.active{display:block}
-svg{display:block;width:100%;height:auto;background:#08131f}
-.note{background:linear-gradient(90deg,#07342c,#09251f);border:1px solid #13846d;color:#bdf7e9;padding:14px 18px;border-radius:8px;margin-top:12px;font-size:14px}
-@media(max-width:800px){.head{grid-template-columns:1fr}.metric{border-left:0;border-top:1px solid #29445a}.tabs{overflow:auto}.tab{white-space:nowrap}}
-</style></head><body><div class="wrap">
-<div class="head"><div><h1>NOVARTIND (NOVARTIND)</h1><div class="muted">NSE Auto Sheet · Scanner-marked candlestick chart</div></div>
+*{box-sizing:border-box} body{margin:0;background:#07111c;color:#d9e3ee;font-family:Arial,sans-serif}
+.wrap{max-width:1600px;margin:auto;padding:12px}
+.header{display:grid;grid-template-columns:1.4fr .6fr 1fr;background:#0c1a28;border:1px solid #1d3449;border-radius:9px;overflow:hidden}
+.header>div{padding:15px 20px} .metric{border-left:1px solid #29445a}
+h1{margin:0 0 5px;font-size:29px} .muted{color:#8fa4b8;font-size:13px}
+.cmp{font-size:25px;font-weight:800;color:#26c6aa;margin-top:6px}
+.setup{font-size:17px;font-weight:800;color:#f4b942;margin-top:6px}
+.tabs{display:flex;gap:7px;padding:8px;margin:10px 0;background:#0a1724;border:1px solid #1c344a;border-radius:8px}
+.tab{border:1px solid #2c4962;background:#102336;color:#d7e4ef;padding:9px 22px;border-radius:6px;font-weight:700;cursor:pointer}
+.tab.active{background:#1268ce;border-color:#4396ef;color:white}
+.toolbar{display:flex;justify-content:space-between;align-items:center;background:#0a1724;border:1px solid #1c344a;border-bottom:0;padding:9px 12px;border-radius:8px 8px 0 0}
+#patternTitle{font-weight:700} #ohlc{color:#9fb0c3;font-size:13px}
+.chartbox{height:610px;border:1px solid #1c344a;background:#08131f}
+.rsibox{height:220px;border:1px solid #1c344a;border-top:0;background:#08131f}
+.help{margin-top:10px;padding:12px 15px;background:#0b2924;border:1px solid #146b5b;border-radius:8px;color:#bdf4e8}
+@media(max-width:800px){.header{grid-template-columns:1fr}.metric{border-left:0;border-top:1px solid #29445a}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="header">
+<div><h1>NOVARTIND (NOVARTIND)</h1><div class="muted">Interactive scanner-marked candlestick chart</div></div>
 <div class="metric"><div class="muted">CMP</div><div class="cmp">₹ 2,046.80</div></div>
-<div class="metric"><div class="muted">Detected Setup</div><div class="setup">Cup Pattern</div></div></div>
-<div class="tabs"><button class="tab active" onclick="showTF('Monthly',this)">Monthly</button></div>
-<div id="panel-Monthly" class="tfpanel active"><svg viewBox="0 0 1240 620" role="img" aria-label="NOVARTIND · Monthly Candles · Cup AFTER BREAKOUT"><rect width="100%" height="100%" fill="#08131f"/><text x="76" y="27" font-size="19" font-weight="800" fill="#e6edf7">NOVARTIND · Monthly Candles · Cup AFTER BREAKOUT</text><text x="76" y="45" font-size="11" fill="#8fa4b8">O 1,546.60   H 2,588.80   L 1,541.60   C 2,046.80</text><line x1="76" y1="482.0" x2="1168" y2="482.0" stroke="#1b2b3b" stroke-width="1"/><text x="1176" y="486.0" font-size="12" fill="#9fb0c3">393.37</text><line x1="76" y1="396.0" x2="1168" y2="396.0" stroke="#1b2b3b" stroke-width="1"/><text x="1176" y="400.0" font-size="12" fill="#9fb0c3">861.18</text><line x1="76" y1="310.0" x2="1168" y2="310.0" stroke="#1b2b3b" stroke-width="1"/><text x="1176" y="314.0" font-size="12" fill="#9fb0c3">1,328.99</text><line x1="76" y1="224.0" x2="1168" y2="224.0" stroke="#1b2b3b" stroke-width="1"/><text x="1176" y="228.0" font-size="12" fill="#9fb0c3">1,796.81</text><line x1="76" y1="138.0" x2="1168" y2="138.0" stroke="#1b2b3b" stroke-width="1"/><text x="1176" y="142.0" font-size="12" fill="#9fb0c3">2,264.62</text><line x1="76" y1="52.0" x2="1168" y2="52.0" stroke="#1b2b3b" stroke-width="1"/><text x="1176" y="56.0" font-size="12" fill="#9fb0c3">2,732.43</text><line x1="92.1" y1="399.1" x2="92.1" y2="407.2" stroke="#ef5350" stroke-width="1.3"/><rect x="87.6" y="400.9" width="9.0" height="3.1" fill="#ef5350" rx=".6"/><rect x="87.6" y="563.2" width="9.0" height="1.8" fill="#ef5350" opacity=".48"/><line x1="124.2" y1="398.6" x2="124.2" y2="419.7" stroke="#ef5350" stroke-width="1.3"/><rect x="119.7" y="403.9" width="9.0" height="13.4" fill="#ef5350" rx=".6"/><rect x="119.7" y="558.7" width="9.0" height="6.3" fill="#ef5350" opacity=".48"/><line x1="156.3" y1="383.9" x2="156.3" y2="419.1" stroke="#16b8a6" stroke-width="1.3"/><rect x="151.8" y="410.4" width="9.0" height="3.3" fill="#16b8a6" rx=".6"/><rect x="151.8" y="549.6" width="9.0" height="15.4" fill="#16b8a6" opacity=".48"/><line x1="188.4" y1="398.1" x2="188.4" y2="415.3" stroke="#ef5350" stroke-width="1.3"/><rect x="183.9" y="410.3" width="9.0" height="1.4" fill="#ef5350" rx=".6"/><rect x="183.9" y="556.9" width="9.0" height="8.1" fill="#ef5350" opacity=".48"/><line x1="220.5" y1="407.4" x2="220.5" y2="420.9" stroke="#ef5350" stroke-width="1.3"/><rect x="216.0" y="411.4" width="9.0" height="7.1" fill="#ef5350" rx=".6"/><rect x="216.0" y="560.8" width="9.0" height="4.2" fill="#ef5350" opacity=".48"/><line x1="252.6" y1="403.0" x2="252.6" y2="440.7" stroke="#ef5350" stroke-width="1.3"/><rect x="248.1" y="418.1" width="9.0" height="20.5" fill="#ef5350" rx=".6"/><rect x="248.1" y="559.5" width="9.0" height="5.5" fill="#ef5350" opacity=".48"/><line x1="284.8" y1="433.8" x2="284.8" y2="447.3" stroke="#ef5350" stroke-width="1.3"/><rect x="280.3" y="439.3" width="9.0" height="6.6" fill="#ef5350" rx=".6"/><rect x="280.3" y="558.3" width="9.0" height="6.7" fill="#ef5350" opacity=".48"/><line x1="316.9" y1="428.6" x2="316.9" y2="446.0" stroke="#16b8a6" stroke-width="1.3"/><rect x="312.4" y="438.8" width="9.0" height="5.9" fill="#16b8a6" rx=".6"/><rect x="312.4" y="560.3" width="9.0" height="4.7" fill="#16b8a6" opacity=".48"/><line x1="349.0" y1="438.3" x2="349.0" y2="450.4" stroke="#ef5350" stroke-width="1.3"/><rect x="344.5" y="439.3" width="9.0" height="6.5" fill="#ef5350" rx=".6"/><rect x="344.5" y="562.7" width="9.0" height="2.3" fill="#ef5350" opacity=".48"/><line x1="381.1" y1="436.8" x2="381.1" y2="449.0" stroke="#16b8a6" stroke-width="1.3"/><rect x="376.6" y="441.7" width="9.0" height="4.5" fill="#16b8a6" rx=".6"/><rect x="376.6" y="562.1" width="9.0" height="2.9" fill="#16b8a6" opacity=".48"/><line x1="413.2" y1="414.6" x2="413.2" y2="442.0" stroke="#16b8a6" stroke-width="1.3"/><rect x="408.7" y="421.3" width="9.0" height="19.3" fill="#16b8a6" rx=".6"/><rect x="408.7" y="548.5" width="9.0" height="16.5" fill="#16b8a6" opacity=".48"/><line x1="445.4" y1="410.9" x2="445.4" y2="425.6" stroke="#16b8a6" stroke-width="1.3"/><rect x="440.9" y="419.9" width="9.0" height="1.4" fill="#16b8a6" rx=".6"/><rect x="440.9" y="558.2" width="9.0" height="6.8" fill="#16b8a6" opacity=".48"/><line x1="477.5" y1="417.9" x2="477.5" y2="432.2" stroke="#ef5350" stroke-width="1.3"/><rect x="473.0" y="419.7" width="9.0" height="9.5" fill="#ef5350" rx=".6"/><rect x="473.0" y="562.1" width="9.0" height="2.9" fill="#ef5350" opacity=".48"/><line x1="509.6" y1="425.6" x2="509.6" y2="432.2" stroke="#ef5350" stroke-width="1.3"/><rect x="505.1" y="429.1" width="9.0" height="1.4" fill="#ef5350" rx=".6"/><rect x="505.1" y="563.4" width="9.0" height="1.6" fill="#ef5350" opacity=".48"/><line x1="541.7" y1="422.2" x2="541.7" y2="435.0" stroke="#ef5350" stroke-width="1.3"/><rect x="537.2" y="428.8" width="9.0" height="2.0" fill="#ef5350" rx=".6"/><rect x="537.2" y="562.2" width="9.0" height="2.8" fill="#ef5350" opacity=".48"/><line x1="573.8" y1="422.9" x2="573.8" y2="434.5" stroke="#16b8a6" stroke-width="1.3"/><rect x="569.3" y="430.3" width="9.0" height="1.4" fill="#16b8a6" rx=".6"/><rect x="569.3" y="560.4" width="9.0" height="4.6" fill="#16b8a6" opacity=".48"/><line x1="605.9" y1="429.2" x2="605.9" y2="441.6" stroke="#ef5350" stroke-width="1.3"/><rect x="601.4" y="430.3" width="9.0" height="6.8" fill="#ef5350" rx=".6"/><rect x="601.4" y="563.3" width="9.0" height="1.7" fill="#ef5350" opacity=".48"/><line x1="638.1" y1="434.6" x2="638.1" y2="446.6" stroke="#ef5350" stroke-width="1.3"/><rect x="633.6" y="437.4" width="9.0" height="7.1" fill="#ef5350" rx=".6"/><rect x="633.6" y="563.2" width="9.0" height="1.8" fill="#ef5350" opacity=".48"/><line x1="670.2" y1="442.3" x2="670.2" y2="455.6" stroke="#ef5350" stroke-width="1.3"/><rect x="665.7" y="443.4" width="9.0" height="7.3" fill="#ef5350" rx=".6"/><rect x="665.7" y="560.8" width="9.0" height="4.2" fill="#ef5350" opacity=".48"/><line x1="702.3" y1="440.7" x2="702.3" y2="450.7" stroke="#16b8a6" stroke-width="1.3"/><rect x="697.8" y="444.9" width="9.0" height="5.8" fill="#16b8a6" rx=".6"/><rect x="697.8" y="563.3" width="9.0" height="1.7" fill="#16b8a6" opacity=".48"/><line x1="734.4" y1="416.9" x2="734.4" y2="446.8" stroke="#16b8a6" stroke-width="1.3"/><rect x="729.9" y="424.4" width="9.0" height="19.8" fill="#16b8a6" rx=".6"/><rect x="729.9" y="554.9" width="9.0" height="10.1" fill="#16b8a6" opacity=".48"/><line x1="766.5" y1="398.9" x2="766.5" y2="424.9" stroke="#16b8a6" stroke-width="1.3"/><rect x="762.0" y="405.3" width="9.0" height="19.0" fill="#16b8a6" rx=".6"/><rect x="762.0" y="551.5" width="9.0" height="13.5" fill="#16b8a6" opacity=".48"/><line x1="798.6" y1="387.2" x2="798.6" y2="422.0" stroke="#ef5350" stroke-width="1.3"/><rect x="794.1" y="404.5" width="9.0" height="16.9" fill="#ef5350" rx=".6"/><rect x="794.1" y="539.7" width="9.0" height="25.3" fill="#ef5350" opacity=".48"/><line x1="830.8" y1="417.4" x2="830.8" y2="425.3" stroke="#ef5350" stroke-width="1.3"/><rect x="826.3" y="421.3" width="9.0" height="1.4" fill="#ef5350" rx=".6"/><rect x="826.3" y="557.9" width="9.0" height="7.1" fill="#ef5350" opacity=".48"/><line x1="862.9" y1="414.3" x2="862.9" y2="424.3" stroke="#16b8a6" stroke-width="1.3"/><rect x="858.4" y="421.9" width="9.0" height="1.4" fill="#16b8a6" rx=".6"/><rect x="858.4" y="559.5" width="9.0" height="5.5" fill="#16b8a6" opacity=".48"/><line x1="895.0" y1="419.5" x2="895.0" y2="431.4" stroke="#ef5350" stroke-width="1.3"/><rect x="890.5" y="421.1" width="9.0" height="9.7" fill="#ef5350" rx=".6"/><rect x="890.5" y="561.9" width="9.0" height="3.1" fill="#ef5350" opacity=".48"/><line x1="927.1" y1="430.7" x2="927.1" y2="430.7" stroke="#16b8a6" stroke-width="1.3"/><rect x="922.6" y="430.7" width="9.0" height="1.4" fill="#16b8a6" rx=".6"/><rect x="922.6" y="565.0" width="9.0" height="0.0" fill="#16b8a6" opacity=".48"/><line x1="959.2" y1="430.7" x2="959.2" y2="430.7" stroke="#16b8a6" stroke-width="1.3"/><rect x="954.7" y="430.7" width="9.0" height="1.4" fill="#16b8a6" rx=".6"/><rect x="954.7" y="565.0" width="9.0" height="0.0" fill="#16b8a6" opacity=".48"/><line x1="991.4" y1="359.5" x2="991.4" y2="430.7" stroke="#16b8a6" stroke-width="1.3"/><rect x="986.9" y="364.9" width="9.0" height="65.9" fill="#16b8a6" rx=".6"/><rect x="986.9" y="563.3" width="9.0" height="1.7" fill="#16b8a6" opacity=".48"/><line x1="1023.5" y1="264.8" x2="1023.5" y2="368.1" stroke="#16b8a6" stroke-width="1.3"/><rect x="1019.0" y="268.2" width="9.0" height="96.8" fill="#16b8a6" rx=".6"/><rect x="1019.0" y="549.3" width="9.0" height="15.7" fill="#16b8a6" opacity=".48"/><line x1="1055.6" y1="262.2" x2="1055.6" y2="320.5" stroke="#ef5350" stroke-width="1.3"/><rect x="1051.1" y="264.8" width="9.0" height="25.8" fill="#ef5350" rx=".6"/><rect x="1051.1" y="557.6" width="9.0" height="7.4" fill="#ef5350" opacity=".48"/><line x1="1087.7" y1="227.1" x2="1087.7" y2="291.4" stroke="#16b8a6" stroke-width="1.3"/><rect x="1083.2" y="271.7" width="9.0" height="19.7" fill="#16b8a6" rx=".6"/><rect x="1083.2" y="545.1" width="9.0" height="19.9" fill="#16b8a6" opacity=".48"/><line x1="1119.8" y1="245.2" x2="1119.8" y2="296.6" stroke="#16b8a6" stroke-width="1.3"/><rect x="1115.3" y="268.6" width="9.0" height="2.6" fill="#16b8a6" rx=".6"/><rect x="1115.3" y="560.1" width="9.0" height="4.9" fill="#16b8a6" opacity=".48"/><line x1="1151.9" y1="78.4" x2="1151.9" y2="270.9" stroke="#16b8a6" stroke-width="1.3"/><rect x="1147.4" y="178.0" width="9.0" height="92.0" fill="#16b8a6" rx=".6"/><rect x="1147.4" y="490.0" width="9.0" height="75.0" fill="#16b8a6" opacity=".48"/><line x1="76" y1="178.0" x2="1168" y2="178.0" stroke="#18b9a4" stroke-width="1" stroke-dasharray="2 3" opacity=".75"/><rect x="1168" y="167.0" width="68" height="22" rx="3" fill="#119b8b"/><text x="1174" y="183.0" font-size="12" font-weight="700" fill="#ffffff">2,046.80</text><line x1="76" y1="486" x2="1168" y2="486" stroke="#304356" stroke-width="1"/><text x="76" y="504" font-size="12" font-weight="700" fill="#c8d5e3">Volume</text><line x1="76" y1="409.9" x2="1168" y2="409.9" stroke="#f59e0b" stroke-width="2" stroke-dasharray="8 6"/><text x="1163" y="401.9" text-anchor="end" font-size="12" font-weight="700" fill="#fbbf24">Breakout 785.81</text><circle cx="124.2" cy="417.4" r="5.5" fill="#38bdf8" stroke="#08131f" stroke-width="2"/><text x="124.2" y="406.4" text-anchor="middle" font-size="11" font-weight="700" fill="#38bdf8">Left Rim</text><circle cx="349.0" cy="450.4" r="5.5" fill="#38bdf8" stroke="#08131f" stroke-width="2"/><text x="349.0" y="439.4" text-anchor="middle" font-size="11" font-weight="700" fill="#38bdf8">Cup Bottom</text><circle cx="830.8" cy="422.4" r="5.5" fill="#38bdf8" stroke="#08131f" stroke-width="2"/><text x="830.8" y="411.4" text-anchor="middle" font-size="11" font-weight="700" fill="#38bdf8">Right Rim</text><circle cx="991.4" cy="364.9" r="5.5" fill="#34d399" stroke="#08131f" stroke-width="2"/><text x="991.4" y="353.9" text-anchor="middle" font-size="11" font-weight="700" fill="#34d399">Breakout</text><path d="M124.2,417.4 Q349.0,505.4 830.8,422.4" fill="none" stroke="#2f8cff" stroke-width="3"/><text x="92.1" y="602" text-anchor="middle" font-size="11" fill="#8294a8">2021-09-30</text><text x="252.6" y="602" text-anchor="middle" font-size="11" fill="#8294a8">2022-02-28</text><text x="445.4" y="602" text-anchor="middle" font-size="11" fill="#8294a8">2022-08-31</text><text x="605.9" y="602" text-anchor="middle" font-size="11" fill="#8294a8">2023-01-31</text><text x="798.6" y="602" text-anchor="middle" font-size="11" fill="#8294a8">2023-07-31</text><text x="959.2" y="602" text-anchor="middle" font-size="11" fill="#8294a8">2023-12-31</text><text x="1151.9" y="602" text-anchor="middle" font-size="11" fill="#8294a8">2026-09-30</text></svg><svg viewBox="0 0 1240 270"><rect width="100%" height="100%" fill="#08131f"/><text x="76" y="25" font-size="17" font-weight="700" fill="#e6edf7">NOVARTIND Monthly RSI (14)</text><line x1="76" y1="175.0" x2="1168" y2="175.0" stroke="#526174" stroke-dasharray="6 6" opacity=".65"/><text x="1176" y="179.0" font-size="12" fill="#9fb0c3">30</text><line x1="76" y1="137.0" x2="1168" y2="137.0" stroke="#526174" stroke-dasharray="6 6" opacity=".65"/><text x="1176" y="141.0" font-size="12" fill="#9fb0c3">50</text><line x1="76" y1="99.0" x2="1168" y2="99.0" stroke="#526174" stroke-dasharray="6 6" opacity=".65"/><text x="1176" y="103.0" font-size="12" fill="#9fb0c3">70</text><polyline points="539.3,193.7 572.4,193.1 605.5,195.3 638.5,197.6 671.6,199.4 704.7,191.4 737.8,167.2 770.9,149.6 804.0,158.8 837.1,159.4 870.2,158.9 903.3,164.1 936.4,164.1 969.5,164.1 1002.5,115.5 1035.6,87.1 1068.7,99.9 1101.8,95.6 1134.9,94.9 1168.0,79.6" fill="none" stroke="#a970ff" stroke-width="2.2"/></svg></div>
-<div class="note">Cup / Cup with Handle markers, breakout level, price divergence and RSI divergence are drawn from the same scanner detections used for the Final List.</div>
+<div class="metric"><div class="muted">Detected Setup</div><div class="setup">Cup Pattern</div></div>
+</div>
+<div class="tabs" id="tabs"></div>
+<div class="toolbar"><span id="patternTitle"></span><span id="ohlc">Move mouse over candles for OHLC</span></div>
+<div id="chart" class="chartbox"></div>
+<div id="rsi" class="rsibox"></div>
+<div class="help">Mouse wheel = zoom · drag = move chart · hover = OHLC · Daily / Weekly / Monthly buttons show the exact scanner timeframe.</div>
 </div>
 <script>
-function showTF(tf,btn){
- document.querySelectorAll('.tfpanel').forEach(x=>x.classList.remove('active'));
- document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
- document.getElementById('panel-'+tf).classList.add('active'); btn.classList.add('active');
+const DATA={"Monthly":{"candles":[{"time":"2021-09-30","open":834.5999755859375,"high":844.5,"low":800.0499877929688,"close":817.9500122070312},{"time":"2021-10-31","open":818.0499877929688,"high":847.0,"low":732.4500122070312,"close":744.9000244140625},{"time":"2021-11-30","open":765.0,"high":927.0,"low":735.2999877929688,"close":782.8499755859375},{"time":"2021-12-31","open":783.1500244140625,"high":850.0,"low":756.0,"close":776.2000122070312},{"time":"2022-01-31","open":777.5999755859375,"high":799.0999755859375,"low":726.0,"close":738.9500122070312},{"time":"2022-02-28","open":741.0,"high":823.0,"low":618.0,"close":629.2999877929688},{"time":"2022-03-31","open":625.5499877929688,"high":655.5499877929688,"low":582.1500244140625,"close":589.7000122070312},{"time":"2022-04-30","open":596.2000122070312,"high":683.8499755859375,"low":589.25,"close":628.2999877929688},{"time":"2022-05-31","open":625.5,"high":631.0499877929688,"low":565.2999877929688,"close":590.0},{"time":"2022-06-30","open":588.0,"high":639.0,"low":572.8499755859375,"close":612.5499877929688},{"time":"2022-07-31","open":618.5999755859375,"high":760.0,"low":611.0,"close":723.5499877929688},{"time":"2022-08-31","open":725.2000122070312,"high":780.0,"low":700.0,"close":731.0999755859375},{"time":"2022-09-30","open":732.25,"high":742.25,"low":664.0999755859375,"close":680.4500122070312},{"time":"2022-10-31","open":681.0499877929688,"high":700.0,"low":664.3499755859375,"close":680.6500244140625},{"time":"2022-11-30","open":683.0,"high":718.5999755859375,"low":649.0,"close":671.9500122070312},{"time":"2022-12-31","open":673.9000244140625,"high":714.5999755859375,"low":652.0,"close":674.5499877929688},{"time":"2023-01-31","open":674.5499877929688,"high":680.5999755859375,"low":613.0,"close":637.5999755859375},{"time":"2023-02-28","open":636.0999755859375,"high":651.0,"low":586.2000122070312,"close":597.6500244140625},{"time":"2023-03-31","open":603.5499877929688,"high":609.4500122070312,"low":537.0,"close":563.7000122070312},{"time":"2023-04-30","open":563.7000122070312,"high":618.0,"low":563.7000122070312,"close":595.4000244140625},{"time":"2023-05-31","open":598.7999877929688,"high":747.6500244140625,"low":585.0499877929688,"close":706.5},{"time":"2023-06-30","open":707.4000244140625,"high":845.4000244140625,"low":704.0499877929688,"close":810.5499877929688},{"time":"2023-07-31","open":815.0999755859375,"high":909.0,"low":720.0,"close":723.4000244140625},{"time":"2023-08-31","open":723.4000244140625,"high":744.8499755859375,"low":701.6500244140625,"close":717.4500122070312},{"time":"2023-09-30","open":718.0,"high":761.75,"low":707.0999755859375,"close":720.3499755859375},{"time":"2023-10-31","open":724.7999877929688,"high":733.4000244140625,"low":668.3499755859375,"close":672.25},{"time":"2023-11-30","open":672.25,"high":672.25,"low":672.25,"close":672.25},{"time":"2023-12-31","open":672.25,"high":672.25,"low":672.25,"close":672.25},{"time":"2026-04-30","open":672.25,"high":1059.9000244140625,"low":672.25,"close":1030.5},{"time":"2026-05-31","open":1030.0,"high":1575.0,"low":1013.0,"close":1556.5999755859375},{"time":"2026-06-30","open":1575.0,"high":1589.199951171875,"low":1272.0999755859375,"close":1434.4000244140625},{"time":"2026-07-31","open":1430.0,"high":1780.0,"low":1430.0,"close":1537.0999755859375},{"time":"2026-08-31","open":1540.0999755859375,"high":1681.5999755859375,"low":1402.0,"close":1554.4000244140625},{"time":"2026-09-30","open":1546.5999755859375,"high":2588.800048828125,"low":1541.5999755859375,"close":2046.800048828125}],"volumes":[{"time":"2021-09-30","value":111273.0,"color":"rgba(239,83,80,0.45)"},{"time":"2021-10-31","value":394784.0,"color":"rgba(239,83,80,0.45)"},{"time":"2021-11-30","value":968219.0,"color":"rgba(38,166,154,0.45)"},{"time":"2021-12-31","value":506962.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-01-31","value":265718.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-02-28","value":348315.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-03-31","value":419946.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-04-30","value":292464.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-05-31","value":147685.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-06-30","value":179977.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-07-31","value":1034871.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-08-31","value":426699.0,"color":"rgba(38,166,154,0.45)"},{"time":"2022-09-30","value":183033.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-10-31","value":98307.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-11-30","value":177323.0,"color":"rgba(239,83,80,0.45)"},{"time":"2022-12-31","value":291439.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-01-31","value":104274.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-02-28","value":113811.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-03-31","value":261958.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-04-30","value":105465.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-05-31","value":632613.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-06-30","value":848179.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-07-31","value":1593226.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-08-31","value":449504.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-09-30","value":345648.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-10-31","value":192266.0,"color":"rgba(239,83,80,0.45)"},{"time":"2023-11-30","value":0.0,"color":"rgba(38,166,154,0.45)"},{"time":"2023-12-31","value":0.0,"color":"rgba(38,166,154,0.45)"},{"time":"2026-04-30","value":107443.0,"color":"rgba(38,166,154,0.45)"},{"time":"2026-05-31","value":989140.0,"color":"rgba(38,166,154,0.45)"},{"time":"2026-06-30","value":465010.0,"color":"rgba(239,83,80,0.45)"},{"time":"2026-07-31","value":1254285.0,"color":"rgba(38,166,154,0.45)"},{"time":"2026-08-31","value":305248.0,"color":"rgba(38,166,154,0.45)"},{"time":"2026-09-30","value":4715511.0,"color":"rgba(38,166,154,0.45)"}],"rsi":[{"time":"2022-11-30","value":20.156265230363644},{"time":"2022-12-31","value":20.47037000644302},{"time":"2023-01-31","value":19.30785712754802},{"time":"2023-02-28","value":18.11033146412629},{"time":"2023-03-31","value":17.13756575650352},{"time":"2023-04-30","value":21.383745555977143},{"time":"2023-05-31","value":34.12471359664303},{"time":"2023-06-30","value":43.3796855703744},{"time":"2023-07-31","value":38.50068462215684},{"time":"2023-08-31","value":38.18491405199073},{"time":"2023-09-30","value":38.449880837698934},{"time":"2023-10-31","value":35.7153144938347},{"time":"2023-11-30","value":35.7153144938347},{"time":"2023-12-31","value":35.7153144938347},{"time":"2026-04-30","value":61.31134046526109},{"time":"2026-05-31","value":76.26021645872234},{"time":"2026-06-30","value":69.53910090904954},{"time":"2026-07-31","value":71.78939661538185},{"time":"2026-08-31","value":72.1624658291603},{"time":"2026-09-30","value":80.19177285019165}],"markers":[{"time":"2021-10-31","position":"aboveBar","color":"#38bdf8","shape":"circle","text":"Left Rim"},{"time":"2022-05-31","position":"belowBar","color":"#38bdf8","shape":"circle","text":"Cup Bottom"},{"time":"2023-08-31","position":"aboveBar","color":"#38bdf8","shape":"circle","text":"Right Rim"},{"time":"2026-04-30","position":"belowBar","color":"#22c55e","shape":"circle","text":"Breakout"}],"priceLines":[{"price":785.8095040893553,"title":"Breakout / Resistance","color":"#f59e0b"}],"divergence":null,"rsiDivergence":null,"pattern":"Cup","status":"AFTER BREAKOUT"}};
+let chart=null,rsiChart=null;
+function addCandleSeriesCompat(ch, opts){
+  if(ch.addCandlestickSeries) return ch.addCandlestickSeries(opts);
+  return ch.addSeries(LightweightCharts.CandlestickSeries,opts);
 }
-</script></body></html>
+function addHistogramSeriesCompat(ch, opts){
+  if(ch.addHistogramSeries) return ch.addHistogramSeries(opts);
+  return ch.addSeries(LightweightCharts.HistogramSeries,opts);
+}
+function addLineSeriesCompat(ch, opts){
+  if(ch.addLineSeries) return ch.addLineSeries(opts);
+  return ch.addSeries(LightweightCharts.LineSeries,opts);
+}
+function destroyCharts(){
+  if(chart) chart.remove(); if(rsiChart) rsiChart.remove();
+  chart=null;rsiChart=null;
+}
+function render(tf){
+  destroyCharts();
+  const d=DATA[tf];
+  document.getElementById('patternTitle').textContent=tf+' · '+d.pattern+(d.status?' · '+d.status:'');
+  const common={
+    layout:{background:{color:'#08131f'},textColor:'#9fb0c3'},
+    grid:{vertLines:{color:'#162738'},horzLines:{color:'#162738'}},
+    rightPriceScale:{borderColor:'#29445a'},
+    timeScale:{borderColor:'#29445a',timeVisible:true},
+    crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
+    handleScroll:true,handleScale:true,
+  };
+  chart=LightweightCharts.createChart(document.getElementById('chart'),{...common,width:document.getElementById('chart').clientWidth,height:610});
+  const candles=addCandleSeriesCompat(chart,{upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
+  candles.setData(d.candles);
+  const vol=addHistogramSeriesCompat(chart,{priceFormat:{type:'volume'},priceScaleId:'volume'});
+  vol.priceScale().applyOptions({scaleMargins:{top:.82,bottom:0}});
+  vol.setData(d.volumes);
+  d.priceLines.forEach(x=>candles.createPriceLine({price:x.price,color:x.color,lineWidth:2,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:x.title}));
+  if(d.markers.length){
+    if(LightweightCharts.createSeriesMarkers) LightweightCharts.createSeriesMarkers(candles,d.markers);
+    else if(candles.setMarkers) candles.setMarkers(d.markers);
+  }
+  if(d.divergence){
+    const dl=addLineSeriesCompat(chart,{color:'#f87171',lineWidth:3,priceLineVisible:false,lastValueVisible:false});
+    dl.setData(d.divergence);
+  }
+  chart.timeScale().fitContent();
+
+  rsiChart=LightweightCharts.createChart(document.getElementById('rsi'),{...common,width:document.getElementById('rsi').clientWidth,height:220,rightPriceScale:{borderColor:'#29445a',autoScale:false}});
+  const rs=addLineSeriesCompat(rsiChart,{color:'#a970ff',lineWidth:2,priceLineVisible:false});
+  rs.setData(d.rsi);
+  [30,70].forEach(v=>rs.createPriceLine({price:v,color:'#64748b',lineWidth:1,lineStyle:LightweightCharts.LineStyle.Dashed,axisLabelVisible:true,title:'RSI '+v}));
+  if(d.rsiDivergence){
+    const rd=addLineSeriesCompat(rsiChart,{color:'#22c55e',lineWidth:3,priceLineVisible:false,lastValueVisible:false});
+    rd.setData(d.rsiDivergence);
+  }
+  rsiChart.timeScale().fitContent();
+
+  chart.subscribeCrosshairMove(p=>{
+    const bar=p.seriesData.get(candles);
+    document.getElementById('ohlc').textContent=bar ? `O ${bar.open.toFixed(2)}  H ${bar.high.toFixed(2)}  L ${bar.low.toFixed(2)}  C ${bar.close.toFixed(2)}` : 'Move mouse over candles for OHLC';
+  });
+}
+const tabs=document.getElementById('tabs');
+Object.keys(DATA).forEach(tf=>{
+ const b=document.createElement('button');b.className='tab'+(tf==='Monthly'?' active':'');b.textContent=tf;
+ b.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));b.classList.add('active');render(tf)};
+ tabs.appendChild(b);
+});
+render('Monthly');
+window.addEventListener('resize',()=>{
+ if(chart) chart.applyOptions({width:document.getElementById('chart').clientWidth});
+ if(rsiChart) rsiChart.applyOptions({width:document.getElementById('rsi').clientWidth});
+});
+</script>
+</body></html>
