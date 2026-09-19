@@ -1286,10 +1286,7 @@ def make_row(
             2,
         ),
 
-        "Chart Link": tradingview_link(
-            nse_code
-        ),
-    }
+        "Chart Link": f'=HYPERLINK("{tradingview_link(nse_code)}","TradingView")',
 
 
 # ============================================================
