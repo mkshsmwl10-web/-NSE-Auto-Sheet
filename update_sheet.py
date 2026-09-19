@@ -67,10 +67,7 @@ MIN_HISTORY_ROWS = 100
 # Pattern chart publishing
 # -------------------------
 CHART_OUTPUT_DIR = Path(os.environ.get("CHART_OUTPUT_DIR", "docs/charts"))
-CHART_BASE_URL = os.environ.get(
-    "CHART_BASE_URL",
-    "https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/charts",
-).strip().rstrip("/")
+CHART_BASE_URL = "https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/charts"
 
 
 # -------------------------
@@ -1539,178 +1536,130 @@ def make_row(
 # ============================================================
 
 def scan_stock(stock):
-    stock_name = stock["Stock Name"]
-    nse_code = stock["NSE Code"]
-
-    symbol = (
-        str(nse_code)
-        .strip()
-        .upper()
-    )
-
-    if symbol.endswith(".NS"):
-        symbol = symbol[:-3]
-
-    yahoo_symbol = (
-        symbol
-        + ".NS"
-    )
+    """Scan one stock and return at most ONE Final List row."""
+    stock_name = str(stock["Stock Name"]).strip()
+    nse_code = str(stock["NSE Code"]).strip()
 
     daily = download_ohlcv(
-        yahoo_symbol,
+        nse_code,
         period="5y",
         interval="1d",
     )
 
-    if (
-        daily is None
-        or len(daily) < MIN_HISTORY_ROWS
-    ):
+    if daily is None or len(daily) < MIN_HISTORY_ROWS:
         return []
 
-    cmp_price = float(
-        daily["close"].iloc[-1]
-    )
+    cmp_price = float(daily["close"].iloc[-1])
 
-    results = []
+    setup_names = []
+    chart_sections = []
 
-    # ========================================================
-    # SETUP A - DIVERGENCE
-    # ========================================================
-
-    divergence_setups, divergence_details = (
-        find_divergence_details(daily)
-    )
+    # Divergence: Classic / RSI remain separate setup names,
+    # but are combined into this stock's single row.
+    divergence_setups, divergence_details = find_divergence_details(daily)
 
     for setup in divergence_setups:
-        chart_url = generate_divergence_chart(
-            stock_name=stock_name,
-            nse_code=nse_code,
-            setup=setup,
-            daily=daily,
-            details=divergence_details,
-        )
+        if setup not in setup_names:
+            setup_names.append(setup)
 
-        results.append(
-            make_row(
-                stock_name=stock_name,
-                nse_code=nse_code,
-                setup=setup,
-                cmp_price=cmp_price,
-                chart_url=chart_url,
+        chart_sections.append(
+            _svg_price_chart(
+                daily,
+                marks={
+                    "i1": divergence_details["i1"],
+                    "i2": divergence_details["i2"],
+                },
+                title=f"{nse_code} Daily Price - {setup}",
+            )
+        )
+        chart_sections.append(
+            _svg_rsi_chart(
+                daily,
+                divergence_details,
+                title=f"{nse_code} RSI(14) - {setup}",
             )
         )
 
-    # ========================================================
-    # SETUP B - CUP PATTERN
-    # ========================================================
-
+    # Cup: scan all three timeframes independently.
     cup_results = {}
+    timeframe_frames = {
+        "Daily": daily,
+        "Weekly": resample_ohlcv(daily, "Weekly"),
+        "Monthly": resample_ohlcv(daily, "Monthly"),
+    }
 
-    for timeframe in (
-        "Daily",
-        "Weekly",
-        "Monthly",
-    ):
-        tf_df = resample_ohlcv(
-            daily,
-            timeframe,
-        )
-
+    for timeframe in ("Daily", "Weekly", "Monthly"):
         pattern, status, details = detect_cup(
-            tf_df,
+            timeframe_frames[timeframe],
             timeframe,
             return_details=True,
         )
+        cup_results[timeframe] = (pattern, status, details)
 
-        cup_results[timeframe] = (
-            pattern,
-            status,
-            details,
-        )
-
-    daily_pattern, daily_status = (
-        cup_results["Daily"][:2]
-    )
-
-    weekly_pattern, weekly_status = (
-        cup_results["Weekly"][:2]
-    )
-
-    monthly_pattern, monthly_status = (
-        cup_results["Monthly"][:2]
-    )
+    daily_pattern, daily_status = cup_results["Daily"][:2]
+    weekly_pattern, weekly_status = cup_results["Weekly"][:2]
+    monthly_pattern, monthly_status = cup_results["Monthly"][:2]
 
     cup_found = any(
         pattern is not None
-        for pattern, status, details
-        in cup_results.values()
+        for pattern, status, details in cup_results.values()
     )
 
     if cup_found:
-        cup_details = {
-            timeframe: values[2]
-            for timeframe, values in cup_results.items()
-            if values[0] is not None and values[2]
-        }
+        setup_names.append("Cup Pattern")
 
-        chart_url = generate_cup_chart(
+        for timeframe in ("Daily", "Weekly", "Monthly"):
+            pattern, status, details = cup_results[timeframe]
+            if pattern is None or not details:
+                continue
+
+            chart_sections.append(
+                _svg_price_chart(
+                    details["data"],
+                    marks={
+                        "li": details["li"],
+                        "bi": details["bi"],
+                        "ri": details["ri"],
+                        "breakout_index": details["breakout_index"],
+                        "breakout_level": details["breakout_level"],
+                    },
+                    title=(
+                        f"{nse_code} {timeframe} - "
+                        f"{pattern} | {status}"
+                    ),
+                    max_bars=260,
+                )
+            )
+
+    if not setup_names:
+        return []
+
+    # Exactly one chart page per stock containing every detected setup.
+    filename = f"{_safe_slug(nse_code)}-pattern-chart.html"
+    chart_url = _write_chart_page(
+        filename=filename,
+        stock_name=stock_name,
+        nse_code=nse_code,
+        setup=" + ".join(setup_names),
+        sections=chart_sections,
+    )
+
+    return [
+        make_row(
             stock_name=stock_name,
             nse_code=nse_code,
-            cup_details=cup_details,
+            setup=" + ".join(setup_names),
+            cmp_price=cmp_price,
+            daily_pattern=daily_pattern or "",
+            daily_status=daily_status or "",
+            weekly_pattern=weekly_pattern or "",
+            weekly_status=weekly_status or "",
+            monthly_pattern=monthly_pattern or "",
+            monthly_status=monthly_status or "",
+            chart_url=chart_url,
         )
+    ]
 
-        # Exactly ONE Cup Pattern row.
-        #
-        # It can contain:
-        # Daily Cup
-        # Weekly Cup
-        # Monthly Cup
-        #
-        # without mixing with divergence.
-        results.append(
-            make_row(
-                stock_name=stock_name,
-                nse_code=nse_code,
-                setup="Cup Pattern",
-                cmp_price=cmp_price,
-                chart_url=chart_url,
-
-                daily_pattern=(
-                    daily_pattern
-                    or ""
-                ),
-                daily_status=(
-                    daily_status
-                    or ""
-                ),
-
-                weekly_pattern=(
-                    weekly_pattern
-                    or ""
-                ),
-                weekly_status=(
-                    weekly_status
-                    or ""
-                ),
-
-                monthly_pattern=(
-                    monthly_pattern
-                    or ""
-                ),
-                monthly_status=(
-                    monthly_status
-                    or ""
-                ),
-            )
-        )
-
-    return results
-
-
-# ============================================================
-# MAIN
-# ============================================================
 
 def main():
     CHART_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
