@@ -164,10 +164,7 @@ def get_google_sheet():
 
 
 def write_final_list(rows):
-    """
-    Writes Final List using a FIXED column order.
-    This prevents column shifting caused by dictionary order or old fields.
-    """
+    """Write exact Final List columns and apply a clean light design."""
 
     sh = get_google_sheet()
 
@@ -197,28 +194,164 @@ def write_final_list(rows):
             row.get("Chart Link", ""),
         ])
 
+    # Clear old data and old dark/black formatting.
     ws.clear()
-
-    ws.update(
-        "A1",
-        output,
-        value_input_option="USER_ENTERED",
-    )
-
     try:
-        ws.freeze(rows=1)
+        ws.clear(format_only=True)
     except Exception:
         pass
 
+    try:
+        ws.resize(rows=max(len(output) + 10, 100), cols=11)
+    except Exception:
+        pass
+
+    ws.update("A1", output, value_input_option="USER_ENTERED")
+
+    last_row = max(len(output), 2)
+
+    try:
+        ws.freeze(rows=1, cols=2)
+    except Exception:
+        try:
+            ws.freeze(rows=1)
+        except Exception:
+            pass
+
+    # Light blue header - no black strip.
+    try:
+        ws.format("A1:K1", {
+            "backgroundColor": {"red": 0.82, "green": 0.91, "blue": 0.98},
+            "textFormat": {
+                "bold": True,
+                "fontSize": 10,
+                "foregroundColor": {"red": 0.08, "green": 0.16, "blue": 0.28},
+            },
+            "horizontalAlignment": "CENTER",
+            "verticalAlignment": "MIDDLE",
+            "wrapStrategy": "WRAP",
+            "borders": {
+                "bottom": {
+                    "style": "SOLID_MEDIUM",
+                    "color": {"red": 0.35, "green": 0.55, "blue": 0.75},
+                }
+            },
+        })
+
+        ws.format(f"A2:K{last_row}", {
+            "verticalAlignment": "MIDDLE",
+            "wrapStrategy": "WRAP",
+            "textFormat": {
+                "fontSize": 10,
+                "foregroundColor": {"red": 0.10, "green": 0.14, "blue": 0.20},
+            },
+        })
+
+        ws.format(f"A2:B{last_row}", {"textFormat": {"bold": True}})
+        ws.format(f"C2:I{last_row}", {"horizontalAlignment": "CENTER"})
+        ws.format(f"J2:J{last_row}", {
+            "horizontalAlignment": "RIGHT",
+            "numberFormat": {"type": "NUMBER", "pattern": "0.00"},
+        })
+
+        # Setup column: very light blue.
+        ws.format(f"C2:C{last_row}", {
+            "backgroundColor": {"red": 0.91, "green": 0.97, "blue": 1.00},
+            "textFormat": {"bold": True},
+            "horizontalAlignment": "CENTER",
+        })
+
+        # Status columns: soft cream/yellow.
+        for col in ("E", "G", "I"):
+            ws.format(f"{col}2:{col}{last_row}", {
+                "backgroundColor": {"red": 1.00, "green": 0.97, "blue": 0.86},
+                "textFormat": {"bold": True},
+                "horizontalAlignment": "CENTER",
+            })
+
+        # Chart links.
+        ws.format(f"K2:K{last_row}", {
+            "textFormat": {
+                "foregroundColor": {"red": 0.05, "green": 0.35, "blue": 0.80},
+                "underline": True,
+            },
+            "horizontalAlignment": "CENTER",
+        })
+
+    except Exception as exc:
+        print("Formatting warning:", exc)
+
+    # Alternating rows + sensible column widths.
+    try:
+        requests = []
+
+        for row_no in range(2, last_row + 1):
+            if row_no % 2 == 0:
+                requests.append({
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": ws.id,
+                            "startRowIndex": row_no - 1,
+                            "endRowIndex": row_no,
+                            "startColumnIndex": 0,
+                            "endColumnIndex": 11,
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "backgroundColor": {
+                                    "red": 0.965,
+                                    "green": 0.98,
+                                    "blue": 0.995,
+                                }
+                            }
+                        },
+                        "fields": "userEnteredFormat.backgroundColor",
+                    }
+                })
+
+        widths = [145, 115, 190, 145, 135, 145, 135, 145, 135, 90, 135]
+        for idx, width in enumerate(widths):
+            requests.append({
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": ws.id,
+                        "dimension": "COLUMNS",
+                        "startIndex": idx,
+                        "endIndex": idx + 1,
+                    },
+                    "properties": {"pixelSize": width},
+                    "fields": "pixelSize",
+                }
+            })
+
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {
+                    "sheetId": ws.id,
+                    "dimension": "ROWS",
+                    "startIndex": 0,
+                    "endIndex": 1,
+                },
+                "properties": {"pixelSize": 42},
+                "fields": "pixelSize",
+            }
+        })
+
+        if requests:
+            sh.batch_update({"requests": requests})
+
+    except Exception as exc:
+        print("Advanced formatting warning:", exc)
+
     print("")
     print("==========================================")
-    print("FINAL LIST UPDATED")
+    print("FINAL LIST UPDATED + CLEAN DESIGN")
     print("==========================================")
     print("Rows:", len(rows))
     print("Columns:", len(FINAL_COLUMNS))
-    print("Exact columns:")
-    for index, column in enumerate(FINAL_COLUMNS, start=1):
-        print(f"{index}. {column}")
+    print("Black header strip: REMOVED")
+    print("Header: LIGHT BLUE")
+    print("Frozen: Header + first 2 columns")
     print("==========================================")
 
 
