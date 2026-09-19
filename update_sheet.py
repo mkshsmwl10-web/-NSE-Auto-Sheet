@@ -69,7 +69,7 @@ MIN_HISTORY_ROWS = 100
 CHART_OUTPUT_DIR = Path(os.environ.get("CHART_OUTPUT_DIR", "docs/charts"))
 CHART_BASE_URL = os.environ.get(
     "CHART_BASE_URL",
-    "https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/charts",
+    "https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/charts",
 ).strip().rstrip("/")
 
 
