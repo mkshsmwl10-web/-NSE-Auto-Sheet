@@ -1314,145 +1314,141 @@ def pattern_chart_url(filename):
 
 
 def _svg_price_chart(df, marks=None, title="", max_bars=220):
-    """Create a dependency-free SVG close-price chart with scanner markers."""
+    """TradingView-style dark candlestick chart with volume + scanner markers."""
     marks = marks or {}
     data = df.copy().tail(max_bars).reset_index(drop=False)
     if data.empty:
         return "<p>No chart data.</p>"
 
-    # If original indices were supplied, convert them to the displayed tail.
     original_start = max(0, len(df) - len(data))
-    close = data["close"].astype(float).to_numpy()
+    opn = data["open"].astype(float).to_numpy()
     high = data["high"].astype(float).to_numpy()
     low = data["low"].astype(float).to_numpy()
+    close = data["close"].astype(float).to_numpy()
+    vol = data["volume"].astype(float).fillna(0).to_numpy() if "volume" in data else np.zeros(len(data))
 
-    width, height = 1120, 520
-    ml, mr, mt, mb = 72, 28, 50, 58
-    pw, ph = width - ml - mr, height - mt - mb
+    width, height = 1240, 620
+    ml, mr, mt, mb = 76, 72, 52, 55
+    price_h = 430
+    vol_top = mt + price_h + 8
+    vol_h = 75
+    pw = width - ml - mr
 
     y_min = float(np.nanmin(low))
     y_max = float(np.nanmax(high))
-    pad = max((y_max - y_min) * 0.08, max(abs(y_max), 1) * 0.005)
+    pad = max((y_max-y_min)*0.07, max(abs(y_max),1)*0.004)
     y_min -= pad
     y_max += pad
 
     def xpix(i):
-        return ml + (i / max(len(data) - 1, 1)) * pw
-
+        return ml + (i + 0.5) / max(len(data), 1) * pw
     def ypix(v):
-        return mt + (y_max - float(v)) / max(y_max - y_min, 1e-9) * ph
+        return mt + (y_max-float(v))/max(y_max-y_min,1e-9)*price_h
 
-    pts = " ".join(f"{xpix(i):.1f},{ypix(v):.1f}" for i, v in enumerate(close))
+    candle_w = max(2.0, min(9.0, pw/max(len(data),1)*0.62))
+    vmax = max(float(np.nanmax(vol)) if len(vol) else 0, 1)
+
     out = [
         f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="{html.escape(title)}">',
-        '<rect width="100%" height="100%" fill="#ffffff"/>',
-        f'<text x="{ml}" y="28" font-size="20" font-weight="700" fill="#172033">{html.escape(title)}</text>',
+        '<rect width="100%" height="100%" fill="#08131f"/>',
+        f'<text x="{ml}" y="30" font-size="20" font-weight="700" fill="#e6edf7">{html.escape(title)}</text>',
     ]
 
-    # Horizontal grid + labels.
+    # Grid / price labels
     for k in range(6):
-        v = y_min + (y_max - y_min) * k / 5
+        v = y_min + (y_max-y_min)*k/5
         y = ypix(v)
-        out.append(f'<line x1="{ml}" y1="{y:.1f}" x2="{width-mr}" y2="{y:.1f}" stroke="#e8edf3" stroke-width="1"/>')
-        out.append(f'<text x="{ml-8}" y="{y+4:.1f}" text-anchor="end" font-size="12" fill="#667085">{v:.2f}</text>')
+        out.append(f'<line x1="{ml}" y1="{y:.1f}" x2="{width-mr}" y2="{y:.1f}" stroke="#1b2b3b" stroke-width="1"/>')
+        out.append(f'<text x="{width-mr+8}" y="{y+4:.1f}" font-size="12" fill="#9fb0c3">{v:,.2f}</text>')
 
-    out.append(f'<polyline points="{pts}" fill="none" stroke="#1f5fbf" stroke-width="2.2"/>')
+    # Candles + volume
+    for i in range(len(data)):
+        x = xpix(i)
+        up = close[i] >= opn[i]
+        color = "#16b8a6" if up else "#ef5350"
+        out.append(f'<line x1="{x:.1f}" y1="{ypix(high[i]):.1f}" x2="{x:.1f}" y2="{ypix(low[i]):.1f}" stroke="{color}" stroke-width="1.3"/>')
+        y1, y2 = ypix(opn[i]), ypix(close[i])
+        top = min(y1,y2)
+        bh = max(abs(y2-y1),1.4)
+        out.append(f'<rect x="{x-candle_w/2:.1f}" y="{top:.1f}" width="{candle_w:.1f}" height="{bh:.1f}" fill="{color}" rx=".6"/>')
+        vh = (vol[i]/vmax)*vol_h if vmax else 0
+        out.append(f'<rect x="{x-candle_w/2:.1f}" y="{vol_top+vol_h-vh:.1f}" width="{candle_w:.1f}" height="{vh:.1f}" fill="{color}" opacity=".48"/>')
 
-    # Breakout level.
+    out.append(f'<text x="{ml}" y="{vol_top+14}" font-size="12" fill="#9fb0c3">Volume</text>')
+
+    # Breakout level
     if marks.get("breakout_level") is not None:
         by = ypix(marks["breakout_level"])
-        out.append(f'<line x1="{ml}" y1="{by:.1f}" x2="{width-mr}" y2="{by:.1f}" stroke="#d97706" stroke-width="2" stroke-dasharray="8 6"/>')
-        out.append(f'<text x="{width-mr-4}" y="{by-7:.1f}" text-anchor="end" font-size="12" font-weight="700" fill="#b45309">Breakout {marks["breakout_level"]:.2f}</text>')
+        out.append(f'<line x1="{ml}" y1="{by:.1f}" x2="{width-mr}" y2="{by:.1f}" stroke="#f59e0b" stroke-width="2" stroke-dasharray="8 6"/>')
+        out.append(f'<text x="{width-mr-5}" y="{by-8:.1f}" text-anchor="end" font-size="12" font-weight="700" fill="#fbbf24">Breakout {marks["breakout_level"]:,.2f}</text>')
 
-    # Scanner points.
-    point_specs = [
-        ("li", "Left Rim", "#7c3aed"),
-        ("bi", "Cup Bottom", "#dc2626"),
-        ("ri", "Right Rim", "#7c3aed"),
-        ("breakout_index", "Breakout", "#059669"),
-        ("i1", "Low 1", "#dc2626"),
-        ("i2", "Low 2", "#dc2626"),
-    ]
     mapped = {}
-    for key, label, color in point_specs:
+    point_specs = [
+        ("li","Left Rim","#38bdf8"), ("bi","Cup Bottom","#38bdf8"),
+        ("ri","Right Rim","#38bdf8"), ("breakout_index","Breakout","#34d399"),
+        ("i1","Price Low 1","#f87171"), ("i2","Price Low 2","#f87171"),
+    ]
+    for key,label,color in point_specs:
         idx = marks.get(key)
-        if idx is None:
-            continue
-        di = int(idx) - original_start
-        if di < 0 or di >= len(data):
-            continue
-        mapped[key] = di
-        val = float(close[di])
-        if key == "bi":
-            val = float(low[di])
-        out.append(f'<circle cx="{xpix(di):.1f}" cy="{ypix(val):.1f}" r="6" fill="{color}" stroke="#fff" stroke-width="2"/>')
-        out.append(f'<text x="{xpix(di):.1f}" y="{ypix(val)-12:.1f}" text-anchor="middle" font-size="12" font-weight="700" fill="{color}">{label}</text>')
+        if idx is None: continue
+        di = int(idx)-original_start
+        if not (0 <= di < len(data)): continue
+        mapped[key]=di
+        val = low[di] if key=="bi" else close[di]
+        out.append(f'<circle cx="{xpix(di):.1f}" cy="{ypix(val):.1f}" r="5.5" fill="{color}" stroke="#08131f" stroke-width="2"/>')
+        out.append(f'<text x="{xpix(di):.1f}" y="{ypix(val)-11:.1f}" text-anchor="middle" font-size="11" font-weight="700" fill="{color}">{label}</text>')
 
-    # Price divergence line.
+    # Smooth cup curve through exact scanner points
+    if all(k in mapped for k in ("li","bi","ri")):
+        a,b,c = mapped["li"],mapped["bi"],mapped["ri"]
+        x1,y1=xpix(a),ypix(close[a]); xb,yb=xpix(b),ypix(low[b]); x2,y2=xpix(c),ypix(close[c])
+        out.append(f'<path d="M{x1:.1f},{y1:.1f} Q{xb:.1f},{yb+55:.1f} {x2:.1f},{y2:.1f}" fill="none" stroke="#2f8cff" stroke-width="3"/>')
+
+    # Price divergence line
     if "i1" in mapped and "i2" in mapped:
-        a, b = mapped["i1"], mapped["i2"]
-        out.append(f'<line x1="{xpix(a):.1f}" y1="{ypix(close[a]):.1f}" x2="{xpix(b):.1f}" y2="{ypix(close[b]):.1f}" stroke="#dc2626" stroke-width="3"/>')
+        a,b=mapped["i1"],mapped["i2"]
+        out.append(f'<line x1="{xpix(a):.1f}" y1="{ypix(close[a]):.1f}" x2="{xpix(b):.1f}" y2="{ypix(close[b]):.1f}" stroke="#f87171" stroke-width="3"/>')
 
-    # Cup guide lines.
-    if all(k in mapped for k in ("li", "bi", "ri")):
-        a, b, c = mapped["li"], mapped["bi"], mapped["ri"]
-        guide = f"{xpix(a):.1f},{ypix(close[a]):.1f} {xpix(b):.1f},{ypix(low[b]):.1f} {xpix(c):.1f},{ypix(close[c]):.1f}"
-        out.append(f'<polyline points="{guide}" fill="none" stroke="#7c3aed" stroke-width="3" stroke-dasharray="7 5"/>')
-
-    # X-axis dates.
     dc = _date_col(data)
     dates = pd.to_datetime(data[dc], errors="coerce")
-    for i in np.linspace(0, len(data)-1, min(6, len(data)), dtype=int):
-        label = dates.iloc[i].strftime("%Y-%m-%d") if not pd.isna(dates.iloc[i]) else ""
-        out.append(f'<text x="{xpix(i):.1f}" y="{height-20}" text-anchor="middle" font-size="11" fill="#667085">{label}</text>')
+    for i in np.linspace(0,len(data)-1,min(7,len(data)),dtype=int):
+        lab = dates.iloc[i].strftime("%Y-%m-%d") if not pd.isna(dates.iloc[i]) else ""
+        out.append(f'<text x="{xpix(i):.1f}" y="{height-18}" text-anchor="middle" font-size="11" fill="#8294a8">{lab}</text>')
 
     out.append("</svg>")
     return "".join(out)
 
-
-def _svg_rsi_chart(df, details, title="RSI (14)", max_bars=220):
+def _svg_rsi_chart(df, details=None, title="RSI (14)", max_bars=220):
     data = df.copy()
     data["rsi14"] = calculate_rsi(data["close"].astype(float), 14)
-    original_start = max(0, len(data) - max_bars)
+    original_start = max(0, len(data)-max_bars)
     data = data.tail(max_bars).reset_index(drop=True)
 
-    width, height = 1120, 300
-    ml, mr, mt, mb = 72, 28, 45, 45
-    pw, ph = width - ml - mr, height - mt - mb
+    width,height=1240,270
+    ml,mr,mt,mb=76,72,42,38
+    pw,ph=width-ml-mr,height-mt-mb
+    def xpix(i): return ml+(i/max(len(data)-1,1))*pw
+    def ypix(v): return mt+(100-float(v))/100*ph
 
-    def xpix(i):
-        return ml + (i / max(len(data)-1, 1)) * pw
-    def ypix(v):
-        return mt + (100-float(v))/100 * ph
+    vals=data["rsi14"].to_numpy(dtype=float)
+    pts=" ".join(f"{xpix(i):.1f},{ypix(v):.1f}" for i,v in enumerate(vals) if np.isfinite(v))
+    out=[f'<svg viewBox="0 0 {width} {height}">',
+         '<rect width="100%" height="100%" fill="#08131f"/>',
+         f'<text x="{ml}" y="25" font-size="17" font-weight="700" fill="#e6edf7">{html.escape(title)}</text>']
+    for level in (30,50,70):
+        y=ypix(level)
+        out.append(f'<line x1="{ml}" y1="{y:.1f}" x2="{width-mr}" y2="{y:.1f}" stroke="#526174" stroke-dasharray="6 6" opacity=".65"/>')
+        out.append(f'<text x="{width-mr+8}" y="{y+4:.1f}" font-size="12" fill="#9fb0c3">{level}</text>')
+    out.append(f'<polyline points="{pts}" fill="none" stroke="#a970ff" stroke-width="2.2"/>')
 
-    vals = data["rsi14"].to_numpy(dtype=float)
-    pts = " ".join(
-        f"{xpix(i):.1f},{ypix(v):.1f}"
-        for i, v in enumerate(vals) if np.isfinite(v)
-    )
-
-    out = [
-        f'<svg viewBox="0 0 {width} {height}">',
-        '<rect width="100%" height="100%" fill="#fff"/>',
-        f'<text x="{ml}" y="26" font-size="18" font-weight="700" fill="#172033">{html.escape(title)}</text>',
-    ]
-    for level in (30, 50, 70):
-        y = ypix(level)
-        out.append(f'<line x1="{ml}" y1="{y:.1f}" x2="{width-mr}" y2="{y:.1f}" stroke="#e5e7eb" stroke-dasharray="6 5"/>')
-        out.append(f'<text x="{ml-8}" y="{y+4:.1f}" text-anchor="end" font-size="12" fill="#667085">{level}</text>')
-    out.append(f'<polyline points="{pts}" fill="none" stroke="#2563eb" stroke-width="2.2"/>')
-
-    i1 = int(details["i1"]) - original_start
-    i2 = int(details["i2"]) - original_start
-    if 0 <= i1 < len(data) and 0 <= i2 < len(data):
-        r1, r2 = float(details["rsi1"]), float(details["rsi2"])
-        out.append(f'<line x1="{xpix(i1):.1f}" y1="{ypix(r1):.1f}" x2="{xpix(i2):.1f}" y2="{ypix(r2):.1f}" stroke="#059669" stroke-width="3"/>')
-        for i, r, lab in ((i1, r1, "RSI Low 1"), (i2, r2, "RSI Low 2")):
-            out.append(f'<circle cx="{xpix(i):.1f}" cy="{ypix(r):.1f}" r="6" fill="#059669" stroke="#fff" stroke-width="2"/>')
-            out.append(f'<text x="{xpix(i):.1f}" y="{ypix(r)-12:.1f}" text-anchor="middle" font-size="12" font-weight="700" fill="#047857">{lab}: {r:.1f}</text>')
+    if details and details.get("i1") is not None and details.get("i2") is not None:
+        i1=int(details["i1"])-original_start; i2=int(details["i2"])-original_start
+        if 0<=i1<len(data) and 0<=i2<len(data):
+            r1=float(details["rsi1"]); r2=float(details["rsi2"])
+            out.append(f'<line x1="{xpix(i1):.1f}" y1="{ypix(r1):.1f}" x2="{xpix(i2):.1f}" y2="{ypix(r2):.1f}" stroke="#22c55e" stroke-width="3"/>')
+            out.append(f'<text x="{(xpix(i1)+xpix(i2))/2:.1f}" y="{min(ypix(r1),ypix(r2))-10:.1f}" text-anchor="middle" font-size="12" font-weight="700" fill="#4ade80">RSI Positive Divergence</text>')
     out.append("</svg>")
     return "".join(out)
-
 
 def _write_chart_page(filename, stock_name, nse_code, setup, sections):
     CHART_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -1543,6 +1539,97 @@ def generate_cup_chart(stock_name, nse_code, cup_details):
     return _write_chart_page(
         filename, stock_name, nse_code, "Cup Pattern", sections
     )
+
+
+
+def generate_unified_stock_chart(stock_name, nse_code, cmp_price, daily, cup_details, divergence_details, divergence_setups):
+    """One page: Daily/Weekly/Monthly candlestick charts; RSI lives under the same timeframe chart."""
+    filename = f"{_safe_slug(nse_code)}-all-patterns.html"
+    tf_data = {
+        "Daily": daily,
+        "Weekly": resample_ohlcv(daily, "Weekly"),
+        "Monthly": resample_ohlcv(daily, "Monthly"),
+    }
+
+    panels = []
+    tabs = []
+    first_active = None
+
+    for timeframe in ("Daily","Weekly","Monthly"):
+        details = cup_details.get(timeframe) or {}
+        has_div = timeframe == "Daily" and bool(divergence_setups)
+        if not details and not has_div:
+            continue
+        if first_active is None:
+            first_active = timeframe
+
+        marks = {}
+        pattern_text = "RSI Positive Divergence" if has_div else ""
+        status_text = ""
+        if details:
+            marks.update({
+                "li": details.get("li"), "bi": details.get("bi"), "ri": details.get("ri"),
+                "breakout_index": details.get("breakout_index"),
+                "breakout_level": details.get("breakout_level"),
+            })
+            pattern_text = details.get("pattern","")
+            status_text = details.get("status","")
+        if has_div and divergence_details:
+            marks["i1"] = divergence_details.get("i1")
+            marks["i2"] = divergence_details.get("i2")
+
+        tfdf = details.get("data") if details else tf_data[timeframe]
+        price = _svg_price_chart(
+            tfdf, marks=marks,
+            title=f"{nse_code} · {timeframe} Candles · {pattern_text} {status_text}",
+            max_bars=220 if timeframe=="Daily" else 180,
+        )
+        rsi_details = divergence_details if has_div else None
+        rsi = _svg_rsi_chart(
+            tfdf, details=rsi_details,
+            title=f"{nse_code} {timeframe} RSI (14)",
+            max_bars=220 if timeframe=="Daily" else 180,
+        )
+        active = " active" if timeframe == first_active else ""
+        panels.append(f'<div id="panel-{timeframe}" class="tfpanel{active}">{price}{rsi}</div>')
+        tabs.append(f'<button class="tab{active}" onclick="showTF(\'{timeframe}\',this)">{timeframe}</button>')
+
+    setups = []
+    if divergence_setups:
+        setups.extend(divergence_setups)
+    if cup_details:
+        setups.append("Cup Pattern")
+    setup_text = " + ".join(dict.fromkeys(setups)) or "Pattern"
+
+    page = f"""<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{html.escape(nse_code)} Pattern Chart</title>
+<style>
+*{{box-sizing:border-box}} body{{margin:0;background:#06111d;color:#e6edf7;font-family:Arial,Helvetica,sans-serif}}
+.wrap{{max-width:1320px;margin:auto;padding:16px}} .head{{display:grid;grid-template-columns:1.4fr .7fr 1fr;gap:12px;background:#0b1b2a;border:1px solid #173149;border-radius:14px;padding:18px}}
+h1{{margin:0;font-size:32px}} .muted{{color:#9fb0c3}} .metric{{padding:10px 14px;border-left:1px solid #244158}} .cmp{{font-size:25px;color:#2dd4bf;font-weight:700}}
+.setup{{color:#fbbf24;font-weight:700}} .tabs{{display:flex;gap:8px;margin:14px 0}} .tab{{background:#102235;color:#d8e4f0;border:1px solid #29445d;padding:10px 22px;border-radius:8px;cursor:pointer;font-size:15px}}
+.tab.active{{background:#0b63ce;border-color:#3b82f6;color:white}} .tfpanel{{display:none;border:1px solid #173149;border-radius:12px;overflow:hidden;background:#08131f;margin-bottom:14px}} .tfpanel.active{{display:block}}
+svg{{display:block;width:100%;height:auto}} .note{{background:#0b2a24;border:1px solid #126c58;color:#b8f5e7;padding:14px 18px;border-radius:10px;margin-top:14px}}
+@media(max-width:800px){{.head{{grid-template-columns:1fr}} .metric{{border-left:0;border-top:1px solid #244158}}}}
+</style></head><body><div class="wrap">
+<div class="head"><div><h1>{html.escape(stock_name)} ({html.escape(nse_code)})</h1><div class="muted">NSE Auto Sheet · Scanner-marked candlestick chart</div></div>
+<div class="metric"><div class="muted">CMP</div><div class="cmp">₹ {cmp_price:,.2f}</div></div>
+<div class="metric"><div class="muted">Detected Setup</div><div class="setup">{html.escape(setup_text)}</div></div></div>
+<div class="tabs">{''.join(tabs)}</div>
+{''.join(panels)}
+<div class="note">Cup / Cup with Handle markers, breakout level, price divergence and RSI divergence are drawn from the same scanner detections used for the Final List.</div>
+</div>
+<script>
+function showTF(tf,btn){{
+ document.querySelectorAll('.tfpanel').forEach(x=>x.classList.remove('active'));
+ document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+ document.getElementById('panel-'+tf).classList.add('active'); btn.classList.add('active');
+}}
+</script></body></html>"""
+    CHART_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    (CHART_OUTPUT_DIR/filename).write_text(page,encoding="utf-8")
+    return pattern_chart_url(filename)
 
 
 # ============================================================
@@ -1755,6 +1842,20 @@ def scan_stock(stock):
                 ),
             )
         )
+
+    # One unified chart page for this stock.
+    if results:
+        unified_url = generate_unified_stock_chart(
+            stock_name=stock_name,
+            nse_code=nse_code,
+            cmp_price=cmp_price,
+            daily=daily,
+            cup_details=cup_details if cup_found else {},
+            divergence_details=divergence_details,
+            divergence_setups=divergence_setups,
+        )
+        for _row in results:
+            _row["Chart Link"] = unified_url
 
     return results
 
