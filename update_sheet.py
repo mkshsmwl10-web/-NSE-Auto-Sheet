@@ -1536,130 +1536,320 @@ def make_row(
 # ============================================================
 
 def scan_stock(stock):
-    """Scan one stock and return at most ONE Final List row."""
-    stock_name = str(stock["Stock Name"]).strip()
-    nse_code = str(stock["NSE Code"]).strip()
+    stock_name = stock["Stock Name"]
+    nse_code = stock["NSE Code"]
+
+    symbol = (
+        str(nse_code)
+        .strip()
+        .upper()
+    )
+
+    if symbol.endswith(".NS"):
+        symbol = symbol[:-3]
+
+    yahoo_symbol = (
+        symbol
+        + ".NS"
+    )
 
     daily = download_ohlcv(
-        nse_code,
+        yahoo_symbol,
         period="5y",
         interval="1d",
     )
 
-    if daily is None or len(daily) < MIN_HISTORY_ROWS:
+    if (
+        daily is None
+        or len(daily) < MIN_HISTORY_ROWS
+    ):
         return []
 
-    cmp_price = float(daily["close"].iloc[-1])
+    cmp_price = float(
+        daily["close"].iloc[-1]
+    )
 
-    setup_names = []
-    chart_sections = []
+    results = []
 
-    # Divergence: Classic / RSI remain separate setup names,
-    # but are combined into this stock's single row.
-    divergence_setups, divergence_details = find_divergence_details(daily)
+    # ========================================================
+    # SETUP A - DIVERGENCE
+    # ========================================================
+
+    divergence_setups, divergence_details = (
+        find_divergence_details(daily)
+    )
 
     for setup in divergence_setups:
-        if setup not in setup_names:
-            setup_names.append(setup)
-
-        chart_sections.append(
-            _svg_price_chart(
-                daily,
-                marks={
-                    "i1": divergence_details["i1"],
-                    "i2": divergence_details["i2"],
-                },
-                title=f"{nse_code} Daily Price - {setup}",
-            )
+        chart_url = generate_divergence_chart(
+            stock_name=stock_name,
+            nse_code=nse_code,
+            setup=setup,
+            daily=daily,
+            details=divergence_details,
         )
-        chart_sections.append(
-            _svg_rsi_chart(
-                daily,
-                divergence_details,
-                title=f"{nse_code} RSI(14) - {setup}",
+
+        results.append(
+            make_row(
+                stock_name=stock_name,
+                nse_code=nse_code,
+                setup=setup,
+                cmp_price=cmp_price,
+                chart_url=chart_url,
             )
         )
 
-    # Cup: scan all three timeframes independently.
+    # ========================================================
+    # SETUP B - CUP PATTERN
+    # ========================================================
+
     cup_results = {}
-    timeframe_frames = {
-        "Daily": daily,
-        "Weekly": resample_ohlcv(daily, "Weekly"),
-        "Monthly": resample_ohlcv(daily, "Monthly"),
-    }
 
-    for timeframe in ("Daily", "Weekly", "Monthly"):
+    for timeframe in (
+        "Daily",
+        "Weekly",
+        "Monthly",
+    ):
+        tf_df = resample_ohlcv(
+            daily,
+            timeframe,
+        )
+
         pattern, status, details = detect_cup(
-            timeframe_frames[timeframe],
+            tf_df,
             timeframe,
             return_details=True,
         )
-        cup_results[timeframe] = (pattern, status, details)
 
-    daily_pattern, daily_status = cup_results["Daily"][:2]
-    weekly_pattern, weekly_status = cup_results["Weekly"][:2]
-    monthly_pattern, monthly_status = cup_results["Monthly"][:2]
+        cup_results[timeframe] = (
+            pattern,
+            status,
+            details,
+        )
+
+    daily_pattern, daily_status = (
+        cup_results["Daily"][:2]
+    )
+
+    weekly_pattern, weekly_status = (
+        cup_results["Weekly"][:2]
+    )
+
+    monthly_pattern, monthly_status = (
+        cup_results["Monthly"][:2]
+    )
 
     cup_found = any(
         pattern is not None
-        for pattern, status, details in cup_results.values()
+        for pattern, status, details
+        in cup_results.values()
     )
 
     if cup_found:
-        setup_names.append("Cup Pattern")
+        cup_details = {
+            timeframe: values[2]
+            for timeframe, values in cup_results.items()
+            if values[0] is not None and values[2]
+        }
 
-        for timeframe in ("Daily", "Weekly", "Monthly"):
-            pattern, status, details = cup_results[timeframe]
-            if pattern is None or not details:
-                continue
-
-            chart_sections.append(
-                _svg_price_chart(
-                    details["data"],
-                    marks={
-                        "li": details["li"],
-                        "bi": details["bi"],
-                        "ri": details["ri"],
-                        "breakout_index": details["breakout_index"],
-                        "breakout_level": details["breakout_level"],
-                    },
-                    title=(
-                        f"{nse_code} {timeframe} - "
-                        f"{pattern} | {status}"
-                    ),
-                    max_bars=260,
-                )
-            )
-
-    if not setup_names:
-        return []
-
-    # Exactly one chart page per stock containing every detected setup.
-    filename = f"{_safe_slug(nse_code)}-pattern-chart.html"
-    chart_url = _write_chart_page(
-        filename=filename,
-        stock_name=stock_name,
-        nse_code=nse_code,
-        setup=" + ".join(setup_names),
-        sections=chart_sections,
-    )
-
-    return [
-        make_row(
+        chart_url = generate_cup_chart(
             stock_name=stock_name,
             nse_code=nse_code,
-            setup=" + ".join(setup_names),
-            cmp_price=cmp_price,
-            daily_pattern=daily_pattern or "",
-            daily_status=daily_status or "",
-            weekly_pattern=weekly_pattern or "",
-            weekly_status=weekly_status or "",
-            monthly_pattern=monthly_pattern or "",
-            monthly_status=monthly_status or "",
-            chart_url=chart_url,
+            cup_details=cup_details,
         )
-    ]
 
+        # Exactly ONE Cup Pattern row.
+        #
+        # It can contain:
+        # Daily Cup
+        # Weekly Cup
+        # Monthly Cup
+        #
+        # without mixing with divergence.
+        results.append(
+            make_row(
+                stock_name=stock_name,
+                nse_code=nse_code,
+                setup="Cup Pattern",
+                cmp_price=cmp_price,
+                chart_url=chart_url,
+
+                daily_pattern=(
+                    daily_pattern
+                    or ""
+                ),
+                daily_status=(
+                    daily_status
+                    or ""
+                ),
+
+                weekly_pattern=(
+                    weekly_pattern
+                    or ""
+                ),
+                weekly_status=(
+                    weekly_status
+                    or ""
+                ),
+
+                monthly_pattern=(
+                    monthly_pattern
+                    or ""
+                ),
+                monthly_status=(
+                    monthly_status
+                    or ""
+                ),
+            )
+        )
+
+    return results
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+
+def _extract_hyperlink_url(formula):
+    match = re.search(r'=HYPERLINK\("([^"]+)"', str(formula or ""))
+    return match.group(1) if match else ""
+
+
+def _write_combined_stock_chart(nse_code, stock_name, rows):
+    """Create one stock page that shows all already-generated setup pages."""
+    urls = []
+    for row in rows:
+        url = _extract_hyperlink_url(row.get("Chart Link", ""))
+        if url and url not in urls:
+            urls.append(url)
+
+    if not urls:
+        return ""
+
+    # If there is only one setup page, use it directly.
+    if len(urls) == 1:
+        return urls[0]
+
+    filename = f"{_safe_slug(nse_code)}-all-patterns.html"
+
+    frames = []
+    for row in rows:
+        url = _extract_hyperlink_url(row.get("Chart Link", ""))
+        if not url:
+            continue
+
+        setup = html.escape(str(row.get("Setup", "")))
+        child_filename = url.rsplit("/", 1)[-1]
+
+        frames.append(
+            f"""
+            <section class="setup">
+              <h2>{setup}</h2>
+              <iframe
+                src="{html.escape(child_filename)}"
+                loading="lazy"
+                title="{setup}">
+              </iframe>
+            </section>
+            """
+        )
+
+    page = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{html.escape(str(nse_code))} - All Patterns</title>
+<style>
+body{{margin:0;background:#f5f7fb;font-family:Arial,Helvetica,sans-serif;color:#172033}}
+.wrap{{max-width:1250px;margin:22px auto;padding:0 14px}}
+.head{{background:#172033;color:#fff;padding:18px 22px;border-radius:14px}}
+.head h1{{margin:0}}
+.setup{{background:#fff;margin-top:18px;padding:14px;border-radius:14px;box-shadow:0 2px 12px rgba(16,24,40,.08)}}
+.setup h2{{margin:0 0 12px}}
+iframe{{width:100%;height:900px;border:0;border-radius:10px;background:#fff}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <h1>{html.escape(str(stock_name))} ({html.escape(str(nse_code))})</h1>
+    <p>All scanner-detected setups for this stock</p>
+  </div>
+  {''.join(frames)}
+</div>
+</body>
+</html>"""
+
+    CHART_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    (CHART_OUTPUT_DIR / filename).write_text(page, encoding="utf-8")
+    return pattern_chart_url(filename)
+
+
+def merge_rows_one_per_stock(results):
+    """
+    Preserve ALL original scanner detections, but display one Final List row
+    per NSE Code. No stock is discarded merely because it has multiple setups.
+    """
+    grouped = {}
+    order = []
+
+    for row in results:
+        code = str(row.get("NSE Code", "")).strip().upper()
+        if not code:
+            continue
+        if code not in grouped:
+            grouped[code] = []
+            order.append(code)
+        grouped[code].append(row)
+
+    merged = []
+
+    for code in order:
+        rows = grouped[code]
+        base = dict(rows[0])
+
+        setups = []
+        for row in rows:
+            setup = str(row.get("Setup", "")).strip()
+            if setup and setup not in setups:
+                setups.append(setup)
+
+        base["Setup"] = " + ".join(setups)
+
+        # Preserve Cup fields from whichever original row contains them.
+        for col in (
+            "Daily Pattern",
+            "Daily Status",
+            "Weekly Pattern",
+            "Weekly Status",
+            "Monthly Pattern",
+            "Monthly Status",
+        ):
+            value = ""
+            for row in rows:
+                candidate = str(row.get(col, "") or "").strip()
+                if candidate:
+                    value = row.get(col, "")
+                    break
+            base[col] = value
+
+        stock_name = str(base.get("Stock Name", code))
+        combined_url = _write_combined_stock_chart(
+            nse_code=code,
+            stock_name=stock_name,
+            rows=rows,
+        )
+
+        base["Chart Link"] = (
+            f'=HYPERLINK("{combined_url}","Pattern Chart")'
+            if combined_url
+            else ""
+        )
+
+        merged.append(base)
+
+    return merged
 
 def main():
     CHART_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -1732,6 +1922,13 @@ def main():
                 "|",
                 exc,
             )
+
+    # --------------------------------------------------------
+    # Final List display:
+    # ONE stock = ONE row, while preserving every detection.
+    # --------------------------------------------------------
+
+    results = merge_rows_one_per_stock(results)
 
     # --------------------------------------------------------
     # Sort:
