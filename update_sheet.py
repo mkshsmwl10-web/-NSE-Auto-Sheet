@@ -41,6 +41,7 @@ import json
 import re
 import html
 from pathlib import Path
+from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
@@ -1686,8 +1687,10 @@ h1{{font-size:23px;margin:0 0 5px;color:#f0f3fa}}
 
     CHART_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     (CHART_OUTPUT_DIR / filename).write_text(page, encoding="utf-8")
-    return pattern_chart_url(filename)
-
+    # Force the exact NSE symbol in TradingView.
+    # TradingView widgets officially recognize the tvwidgetsymbol URL parameter.
+    forced_symbol = f"NSE:{str(nse_code).strip().upper()}"
+    return pattern_chart_url(filename) + "?tvwidgetsymbol=" + quote(forced_symbol, safe="")
 
 
 def make_row(
