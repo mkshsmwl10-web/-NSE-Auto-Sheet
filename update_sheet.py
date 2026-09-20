@@ -41,7 +41,6 @@ import json
 import re
 import html
 from pathlib import Path
-from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
@@ -1553,19 +1552,21 @@ def generate_cup_chart(stock_name, nse_code, cup_details):
 
 def generate_unified_stock_chart(stock_name, nse_code, cmp_price, daily, cup_details, divergence_details, divergence_setups):
     """
-    Generate one page per stock containing the OFFICIAL TradingView Advanced Chart widget.
-    The default interval follows the scanner-detected timeframe:
-      Daily -> D, Weekly -> W, Monthly -> M
-    Scanner detection itself is unchanged.
+    Generate one TradingView page per stock.
+    IMPORTANT: the TradingView symbol is hard-coded into the generated HTML
+    as EXCHANGE:SYMBOL. We deliberately do NOT use tvwidgetsymbol here.
     """
+
     filename = f"{_safe_slug(nse_code)}-all-patterns.html"
 
     detected_tfs = []
     for tf in ("Daily", "Weekly", "Monthly"):
         if cup_details.get(tf):
             detected_tfs.append(tf)
+
     if divergence_setups and "Daily" not in detected_tfs:
         detected_tfs.insert(0, "Daily")
+
     if not detected_tfs:
         detected_tfs = ["Daily"]
 
@@ -1585,19 +1586,53 @@ def generate_unified_stock_chart(stock_name, nse_code, cmp_price, daily, cup_det
             pat = det.get("pattern", "Cup")
             st = det.get("status", "")
             status_bits.append(f"{tf}: {pat}" + (f" · {st}" if st else ""))
+
     if divergence_setups:
         status_bits.append("Daily: " + " + ".join(divergence_setups))
+
     scanner_summary = " | ".join(status_bits)
 
-    # TradingView NSE symbols use the NSE:SYMBOL convention.
-    tv_symbol = f"NSE:{nse_code}"
+    # Exact TradingView naming convention: EXCHANGE:SYMBOL
+    clean_code = str(nse_code).strip().upper()
+    if clean_code.endswith(".NS"):
+        clean_code = clean_code[:-3]
+    tv_symbol = f"NSE:{clean_code}"
+
+    # JSON is created explicitly so the generated page contains the exact
+    # stock symbol and cannot inherit an AAPL value from a query parameter.
+    widget_config = {
+        "autosize": True,
+        "symbol": tv_symbol,
+        "interval": interval,
+        "timezone": "Asia/Kolkata",
+        "theme": "dark",
+        "backgroundColor": "rgba(11, 14, 17, 1)",
+        "style": "1",
+        "locale": "en",
+        "withdateranges": True,
+        "hide_side_toolbar": False,
+        "allow_symbol_change": True,
+        "save_image": False,
+        "calendar": False,
+        "details": True,
+        "hotlist": False,
+        "show_popup_button": True,
+        "popup_width": "1200",
+        "popup_height": "750",
+        "studies": [
+            "RSI@tv-basicstudies",
+            "Volume@tv-basicstudies"
+        ],
+        "support_host": "https://www.tradingview.com"
+    }
+    widget_json = json.dumps(widget_config, ensure_ascii=False)
 
     page = f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{html.escape(nse_code)} · TradingView</title>
+<title>{html.escape(clean_code)} · TradingView</title>
 <style>
 *{{box-sizing:border-box}}
 html,body{{margin:0;height:100%;background:#0b0e11;color:#d1d4dc;font-family:Arial,Helvetica,sans-serif}}
@@ -1613,9 +1648,7 @@ h1{{font-size:23px;margin:0 0 5px;color:#f0f3fa}}
 .summary{{font-size:12px;color:#b2b5be;margin-top:5px;line-height:1.35}}
 .tvwrap{{flex:1;min-height:650px}}
 .tradingview-widget-container{{height:100%;width:100%}}
-.tradingview-widget-container__widget{{height:calc(100% - 28px);width:100%}}
-.tradingview-widget-copyright{{height:28px;padding:5px 10px;font-size:12px;background:#131722;color:#787b86}}
-.tradingview-widget-copyright a{{color:#2962ff;text-decoration:none}}
+.tradingview-widget-container__widget{{height:100%;width:100%}}
 @media(max-width:850px){{
  .scanner{{grid-template-columns:1fr}}
  .cell+.cell{{border-left:0;border-top:1px solid #2a2e39}}
@@ -1627,7 +1660,7 @@ h1{{font-size:23px;margin:0 0 5px;color:#f0f3fa}}
 <div class="page">
   <div class="scanner">
     <div class="cell">
-      <h1>{html.escape(stock_name)} ({html.escape(nse_code)})</h1>
+      <h1>{html.escape(stock_name)} ({html.escape(clean_code)})</h1>
       <div class="label">Scanner-marked setup</div>
       <div class="summary">{html.escape(scanner_summary)}</div>
     </div>
@@ -1638,47 +1671,16 @@ h1{{font-size:23px;margin:0 0 5px;color:#f0f3fa}}
     <div class="cell">
       <div class="label">Detected setup</div>
       <div class="value setup">{html.escape(setup_text)}</div>
-      <div class="summary">TradingView opens on scanner timeframe: {html.escape(default_tf)}</div>
+      <div class="summary">TradingView symbol: {html.escape(tv_symbol)} · scanner timeframe: {html.escape(default_tf)}</div>
     </div>
   </div>
 
   <div class="tvwrap">
     <div class="tradingview-widget-container">
       <div class="tradingview-widget-container__widget"></div>
-      <div class="tradingview-widget-copyright">
-        <a href="https://www.tradingview.com/symbols/{html.escape(nse_code)}/" rel="noopener nofollow" target="_blank">
-          {html.escape(nse_code)} chart
-        </a> by TradingView
-      </div>
       <script type="text/javascript"
         src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
-        async>
-      {{
-        "autosize": true,
-        "symbol": "{html.escape(tv_symbol)}",
-        "interval": "{interval}",
-        "timezone": "Asia/Kolkata",
-        "theme": "dark",
-        "backgroundColor": "rgba(11, 14, 17, 1)",
-        "style": "1",
-        "locale": "en",
-        "withdateranges": true,
-        "hide_side_toolbar": false,
-        "allow_symbol_change": true,
-        "save_image": false,
-        "calendar": false,
-        "details": true,
-        "hotlist": false,
-        "show_popup_button": true,
-        "popup_width": "1200",
-        "popup_height": "750",
-        "studies": [
-          "RSI@tv-basicstudies",
-          "Volume@tv-basicstudies"
-        ],
-        "support_host": "https://www.tradingview.com"
-      }}
-      </script>
+        async>{widget_json}</script>
     </div>
   </div>
 </div>
@@ -1687,10 +1689,9 @@ h1{{font-size:23px;margin:0 0 5px;color:#f0f3fa}}
 
     CHART_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     (CHART_OUTPUT_DIR / filename).write_text(page, encoding="utf-8")
-    # Force the exact NSE symbol in TradingView.
-    # TradingView widgets officially recognize the tvwidgetsymbol URL parameter.
-    forced_symbol = f"NSE:{str(nse_code).strip().upper()}"
-    return pattern_chart_url(filename) + "?tvwidgetsymbol=" + quote(forced_symbol, safe="")
+
+    # Cache-busting query only. Do not use tvwidgetsymbol.
+    return pattern_chart_url(filename) + "?v=3"
 
 
 def make_row(
