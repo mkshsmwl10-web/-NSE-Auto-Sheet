@@ -114,25 +114,107 @@ def make_monthly(daily):
 
 
 def calculate_dynamic_trend(df):
-    """Same-trend colour shifts reference; opposite colour flips only on reference break."""
-    if df is None or df.empty: return "NO DATA", None, None
-    w=df.dropna(subset=["Open","Close"]).copy()
-    if w.empty: return "NO DATA", None, None
-    s=0
-    while s<len(w) and float(w.iloc[s]["Close"])==float(w.iloc[s]["Open"]): s+=1
-    if s>=len(w): return "NO DATA", None, None
-    o=float(w.iloc[s]["Open"]); c=float(w.iloc[s]["Close"])
-    trend="POSITIVE" if c>o else "NEGATIVE"; ref=o; changed=w.index[s]
-    for i in range(s+1,len(w)):
-        o=float(w.iloc[i]["Open"]); c=float(w.iloc[i]["Close"])
-        green=c>o; red=c<o
-        if trend=="POSITIVE":
-            if green: ref=o
-            elif red and c<ref: trend="NEGATIVE"; ref=o; changed=w.index[i]
-        else:
-            if red: ref=o
-            elif green and c>ref: trend="POSITIVE"; ref=o; changed=w.index[i]
-    return trend, round(ref,2), changed
+    """
+    Dynamic trend + Big Candle / Inside Candle lock.
+
+    BIG candle is NOT ATR/body-size based.
+    A candle becomes the active container/trend candle. Any later candle whose
+    full High-Low range stays inside that active candle's High-Low range is a
+    SMALL/INSIDE candle. Inside candles never shift the reference Open.
+
+    POSITIVE:
+      * Active/reference candle is GREEN.
+      * Inside candles (green or red) do nothing.
+      * A non-inside GREEN candle continues POSITIVE and becomes the new active
+        candle; reference shifts to its Open.
+      * A RED candle flips NEGATIVE only if it closes below the active reference
+        Open. That RED candle becomes the new active candle/reference.
+      * Otherwise the red candle does not shift the reference.
+
+    NEGATIVE: exact reverse.
+      * Inside candles do nothing.
+      * A non-inside RED candle continues NEGATIVE and becomes the new active
+        candle; reference shifts to its Open.
+      * A GREEN candle flips POSITIVE only if it closes above the active
+        reference Open. That GREEN candle becomes the new active candle/reference.
+      * Otherwise the green candle does not shift the reference.
+    """
+    if df is None or df.empty:
+        return "NO DATA", None, None
+
+    work = df.dropna(subset=["Open", "High", "Low", "Close"]).copy()
+    if work.empty:
+        return "NO DATA", None, None
+
+    # First completed non-doji candle establishes the first trend/container.
+    start_i = 0
+    while start_i < len(work):
+        o = float(work.iloc[start_i]["Open"])
+        c = float(work.iloc[start_i]["Close"])
+        if c != o:
+            break
+        start_i += 1
+
+    if start_i >= len(work):
+        return "NO DATA", None, None
+
+    row = work.iloc[start_i]
+    active_open = float(row["Open"])
+    active_high = float(row["High"])
+    active_low = float(row["Low"])
+    active_close = float(row["Close"])
+
+    trend = "POSITIVE" if active_close > active_open else "NEGATIVE"
+    reference_open = active_open
+    last_change = work.index[start_i]
+
+    for i in range(start_i + 1, len(work)):
+        row = work.iloc[i]
+        o = float(row["Open"])
+        h = float(row["High"])
+        l = float(row["Low"])
+        c = float(row["Close"])
+
+        green = c > o
+        red = c < o
+
+        # Full candle is inside the active Big/Container candle:
+        # it is SMALL regardless of colour and cannot move the reference.
+        inside_active = (h <= active_high and l >= active_low)
+        if inside_active:
+            continue
+
+        if trend == "POSITIVE":
+            # Confirmed opposite-colour reversal.
+            if red and c < reference_open:
+                trend = "NEGATIVE"
+                reference_open = o
+                active_open, active_high, active_low = o, h, l
+                last_change = work.index[i]
+
+            # Same-trend colour outside active range: new active trend candle.
+            elif green:
+                reference_open = o
+                active_open, active_high, active_low = o, h, l
+
+            # Red without reversal: keep old active candle/reference locked.
+
+        elif trend == "NEGATIVE":
+            # Confirmed opposite-colour reversal.
+            if green and c > reference_open:
+                trend = "POSITIVE"
+                reference_open = o
+                active_open, active_high, active_low = o, h, l
+                last_change = work.index[i]
+
+            # Same-trend colour outside active range: new active trend candle.
+            elif red:
+                reference_open = o
+                active_open, active_high, active_low = o, h, l
+
+            # Green without reversal: keep old active candle/reference locked.
+
+    return trend, round(reference_open, 2), last_change
 
 
 def read_nifty200(book):
@@ -208,7 +290,7 @@ button.active { background:#2563eb; }
 .ohlc span { margin-right:14px; }
 .toolbar button.tool-active { background:#7c3aed; border-color:#a78bfa; }
 #chartWrap{position:relative;width:100%;height:650px} #chart{position:absolute;inset:0}
-#overlay{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none;overflow:visible}
+#drawCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none} #drawHit{position:absolute;inset:0;z-index:6;pointer-events:none;cursor:crosshair}
 @media(max-width:700px) {
   .status-grid { grid-template-columns:1fr; }
   #chartWrap { height:520px; }
@@ -231,17 +313,19 @@ button.active { background:#2563eb; }
   <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
   <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
   <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
-  <button id="toolH" onclick="drawH()">H-Line</button><button id="toolV" onclick="drawV()">V-Line</button>
-  <button id="toolT" onclick="drawTrend()">Trend Line</button><button id="toolR" onclick="drawRay()">Ray</button>
-  <button onclick="clearDrawings()">Clear Drawings</button>
+  <button id="toolH" onclick="drawH()">H-Line</button> <button id="toolV" onclick="drawV()">V-Line</button>
+  <button id="toolT" onclick="drawTrend()">Trend Line</button> <button id="toolR" onclick="drawRay()">Ray</button>
+  <button id="toolClear" onclick="clearDrawings()">Clear Drawings</button>
 </div>
 <div class="info" id="info"></div><div class="ohlc" id="ohlc">Move mouse over a candle to see OHLC</div>
-<div id="chartWrap"><div id="chart"></div><svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg></div>
+<div id="chartWrap"><div id="chart"></div><canvas id="drawCanvas"></canvas><div id="drawHit"></div></div>
 <script>
 const DATA = __DATA_JSON__;
 let chart = null;
 let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
-const overlay=document.getElementById("overlay");
+const drawCanvas=document.getElementById("drawCanvas");
+const drawHit=document.getElementById("drawHit");
+const pen=drawCanvas.getContext("2d");
 const ohlcBox=document.getElementById("ohlc");
 
 document.getElementById("title").textContent = DATA.name + " (" + DATA.code + ")";
@@ -263,7 +347,7 @@ function setupStatuses() {
 }
 
 function renderTF(tf) {
-  currentTF=tf; firstPoint=null; mode=null; overlay.style.pointerEvents="none"; redraw();
+  currentTF=tf; firstPoint=null; mode=null; drawHit.style.pointerEvents="none"; redraw();
   document.querySelectorAll(".toolbar button").forEach(b => b.classList.remove("active"));
   const btn = document.getElementById(tf);
   if (btn) btn.classList.add("active");
@@ -309,6 +393,7 @@ function renderTF(tf) {
   }
 
   chart.timeScale().fitContent();
+  setTimeout(resizeDrawingCanvas,0);
 }
 
 function fitChart(){if(chart)chart.timeScale().fitContent();}
@@ -322,87 +407,95 @@ function zoomBy(f){
 function fitChart(){ if(chart) chart.timeScale().fitContent(); }
 function resetChart(){ fitChart(); clearDrawings(); }
 
+function resizeDrawingCanvas(){
+  const r=drawCanvas.getBoundingClientRect();
+  const dpr=window.devicePixelRatio||1;
+  drawCanvas.width=Math.max(1,Math.round(r.width*dpr));
+  drawCanvas.height=Math.max(1,Math.round(r.height*dpr));
+  pen.setTransform(dpr,0,0,dpr,0,0);
+  redraw();
+}
 function setMode(m){
   mode=(mode===m?null:m);
   firstPoint=null;
-  overlay.style.pointerEvents=mode?"auto":"none";
+  drawHit.style.pointerEvents=mode?"auto":"none";
   document.querySelectorAll(".toolbar button").forEach(b=>b.classList.remove("tool-active"));
-  const map={h:"toolH",v:"toolV",t:"toolT",r:"toolR"};
-  if(mode && map[mode]) document.getElementById(map[mode]).classList.add("tool-active");
+  const ids={h:"toolH",v:"toolV",t:"toolT",r:"toolR"};
+  if(mode && ids[mode]) document.getElementById(ids[mode]).classList.add("tool-active");
 }
 function drawH(){setMode("h")}
 function drawV(){setMode("v")}
 function drawTrend(){setMode("t")}
 function drawRay(){setMode("r")}
-
 function clearDrawings(){
   drawings=[];
   firstPoint=null;
+  mode=null;
+  drawHit.style.pointerEvents="none";
+  document.querySelectorAll(".toolbar button").forEach(b=>b.classList.remove("tool-active"));
   redraw();
 }
-function point(e){
-  const r=overlay.getBoundingClientRect();
+function hitPoint(e){
+  const r=drawHit.getBoundingClientRect();
   return {x:e.clientX-r.left,y:e.clientY-r.top};
 }
-function svgLine(x1,y1,x2,y2){
-  const n=document.createElementNS("http://www.w3.org/2000/svg","line");
-  n.setAttribute("x1",x1); n.setAttribute("y1",y1);
-  n.setAttribute("x2",x2); n.setAttribute("y2",y2);
-  n.setAttribute("stroke","#f59e0b"); n.setAttribute("stroke-width","2");
-  overlay.appendChild(n);
+function line(x1,y1,x2,y2){
+  pen.beginPath(); pen.moveTo(x1,y1); pen.lineTo(x2,y2);
+  pen.strokeStyle="#f59e0b"; pen.lineWidth=2; pen.stroke();
 }
 function redraw(){
-  while(overlay.firstChild) overlay.removeChild(overlay.firstChild);
-  const r=overlay.getBoundingClientRect(), w=r.width, h=r.height;
+  const r=drawCanvas.getBoundingClientRect();
+  pen.clearRect(0,0,r.width,r.height);
   drawings.filter(d=>d.tf===currentTF).forEach(d=>{
-    if(d.k==="h") svgLine(0,d.a.y,w,d.a.y);
-    else if(d.k==="v") svgLine(d.a.x,0,d.a.x,h);
-    else if(d.k==="t") svgLine(d.a.x,d.a.y,d.b.x,d.b.y);
+    if(d.k==="h") line(0,d.a.y,r.width,d.a.y);
+    else if(d.k==="v") line(d.a.x,0,d.a.x,r.height);
+    else if(d.k==="t") line(d.a.x,d.a.y,d.b.x,d.b.y);
     else if(d.k==="r"){
-      const dx=d.b.x-d.a.x, dy=d.b.y-d.a.y;
-      if(Math.abs(dx)<0.001) svgLine(d.a.x,d.a.y,d.a.x,dy>=0?h:0);
+      const dx=d.b.x-d.a.x,dy=d.b.y-d.a.y;
+      if(Math.abs(dx)<0.001) line(d.a.x,d.a.y,d.a.x,dy>=0?r.height:0);
       else{
-        const tx=dx>=0?w:0, z=(tx-d.a.x)/dx;
-        svgLine(d.a.x,d.a.y,tx,d.a.y+z*dy);
+        const tx=dx>=0?r.width:0, q=(tx-d.a.x)/dx;
+        line(d.a.x,d.a.y,tx,d.a.y+q*dy);
       }
     }
   });
 }
-overlay.addEventListener("click",e=>{
+drawHit.addEventListener("click",e=>{
   if(!mode)return;
-  const p=point(e);
+  const p=hitPoint(e);
   if(mode==="h"||mode==="v"){
     drawings.push({tf:currentTF,k:mode,a:p});
-    redraw();
-    setMode(null);
-    return;
+    redraw(); setMode(null); return;
   }
-  if(!firstPoint) firstPoint=p;
-  else{
+  if(firstPoint===null){
+    firstPoint=p;
+  }else{
     drawings.push({tf:currentTF,k:mode,a:firstPoint,b:p});
-    firstPoint=null;
-    redraw();
-    setMode(null);
+    firstPoint=null; redraw(); setMode(null);
   }
 });
 
 function setupCrosshairOHLC(){
-  if(!chart || !candleSeries)return;
+  if(!chart||!candleSeries)return;
   chart.subscribeCrosshairMove(param=>{
     if(!param || !param.time){
-      ohlcBox.textContent="Move mouse over a candle to see OHLC";
+      ohlcBox.innerHTML="<span>Hover candle → OHLC</span>";
       return;
     }
-    const d=param.seriesData.get(candleSeries);
-    if(!d || d.open===undefined)return;
-    const date=typeof param.time==="string"?param.time:
-      (param.time.year+"-"+String(param.time.month).padStart(2,"0")+"-"+String(param.time.day).padStart(2,"0"));
-    ohlcBox.innerHTML=
-      "<span>"+date+"</span>"+
-      "<span>O "+Number(d.open).toFixed(2)+"</span>"+
-      "<span>H "+Number(d.high).toFixed(2)+"</span>"+
-      "<span>L "+Number(d.low).toFixed(2)+"</span>"+
-      "<span>C "+Number(d.close).toFixed(2)+"</span>";
+    const d=param.seriesData && param.seriesData.get(candleSeries);
+    if(!d || d.open===undefined){
+      ohlcBox.innerHTML="<span>Hover candle → OHLC</span>";
+      return;
+    }
+    let date="";
+    if(typeof param.time==="string") date=param.time;
+    else if(param.time.year) date=param.time.year+"-"+String(param.time.month).padStart(2,"0")+"-"+String(param.time.day).padStart(2,"0");
+    else date=String(param.time);
+    ohlcBox.innerHTML="<span>"+date+"</span>"+
+      "<span>O: "+Number(d.open).toFixed(2)+"</span>"+
+      "<span>H: "+Number(d.high).toFixed(2)+"</span>"+
+      "<span>L: "+Number(d.low).toFixed(2)+"</span>"+
+      "<span>C: "+Number(d.close).toFixed(2)+"</span>";
   });
 }
 
@@ -420,7 +513,7 @@ window.addEventListener("resize", () => {
   if (!chart) return;
   const holder = document.getElementById("chart");
   chart.applyOptions({ width:holder.clientWidth });
-  redraw();
+  resizeDrawingCanvas();
 });
 </script>
 </body>
@@ -432,7 +525,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=10"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=12"
 
     payload = {
         "name": stock_name,
