@@ -115,34 +115,70 @@ def make_monthly(daily):
 
 def calculate_dynamic_trend(df):
     """
-    Reversal-reference trend logic.
-    Reference Open changes ONLY when a trend reversal is confirmed.
+    Reversal-candle trend logic.
+
+    A GREEN candle can establish/confirm POSITIVE.
+    A RED candle can establish/confirm NEGATIVE.
+
+    POSITIVE:
+      - Keep the active Positive reversal candle Open fixed.
+      - Ignore ordinary red/green candles.
+      - Flip to NEGATIVE only when a completed RED candle closes
+        below the active Positive reversal Open.
+      - That RED candle's Open becomes the new Negative reversal Open.
+
+    NEGATIVE:
+      - Keep the active Negative reversal candle Open fixed.
+      - Ignore ordinary red/green candles.
+      - Flip to POSITIVE only when a completed GREEN candle closes
+        above the active Negative reversal Open.
+      - That GREEN candle's Open becomes the new Positive reversal Open.
+
+    This prevents a small green/doji candle below the Negative
+    reversal Open from incorrectly turning the trend POSITIVE.
     """
     if df is None or df.empty:
         return "NO DATA", None, None
 
-    work = df.dropna(subset=["Open", "Close"])
+    work = df.dropna(subset=["Open", "Close"]).copy()
     if work.empty:
         return "NO DATA", None, None
 
     first_open = float(work.iloc[0]["Open"])
     first_close = float(work.iloc[0]["Close"])
-    trend = "POSITIVE" if first_close >= first_open else "NEGATIVE"
-    reference_open = first_open
-    last_change = work.index[0]
 
-    for i in range(1, len(work)):
+    # Doji cannot create a fresh direction. Find the first directional candle.
+    start_i = 0
+    while start_i < len(work) and float(work.iloc[start_i]["Close"]) == float(work.iloc[start_i]["Open"]):
+        start_i += 1
+
+    if start_i >= len(work):
+        return "NO DATA", None, None
+
+    first_open = float(work.iloc[start_i]["Open"])
+    first_close = float(work.iloc[start_i]["Close"])
+    trend = "POSITIVE" if first_close > first_open else "NEGATIVE"
+    reference_open = first_open
+    last_change = work.index[start_i]
+
+    for i in range(start_i + 1, len(work)):
         candle_open = float(work.iloc[i]["Open"])
         candle_close = float(work.iloc[i]["Close"])
 
-        if trend == "POSITIVE" and candle_close < reference_open:
-            trend = "NEGATIVE"
-            reference_open = candle_open
-            last_change = work.index[i]
-        elif trend == "NEGATIVE" and candle_close > reference_open:
-            trend = "POSITIVE"
-            reference_open = candle_open
-            last_change = work.index[i]
+        is_green = candle_close > candle_open
+        is_red = candle_close < candle_open
+
+        if trend == "POSITIVE":
+            if is_red and candle_close < reference_open:
+                trend = "NEGATIVE"
+                reference_open = candle_open
+                last_change = work.index[i]
+
+        elif trend == "NEGATIVE":
+            if is_green and candle_close > reference_open:
+                trend = "POSITIVE"
+                reference_open = candle_open
+                last_change = work.index[i]
 
     return trend, round(reference_open, 2), last_change
 
@@ -340,7 +376,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=7"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=8"
 
     payload = {
         "name": stock_name,
