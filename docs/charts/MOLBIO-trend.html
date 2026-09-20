@@ -21,8 +21,11 @@ body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,
 button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
 button.active { background:#2563eb; }
 .info { padding:0 20px 10px; color:#cbd5e1; }
+.ohlc { padding:0 20px 10px; min-height:24px; color:#e2e8f0; font-weight:700; }
+.ohlc span { margin-right:14px; }
+.toolbar button.tool-active { background:#7c3aed; border-color:#a78bfa; }
 #chartWrap{position:relative;width:100%;height:650px} #chart{position:absolute;inset:0}
-#overlay{position:absolute;inset:0;z-index:5;pointer-events:none}
+#overlay{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none;overflow:visible}
 @media(max-width:700px) {
   .status-grid { grid-template-columns:1fr; }
   #chartWrap { height:520px; }
@@ -45,17 +48,18 @@ button.active { background:#2563eb; }
   <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
   <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
   <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
-  <button onclick="drawH()">H-Line</button><button onclick="drawV()">V-Line</button>
-  <button onclick="drawTrend()">Trend Line</button><button onclick="drawRay()">Ray</button>
+  <button id="toolH" onclick="drawH()">H-Line</button><button id="toolV" onclick="drawV()">V-Line</button>
+  <button id="toolT" onclick="drawTrend()">Trend Line</button><button id="toolR" onclick="drawRay()">Ray</button>
   <button onclick="clearDrawings()">Clear Drawings</button>
 </div>
-<div class="info" id="info"></div>
-<div id="chartWrap"><div id="chart"></div><canvas id="overlay"></canvas></div>
+<div class="info" id="info"></div><div class="ohlc" id="ohlc">Move mouse over a candle to see OHLC</div>
+<div id="chartWrap"><div id="chart"></div><svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg></div>
 <script>
 const DATA = {"name": "MOLBIO", "code": "MOLBIO", "cmp": 1288.3, "Daily": {"trend": "POSITIVE", "reference": 1271.0, "bars": [{"time": "2026-08-17", "open": 980.0, "high": 1064.75, "low": 926.35, "close": 1041.7}, {"time": "2026-08-18", "open": 1037.0, "high": 1177.0, "low": 1022.65, "close": 1110.9}, {"time": "2026-08-19", "open": 1085.0, "high": 1132.85, "low": 1012.0, "close": 1036.65}, {"time": "2026-08-20", "open": 1046.9, "high": 1083.5, "low": 1020.05, "close": 1036.65}, {"time": "2026-08-21", "open": 1047.05, "high": 1118.4, "low": 1041.2, "close": 1098.45}, {"time": "2026-08-24", "open": 1125.0, "high": 1219.95, "low": 1125.0, "close": 1199.3}, {"time": "2026-08-25", "open": 1224.15, "high": 1247.0, "low": 1180.05, "close": 1227.35}, {"time": "2026-08-26", "open": 1242.0, "high": 1264.6, "low": 1215.0, "close": 1238.85}, {"time": "2026-08-27", "open": 1234.0, "high": 1243.7, "low": 1130.1, "close": 1144.15}, {"time": "2026-08-28", "open": 1153.95, "high": 1156.1, "low": 1077.5, "close": 1094.75}, {"time": "2026-08-31", "open": 1102.1, "high": 1161.1, "low": 1065.2, "close": 1086.3}, {"time": "2026-09-01", "open": 1072.3, "high": 1089.2, "low": 1035.2, "close": 1053.3}, {"time": "2026-09-02", "open": 1047.2, "high": 1132.1, "low": 1043.8, "close": 1107.8}, {"time": "2026-09-03", "open": 1120.0, "high": 1141.8, "low": 1103.0, "close": 1135.2}, {"time": "2026-09-04", "open": 1139.9, "high": 1177.0, "low": 1117.2, "close": 1160.5}, {"time": "2026-09-07", "open": 1170.0, "high": 1183.7, "low": 1098.2, "close": 1127.2}, {"time": "2026-09-08", "open": 1127.2, "high": 1155.0, "low": 1110.2, "close": 1117.5}, {"time": "2026-09-09", "open": 1119.0, "high": 1293.5, "low": 1111.5, "close": 1257.9}, {"time": "2026-09-10", "open": 1271.0, "high": 1509.4, "low": 1271.0, "close": 1509.4}, {"time": "2026-09-11", "open": 1545.0, "high": 1686.8, "low": 1391.7, "close": 1438.2}, {"time": "2026-09-14", "open": 1438.2, "high": 1438.2, "low": 1438.2, "close": 1438.2}, {"time": "2026-09-15", "open": 1419.7, "high": 1419.7, "low": 1273.0, "close": 1356.8}, {"time": "2026-09-16", "open": 1385.0, "high": 1437.6, "low": 1196.2, "close": 1307.0}, {"time": "2026-09-17", "open": 1313.5, "high": 1382.0, "low": 1272.1, "close": 1285.3}, {"time": "2026-09-18", "open": 1297.1, "high": 1314.8, "low": 1262.2, "close": 1288.3}]}, "Weekly": {"trend": "POSITIVE", "reference": 1170.0, "bars": [{"time": "2026-08-21", "open": 980.0, "high": 1177.0, "low": 926.35, "close": 1098.45}, {"time": "2026-08-28", "open": 1125.0, "high": 1264.6, "low": 1077.5, "close": 1094.75}, {"time": "2026-09-04", "open": 1102.1, "high": 1177.0, "low": 1035.2, "close": 1160.5}, {"time": "2026-09-11", "open": 1170.0, "high": 1686.8, "low": 1098.2, "close": 1438.2}, {"time": "2026-09-18", "open": 1438.2, "high": 1438.2, "low": 1196.2, "close": 1288.3}]}, "Monthly": {"trend": "POSITIVE", "reference": 980.0, "bars": [{"time": "2026-08-31", "open": 980.0, "high": 1264.6, "low": 926.35, "close": 1086.3}]}};
 let chart = null;
 let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
-const overlay=document.getElementById("overlay"), pen=overlay.getContext("2d");
+const overlay=document.getElementById("overlay");
+const ohlcBox=document.getElementById("ohlc");
 
 document.getElementById("title").textContent = DATA.name + " (" + DATA.code + ")";
 document.getElementById("subtitle").textContent = "CMP: " + DATA.cmp;
@@ -76,7 +80,7 @@ function setupStatuses() {
 }
 
 function renderTF(tf) {
-  currentTF=tf; firstPoint=null;
+  currentTF=tf; firstPoint=null; mode=null; overlay.style.pointerEvents="none"; redraw();
   document.querySelectorAll(".toolbar button").forEach(b => b.classList.remove("active"));
   const btn = document.getElementById(tf);
   if (btn) btn.classList.add("active");
@@ -108,6 +112,7 @@ function renderTF(tf) {
   });
 
   candleSeries.setData(item.bars);
+  setupCrosshairOHLC();
 
   if (item.reference !== null) {
     candleSeries.createPriceLine({
@@ -121,24 +126,102 @@ function renderTF(tf) {
   }
 
   chart.timeScale().fitContent();
-  setTimeout(sizeOverlay,0);
 }
 
 function fitChart(){if(chart)chart.timeScale().fitContent();}
-function zoomBy(f){if(!chart)return;let t=chart.timeScale(),r=t.getVisibleLogicalRange();if(!r)return;let m=(r.from+r.to)/2,h=(r.to-r.from)*f/2;t.setVisibleLogicalRange({from:m-h,to:m+h});}
-function resetChart(){fitChart();clearDrawings();}
-function sizeOverlay(){let r=overlay.getBoundingClientRect(),d=window.devicePixelRatio||1;overlay.width=r.width*d;overlay.height=r.height*d;pen.setTransform(d,0,0,d,0,0);redraw();}
-function pick(e){let r=overlay.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
-function setMode(m){mode=m;firstPoint=null;overlay.style.pointerEvents="auto";}
-function drawH(){setMode("h")} function drawV(){setMode("v")} function drawTrend(){setMode("t")} function drawRay(){setMode("r")}
-function clearDrawings(){drawings=[];firstPoint=null;redraw();}
-function one(d){let w=overlay.getBoundingClientRect().width,h=overlay.getBoundingClientRect().height;pen.beginPath();pen.strokeStyle="#f59e0b";pen.lineWidth=2;
-if(d.k=="h"){pen.moveTo(0,d.a.y);pen.lineTo(w,d.a.y)}else if(d.k=="v"){pen.moveTo(d.a.x,0);pen.lineTo(d.a.x,h)}
-else if(d.k=="t"){pen.moveTo(d.a.x,d.a.y);pen.lineTo(d.b.x,d.b.y)}else{let dx=d.b.x-d.a.x,dy=d.b.y-d.a.y,x=dx>=0?w:0,t=(x-d.a.x)/(dx||.001);pen.moveTo(d.a.x,d.a.y);pen.lineTo(x,d.a.y+t*dy)}pen.stroke();}
-function redraw(){let r=overlay.getBoundingClientRect();pen.clearRect(0,0,r.width,r.height);drawings.filter(x=>x.tf==currentTF).forEach(one);}
-overlay.addEventListener("click",e=>{if(!mode)return;let p=pick(e);if(mode=="h"||mode=="v"){drawings.push({tf:currentTF,k:mode,a:p});redraw();mode=null;overlay.style.pointerEvents="none";return}
-if(!firstPoint)firstPoint=p;else{drawings.push({tf:currentTF,k:mode,a:firstPoint,b:p});firstPoint=null;redraw();mode=null;overlay.style.pointerEvents="none";}});
+function zoomBy(f){
+  if(!chart)return;
+  const t=chart.timeScale(), r=t.getVisibleLogicalRange();
+  if(!r)return;
+  const m=(r.from+r.to)/2, h=(r.to-r.from)*f/2;
+  t.setVisibleLogicalRange({from:m-h,to:m+h});
+}
+function fitChart(){ if(chart) chart.timeScale().fitContent(); }
+function resetChart(){ fitChart(); clearDrawings(); }
 
+function setMode(m){
+  mode=(mode===m?null:m);
+  firstPoint=null;
+  overlay.style.pointerEvents=mode?"auto":"none";
+  document.querySelectorAll(".toolbar button").forEach(b=>b.classList.remove("tool-active"));
+  const map={h:"toolH",v:"toolV",t:"toolT",r:"toolR"};
+  if(mode && map[mode]) document.getElementById(map[mode]).classList.add("tool-active");
+}
+function drawH(){setMode("h")}
+function drawV(){setMode("v")}
+function drawTrend(){setMode("t")}
+function drawRay(){setMode("r")}
+
+function clearDrawings(){
+  drawings=[];
+  firstPoint=null;
+  redraw();
+}
+function point(e){
+  const r=overlay.getBoundingClientRect();
+  return {x:e.clientX-r.left,y:e.clientY-r.top};
+}
+function svgLine(x1,y1,x2,y2){
+  const n=document.createElementNS("http://www.w3.org/2000/svg","line");
+  n.setAttribute("x1",x1); n.setAttribute("y1",y1);
+  n.setAttribute("x2",x2); n.setAttribute("y2",y2);
+  n.setAttribute("stroke","#f59e0b"); n.setAttribute("stroke-width","2");
+  overlay.appendChild(n);
+}
+function redraw(){
+  while(overlay.firstChild) overlay.removeChild(overlay.firstChild);
+  const r=overlay.getBoundingClientRect(), w=r.width, h=r.height;
+  drawings.filter(d=>d.tf===currentTF).forEach(d=>{
+    if(d.k==="h") svgLine(0,d.a.y,w,d.a.y);
+    else if(d.k==="v") svgLine(d.a.x,0,d.a.x,h);
+    else if(d.k==="t") svgLine(d.a.x,d.a.y,d.b.x,d.b.y);
+    else if(d.k==="r"){
+      const dx=d.b.x-d.a.x, dy=d.b.y-d.a.y;
+      if(Math.abs(dx)<0.001) svgLine(d.a.x,d.a.y,d.a.x,dy>=0?h:0);
+      else{
+        const tx=dx>=0?w:0, z=(tx-d.a.x)/dx;
+        svgLine(d.a.x,d.a.y,tx,d.a.y+z*dy);
+      }
+    }
+  });
+}
+overlay.addEventListener("click",e=>{
+  if(!mode)return;
+  const p=point(e);
+  if(mode==="h"||mode==="v"){
+    drawings.push({tf:currentTF,k:mode,a:p});
+    redraw();
+    setMode(null);
+    return;
+  }
+  if(!firstPoint) firstPoint=p;
+  else{
+    drawings.push({tf:currentTF,k:mode,a:firstPoint,b:p});
+    firstPoint=null;
+    redraw();
+    setMode(null);
+  }
+});
+
+function setupCrosshairOHLC(){
+  if(!chart || !candleSeries)return;
+  chart.subscribeCrosshairMove(param=>{
+    if(!param || !param.time){
+      ohlcBox.textContent="Move mouse over a candle to see OHLC";
+      return;
+    }
+    const d=param.seriesData.get(candleSeries);
+    if(!d || d.open===undefined)return;
+    const date=typeof param.time==="string"?param.time:
+      (param.time.year+"-"+String(param.time.month).padStart(2,"0")+"-"+String(param.time.day).padStart(2,"0"));
+    ohlcBox.innerHTML=
+      "<span>"+date+"</span>"+
+      "<span>O "+Number(d.open).toFixed(2)+"</span>"+
+      "<span>H "+Number(d.high).toFixed(2)+"</span>"+
+      "<span>L "+Number(d.low).toFixed(2)+"</span>"+
+      "<span>C "+Number(d.close).toFixed(2)+"</span>";
+  });
+}
 
 setupStatuses();
 try {
@@ -154,7 +237,7 @@ window.addEventListener("resize", () => {
   if (!chart) return;
   const holder = document.getElementById("chart");
   chart.applyOptions({ width:holder.clientWidth });
-  sizeOverlay();
+  redraw();
 });
 </script>
 </body>

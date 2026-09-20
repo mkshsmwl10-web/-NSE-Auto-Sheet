@@ -21,8 +21,11 @@ body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,
 button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
 button.active { background:#2563eb; }
 .info { padding:0 20px 10px; color:#cbd5e1; }
+.ohlc { padding:0 20px 10px; min-height:24px; color:#e2e8f0; font-weight:700; }
+.ohlc span { margin-right:14px; }
+.toolbar button.tool-active { background:#7c3aed; border-color:#a78bfa; }
 #chartWrap{position:relative;width:100%;height:650px} #chart{position:absolute;inset:0}
-#overlay{position:absolute;inset:0;z-index:5;pointer-events:none}
+#overlay{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none;overflow:visible}
 @media(max-width:700px) {
   .status-grid { grid-template-columns:1fr; }
   #chartWrap { height:520px; }
@@ -45,17 +48,18 @@ button.active { background:#2563eb; }
   <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
   <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
   <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
-  <button onclick="drawH()">H-Line</button><button onclick="drawV()">V-Line</button>
-  <button onclick="drawTrend()">Trend Line</button><button onclick="drawRay()">Ray</button>
+  <button id="toolH" onclick="drawH()">H-Line</button><button id="toolV" onclick="drawV()">V-Line</button>
+  <button id="toolT" onclick="drawTrend()">Trend Line</button><button id="toolR" onclick="drawRay()">Ray</button>
   <button onclick="clearDrawings()">Clear Drawings</button>
 </div>
-<div class="info" id="info"></div>
-<div id="chartWrap"><div id="chart"></div><canvas id="overlay"></canvas></div>
+<div class="info" id="info"></div><div class="ohlc" id="ohlc">Move mouse over a candle to see OHLC</div>
+<div id="chartWrap"><div id="chart"></div><svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg></div>
 <script>
 const DATA = {"name": "LUMINO", "code": "LUMINO", "cmp": 111.52, "Daily": {"trend": "POSITIVE", "reference": 109.4, "bars": [{"time": "2026-09-03", "open": 110.0, "high": 118.99, "low": 106.54, "close": 110.32}, {"time": "2026-09-04", "open": 112.4, "high": 122.0, "low": 111.22, "close": 114.5}, {"time": "2026-09-07", "open": 116.75, "high": 121.0, "low": 114.4, "close": 114.82}, {"time": "2026-09-08", "open": 116.23, "high": 118.0, "low": 107.2, "close": 108.12}, {"time": "2026-09-09", "open": 109.6, "high": 110.25, "low": 105.41, "close": 106.32}, {"time": "2026-09-10", "open": 106.49, "high": 110.75, "low": 102.5, "close": 107.93}, {"time": "2026-09-11", "open": 106.0, "high": 112.8, "low": 105.65, "close": 108.81}, {"time": "2026-09-14", "open": 108.81, "high": 108.81, "low": 108.81, "close": 108.81}, {"time": "2026-09-15", "open": 109.7, "high": 110.64, "low": 100.62, "close": 103.16}, {"time": "2026-09-16", "open": 102.99, "high": 102.99, "low": 98.05, "close": 100.29}, {"time": "2026-09-17", "open": 100.1, "high": 108.6, "low": 98.51, "close": 107.14}, {"time": "2026-09-18", "open": 109.4, "high": 112.9, "low": 107.2, "close": 111.52}]}, "Weekly": {"trend": "NEGATIVE", "reference": 116.75, "bars": [{"time": "2026-09-04", "open": 110.0, "high": 122.0, "low": 106.54, "close": 114.5}, {"time": "2026-09-11", "open": 116.75, "high": 121.0, "low": 102.5, "close": 108.81}, {"time": "2026-09-18", "open": 108.81, "high": 112.9, "low": 98.05, "close": 111.52}]}, "Monthly": {"trend": "NO DATA", "reference": null, "bars": []}};
 let chart = null;
 let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
-const overlay=document.getElementById("overlay"), pen=overlay.getContext("2d");
+const overlay=document.getElementById("overlay");
+const ohlcBox=document.getElementById("ohlc");
 
 document.getElementById("title").textContent = DATA.name + " (" + DATA.code + ")";
 document.getElementById("subtitle").textContent = "CMP: " + DATA.cmp;
@@ -76,7 +80,7 @@ function setupStatuses() {
 }
 
 function renderTF(tf) {
-  currentTF=tf; firstPoint=null;
+  currentTF=tf; firstPoint=null; mode=null; overlay.style.pointerEvents="none"; redraw();
   document.querySelectorAll(".toolbar button").forEach(b => b.classList.remove("active"));
   const btn = document.getElementById(tf);
   if (btn) btn.classList.add("active");
@@ -108,6 +112,7 @@ function renderTF(tf) {
   });
 
   candleSeries.setData(item.bars);
+  setupCrosshairOHLC();
 
   if (item.reference !== null) {
     candleSeries.createPriceLine({
@@ -121,24 +126,102 @@ function renderTF(tf) {
   }
 
   chart.timeScale().fitContent();
-  setTimeout(sizeOverlay,0);
 }
 
 function fitChart(){if(chart)chart.timeScale().fitContent();}
-function zoomBy(f){if(!chart)return;let t=chart.timeScale(),r=t.getVisibleLogicalRange();if(!r)return;let m=(r.from+r.to)/2,h=(r.to-r.from)*f/2;t.setVisibleLogicalRange({from:m-h,to:m+h});}
-function resetChart(){fitChart();clearDrawings();}
-function sizeOverlay(){let r=overlay.getBoundingClientRect(),d=window.devicePixelRatio||1;overlay.width=r.width*d;overlay.height=r.height*d;pen.setTransform(d,0,0,d,0,0);redraw();}
-function pick(e){let r=overlay.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
-function setMode(m){mode=m;firstPoint=null;overlay.style.pointerEvents="auto";}
-function drawH(){setMode("h")} function drawV(){setMode("v")} function drawTrend(){setMode("t")} function drawRay(){setMode("r")}
-function clearDrawings(){drawings=[];firstPoint=null;redraw();}
-function one(d){let w=overlay.getBoundingClientRect().width,h=overlay.getBoundingClientRect().height;pen.beginPath();pen.strokeStyle="#f59e0b";pen.lineWidth=2;
-if(d.k=="h"){pen.moveTo(0,d.a.y);pen.lineTo(w,d.a.y)}else if(d.k=="v"){pen.moveTo(d.a.x,0);pen.lineTo(d.a.x,h)}
-else if(d.k=="t"){pen.moveTo(d.a.x,d.a.y);pen.lineTo(d.b.x,d.b.y)}else{let dx=d.b.x-d.a.x,dy=d.b.y-d.a.y,x=dx>=0?w:0,t=(x-d.a.x)/(dx||.001);pen.moveTo(d.a.x,d.a.y);pen.lineTo(x,d.a.y+t*dy)}pen.stroke();}
-function redraw(){let r=overlay.getBoundingClientRect();pen.clearRect(0,0,r.width,r.height);drawings.filter(x=>x.tf==currentTF).forEach(one);}
-overlay.addEventListener("click",e=>{if(!mode)return;let p=pick(e);if(mode=="h"||mode=="v"){drawings.push({tf:currentTF,k:mode,a:p});redraw();mode=null;overlay.style.pointerEvents="none";return}
-if(!firstPoint)firstPoint=p;else{drawings.push({tf:currentTF,k:mode,a:firstPoint,b:p});firstPoint=null;redraw();mode=null;overlay.style.pointerEvents="none";}});
+function zoomBy(f){
+  if(!chart)return;
+  const t=chart.timeScale(), r=t.getVisibleLogicalRange();
+  if(!r)return;
+  const m=(r.from+r.to)/2, h=(r.to-r.from)*f/2;
+  t.setVisibleLogicalRange({from:m-h,to:m+h});
+}
+function fitChart(){ if(chart) chart.timeScale().fitContent(); }
+function resetChart(){ fitChart(); clearDrawings(); }
 
+function setMode(m){
+  mode=(mode===m?null:m);
+  firstPoint=null;
+  overlay.style.pointerEvents=mode?"auto":"none";
+  document.querySelectorAll(".toolbar button").forEach(b=>b.classList.remove("tool-active"));
+  const map={h:"toolH",v:"toolV",t:"toolT",r:"toolR"};
+  if(mode && map[mode]) document.getElementById(map[mode]).classList.add("tool-active");
+}
+function drawH(){setMode("h")}
+function drawV(){setMode("v")}
+function drawTrend(){setMode("t")}
+function drawRay(){setMode("r")}
+
+function clearDrawings(){
+  drawings=[];
+  firstPoint=null;
+  redraw();
+}
+function point(e){
+  const r=overlay.getBoundingClientRect();
+  return {x:e.clientX-r.left,y:e.clientY-r.top};
+}
+function svgLine(x1,y1,x2,y2){
+  const n=document.createElementNS("http://www.w3.org/2000/svg","line");
+  n.setAttribute("x1",x1); n.setAttribute("y1",y1);
+  n.setAttribute("x2",x2); n.setAttribute("y2",y2);
+  n.setAttribute("stroke","#f59e0b"); n.setAttribute("stroke-width","2");
+  overlay.appendChild(n);
+}
+function redraw(){
+  while(overlay.firstChild) overlay.removeChild(overlay.firstChild);
+  const r=overlay.getBoundingClientRect(), w=r.width, h=r.height;
+  drawings.filter(d=>d.tf===currentTF).forEach(d=>{
+    if(d.k==="h") svgLine(0,d.a.y,w,d.a.y);
+    else if(d.k==="v") svgLine(d.a.x,0,d.a.x,h);
+    else if(d.k==="t") svgLine(d.a.x,d.a.y,d.b.x,d.b.y);
+    else if(d.k==="r"){
+      const dx=d.b.x-d.a.x, dy=d.b.y-d.a.y;
+      if(Math.abs(dx)<0.001) svgLine(d.a.x,d.a.y,d.a.x,dy>=0?h:0);
+      else{
+        const tx=dx>=0?w:0, z=(tx-d.a.x)/dx;
+        svgLine(d.a.x,d.a.y,tx,d.a.y+z*dy);
+      }
+    }
+  });
+}
+overlay.addEventListener("click",e=>{
+  if(!mode)return;
+  const p=point(e);
+  if(mode==="h"||mode==="v"){
+    drawings.push({tf:currentTF,k:mode,a:p});
+    redraw();
+    setMode(null);
+    return;
+  }
+  if(!firstPoint) firstPoint=p;
+  else{
+    drawings.push({tf:currentTF,k:mode,a:firstPoint,b:p});
+    firstPoint=null;
+    redraw();
+    setMode(null);
+  }
+});
+
+function setupCrosshairOHLC(){
+  if(!chart || !candleSeries)return;
+  chart.subscribeCrosshairMove(param=>{
+    if(!param || !param.time){
+      ohlcBox.textContent="Move mouse over a candle to see OHLC";
+      return;
+    }
+    const d=param.seriesData.get(candleSeries);
+    if(!d || d.open===undefined)return;
+    const date=typeof param.time==="string"?param.time:
+      (param.time.year+"-"+String(param.time.month).padStart(2,"0")+"-"+String(param.time.day).padStart(2,"0"));
+    ohlcBox.innerHTML=
+      "<span>"+date+"</span>"+
+      "<span>O "+Number(d.open).toFixed(2)+"</span>"+
+      "<span>H "+Number(d.high).toFixed(2)+"</span>"+
+      "<span>L "+Number(d.low).toFixed(2)+"</span>"+
+      "<span>C "+Number(d.close).toFixed(2)+"</span>";
+  });
+}
 
 setupStatuses();
 try {
@@ -154,7 +237,7 @@ window.addEventListener("resize", () => {
   if (!chart) return;
   const holder = document.getElementById("chart");
   chart.applyOptions({ width:holder.clientWidth });
-  sizeOverlay();
+  redraw();
 });
 </script>
 </body>
