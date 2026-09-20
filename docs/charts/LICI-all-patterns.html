@@ -32,7 +32,7 @@ button:hover,button.active{background:#2962ff;color:white;border-color:#2962ff}
 <div class="toolbar">
  <button data-tf="Daily">1D</button><button data-tf="Weekly">1W</button><button data-tf="Monthly">1M</button>
  <span class="sep"></span>
- <button id="fit">Fit</button><button id="reset">Reset Zoom</button>
+ <button id="fit">Pattern Zoom</button><button id="all">All Data</button><button id="reset">Reset Zoom</button>
  <span class="sep"></span>
  <button id="patterns" class="active">Patterns ON</button>
  <button id="rsiToggle" class="active">RSI ON</button>
@@ -108,7 +108,30 @@ function render(timeframe){
  const marks=(DATA.markers[tf]||[]).map((m,i)=>Object.assign({color:i%2?'#f0b90b':'#2962ff'},m));
  if(patternVisible && marks.length) markerApi=LC.createSeriesMarkers(candle,marks,{autoScale:true});
 
- priceChart.timeScale().fitContent(); rsiChart.timeScale().fitContent();
+ // Smart initial zoom around the detected scanner pattern.
+ const bars = DATA.frames[tf] || [];
+ const ds = DATA.drawings[tf] || [];
+ let anchorTimes = [];
+ ds.forEach(d => (d.points || []).forEach(p => { if (p.time) anchorTimes.push(p.time); }));
+
+ let fromIndex = Math.max(0, bars.length - (tf === 'Daily' ? 120 : tf === 'Weekly' ? 90 : 60));
+ let toIndex = Math.max(0, bars.length - 1);
+
+ if (anchorTimes.length && bars.length) {
+   const idxs = anchorTimes.map(t => bars.findIndex(b => b.time === t)).filter(i => i >= 0);
+   if (idxs.length) {
+     const first = Math.min(...idxs);
+     const last = Math.max(...idxs);
+     const span = Math.max(last - first, 12);
+     const pad = Math.max(8, Math.round(span * 0.30));
+     fromIndex = Math.max(0, first - pad);
+     toIndex = Math.min(bars.length - 1, Math.max(last + pad, bars.length - 1));
+     if (toIndex - fromIndex > 180) fromIndex = Math.max(0, toIndex - 180);
+   }
+ }
+
+ priceChart.timeScale().setVisibleLogicalRange({from: fromIndex - 0.5, to: toIndex + 6});
+ rsiChart.timeScale().setVisibleLogicalRange({from: fromIndex - 0.5, to: toIndex + 6});
 
  let syncing=false;
  priceChart.timeScale().subscribeVisibleLogicalRangeChange(r=>{if(!syncing&&r){syncing=true;rsiChart.timeScale().setVisibleLogicalRange(r);syncing=false;}});
@@ -137,8 +160,11 @@ function drawPatterns(){
 }
 
 document.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>render(b.dataset.tf));
-document.getElementById('fit').onclick=()=>{priceChart.timeScale().fitContent();rsiChart.timeScale().fitContent();};
+document.getElementById('fit').onclick=()=>render(tf);
+document.getElementById('all').onclick=()=>{priceChart.timeScale().fitContent();rsiChart.timeScale().fitContent();};
 document.getElementById('reset').onclick=()=>render(tf);
+document.getElementById('price').ondblclick=()=>render(tf);
+document.getElementById('rsi').ondblclick=()=>render(tf);
 document.getElementById('patterns').onclick=e=>{patternVisible=!patternVisible;e.target.textContent=patternVisible?'Patterns ON':'Patterns OFF';e.target.classList.toggle('active',patternVisible);render(tf);};
 document.getElementById('rsiToggle').onclick=e=>{const el=document.getElementById('rsi');const on=el.style.display!=='none';el.style.display=on?'none':'block';e.target.textContent=on?'RSI OFF':'RSI ON';e.target.classList.toggle('active',!on);render(tf);};
 window.addEventListener('resize',()=>render(tf));
