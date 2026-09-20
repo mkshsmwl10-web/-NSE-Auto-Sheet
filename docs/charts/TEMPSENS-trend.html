@@ -25,7 +25,7 @@ button.active { background:#2563eb; }
 .ohlc span { margin-right:14px; }
 .toolbar button.tool-active { background:#7c3aed; border-color:#a78bfa; }
 #chartWrap{position:relative;width:100%;height:650px} #chart{position:absolute;inset:0}
-#overlay{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none;overflow:visible}
+#drawCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none} #drawHit{position:absolute;inset:0;z-index:6;pointer-events:none;cursor:crosshair}
 @media(max-width:700px) {
   .status-grid { grid-template-columns:1fr; }
   #chartWrap { height:520px; }
@@ -48,17 +48,19 @@ button.active { background:#2563eb; }
   <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
   <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
   <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
-  <button id="toolH" onclick="drawH()">H-Line</button><button id="toolV" onclick="drawV()">V-Line</button>
-  <button id="toolT" onclick="drawTrend()">Trend Line</button><button id="toolR" onclick="drawRay()">Ray</button>
-  <button onclick="clearDrawings()">Clear Drawings</button>
+  <button id="toolH" onclick="drawH()">H-Line</button> <button id="toolV" onclick="drawV()">V-Line</button>
+  <button id="toolT" onclick="drawTrend()">Trend Line</button> <button id="toolR" onclick="drawRay()">Ray</button>
+  <button id="toolClear" onclick="clearDrawings()">Clear Drawings</button>
 </div>
 <div class="info" id="info"></div><div class="ohlc" id="ohlc">Move mouse over a candle to see OHLC</div>
-<div id="chartWrap"><div id="chart"></div><svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg></div>
+<div id="chartWrap"><div id="chart"></div><canvas id="drawCanvas"></canvas><div id="drawHit"></div></div>
 <script>
-const DATA = {"name": "TEMPSENS", "code": "TEMPSENS", "cmp": 531.6, "Daily": {"trend": "NEGATIVE", "reference": 542.8, "bars": [{"time": "2026-08-28", "open": 634.0, "high": 634.85, "low": 551.15, "close": 586.65}, {"time": "2026-08-31", "open": 579.0, "high": 585.0, "low": 557.1, "close": 563.6}, {"time": "2026-09-01", "open": 560.2, "high": 574.8, "low": 534.7, "close": 539.05}, {"time": "2026-09-02", "open": 536.0, "high": 589.0, "low": 535.05, "close": 566.3}, {"time": "2026-09-03", "open": 577.5, "high": 584.95, "low": 556.05, "close": 568.55}, {"time": "2026-09-04", "open": 570.8, "high": 573.75, "low": 547.55, "close": 554.8}, {"time": "2026-09-07", "open": 559.0, "high": 559.0, "low": 540.0, "close": 546.2}, {"time": "2026-09-08", "open": 546.0, "high": 573.75, "low": 537.35, "close": 571.35}, {"time": "2026-09-09", "open": 574.7, "high": 609.8, "low": 572.0, "close": 588.65}, {"time": "2026-09-10", "open": 600.0, "high": 602.4, "low": 575.8, "close": 581.3}, {"time": "2026-09-11", "open": 578.9, "high": 594.15, "low": 561.2, "close": 584.8}, {"time": "2026-09-14", "open": 584.8, "high": 584.8, "low": 584.8, "close": 584.8}, {"time": "2026-09-15", "open": 589.0, "high": 592.0, "low": 517.25, "close": 523.65}, {"time": "2026-09-16", "open": 530.0, "high": 546.0, "low": 521.1, "close": 540.55}, {"time": "2026-09-17", "open": 514.9, "high": 562.3, "low": 505.05, "close": 541.55}, {"time": "2026-09-18", "open": 542.8, "high": 552.4, "low": 524.5, "close": 531.6}]}, "Weekly": {"trend": "NEGATIVE", "reference": 584.8, "bars": [{"time": "2026-08-28", "open": 634.0, "high": 634.85, "low": 551.15, "close": 586.65}, {"time": "2026-09-04", "open": 579.0, "high": 589.0, "low": 534.7, "close": 554.8}, {"time": "2026-09-11", "open": 559.0, "high": 609.8, "low": 537.35, "close": 584.8}, {"time": "2026-09-18", "open": 584.8, "high": 592.0, "low": 505.05, "close": 531.6}]}, "Monthly": {"trend": "NEGATIVE", "reference": 634.0, "bars": [{"time": "2026-08-31", "open": 634.0, "high": 634.85, "low": 551.15, "close": 563.6}]}};
+const DATA = {"name": "TEMPSENS", "code": "TEMPSENS", "cmp": 531.6, "Daily": {"trend": "NEGATIVE", "reference": 589.0, "bars": [{"time": "2026-08-28", "open": 634.0, "high": 634.85, "low": 551.15, "close": 586.65}, {"time": "2026-08-31", "open": 579.0, "high": 585.0, "low": 557.1, "close": 563.6}, {"time": "2026-09-01", "open": 560.2, "high": 574.8, "low": 534.7, "close": 539.05}, {"time": "2026-09-02", "open": 536.0, "high": 589.0, "low": 535.05, "close": 566.3}, {"time": "2026-09-03", "open": 577.5, "high": 584.95, "low": 556.05, "close": 568.55}, {"time": "2026-09-04", "open": 570.8, "high": 573.75, "low": 547.55, "close": 554.8}, {"time": "2026-09-07", "open": 559.0, "high": 559.0, "low": 540.0, "close": 546.2}, {"time": "2026-09-08", "open": 546.0, "high": 573.75, "low": 537.35, "close": 571.35}, {"time": "2026-09-09", "open": 574.7, "high": 609.8, "low": 572.0, "close": 588.65}, {"time": "2026-09-10", "open": 600.0, "high": 602.4, "low": 575.8, "close": 581.3}, {"time": "2026-09-11", "open": 578.9, "high": 594.15, "low": 561.2, "close": 584.8}, {"time": "2026-09-14", "open": 584.8, "high": 584.8, "low": 584.8, "close": 584.8}, {"time": "2026-09-15", "open": 589.0, "high": 592.0, "low": 517.25, "close": 523.65}, {"time": "2026-09-16", "open": 530.0, "high": 546.0, "low": 521.1, "close": 540.55}, {"time": "2026-09-17", "open": 514.9, "high": 562.3, "low": 505.05, "close": 541.55}, {"time": "2026-09-18", "open": 542.8, "high": 552.4, "low": 524.5, "close": 531.6}]}, "Weekly": {"trend": "NEGATIVE", "reference": 584.8, "bars": [{"time": "2026-08-28", "open": 634.0, "high": 634.85, "low": 551.15, "close": 586.65}, {"time": "2026-09-04", "open": 579.0, "high": 589.0, "low": 534.7, "close": 554.8}, {"time": "2026-09-11", "open": 559.0, "high": 609.8, "low": 537.35, "close": 584.8}, {"time": "2026-09-18", "open": 584.8, "high": 592.0, "low": 505.05, "close": 531.6}]}, "Monthly": {"trend": "NEGATIVE", "reference": 634.0, "bars": [{"time": "2026-08-31", "open": 634.0, "high": 634.85, "low": 551.15, "close": 563.6}]}};
 let chart = null;
 let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
-const overlay=document.getElementById("overlay");
+const drawCanvas=document.getElementById("drawCanvas");
+const drawHit=document.getElementById("drawHit");
+const pen=drawCanvas.getContext("2d");
 const ohlcBox=document.getElementById("ohlc");
 
 document.getElementById("title").textContent = DATA.name + " (" + DATA.code + ")";
@@ -80,7 +82,7 @@ function setupStatuses() {
 }
 
 function renderTF(tf) {
-  currentTF=tf; firstPoint=null; mode=null; overlay.style.pointerEvents="none"; redraw();
+  currentTF=tf; firstPoint=null; mode=null; drawHit.style.pointerEvents="none"; redraw();
   document.querySelectorAll(".toolbar button").forEach(b => b.classList.remove("active"));
   const btn = document.getElementById(tf);
   if (btn) btn.classList.add("active");
@@ -126,6 +128,7 @@ function renderTF(tf) {
   }
 
   chart.timeScale().fitContent();
+  setTimeout(resizeDrawingCanvas,0);
 }
 
 function fitChart(){if(chart)chart.timeScale().fitContent();}
@@ -139,87 +142,95 @@ function zoomBy(f){
 function fitChart(){ if(chart) chart.timeScale().fitContent(); }
 function resetChart(){ fitChart(); clearDrawings(); }
 
+function resizeDrawingCanvas(){
+  const r=drawCanvas.getBoundingClientRect();
+  const dpr=window.devicePixelRatio||1;
+  drawCanvas.width=Math.max(1,Math.round(r.width*dpr));
+  drawCanvas.height=Math.max(1,Math.round(r.height*dpr));
+  pen.setTransform(dpr,0,0,dpr,0,0);
+  redraw();
+}
 function setMode(m){
   mode=(mode===m?null:m);
   firstPoint=null;
-  overlay.style.pointerEvents=mode?"auto":"none";
+  drawHit.style.pointerEvents=mode?"auto":"none";
   document.querySelectorAll(".toolbar button").forEach(b=>b.classList.remove("tool-active"));
-  const map={h:"toolH",v:"toolV",t:"toolT",r:"toolR"};
-  if(mode && map[mode]) document.getElementById(map[mode]).classList.add("tool-active");
+  const ids={h:"toolH",v:"toolV",t:"toolT",r:"toolR"};
+  if(mode && ids[mode]) document.getElementById(ids[mode]).classList.add("tool-active");
 }
 function drawH(){setMode("h")}
 function drawV(){setMode("v")}
 function drawTrend(){setMode("t")}
 function drawRay(){setMode("r")}
-
 function clearDrawings(){
   drawings=[];
   firstPoint=null;
+  mode=null;
+  drawHit.style.pointerEvents="none";
+  document.querySelectorAll(".toolbar button").forEach(b=>b.classList.remove("tool-active"));
   redraw();
 }
-function point(e){
-  const r=overlay.getBoundingClientRect();
+function hitPoint(e){
+  const r=drawHit.getBoundingClientRect();
   return {x:e.clientX-r.left,y:e.clientY-r.top};
 }
-function svgLine(x1,y1,x2,y2){
-  const n=document.createElementNS("http://www.w3.org/2000/svg","line");
-  n.setAttribute("x1",x1); n.setAttribute("y1",y1);
-  n.setAttribute("x2",x2); n.setAttribute("y2",y2);
-  n.setAttribute("stroke","#f59e0b"); n.setAttribute("stroke-width","2");
-  overlay.appendChild(n);
+function line(x1,y1,x2,y2){
+  pen.beginPath(); pen.moveTo(x1,y1); pen.lineTo(x2,y2);
+  pen.strokeStyle="#f59e0b"; pen.lineWidth=2; pen.stroke();
 }
 function redraw(){
-  while(overlay.firstChild) overlay.removeChild(overlay.firstChild);
-  const r=overlay.getBoundingClientRect(), w=r.width, h=r.height;
+  const r=drawCanvas.getBoundingClientRect();
+  pen.clearRect(0,0,r.width,r.height);
   drawings.filter(d=>d.tf===currentTF).forEach(d=>{
-    if(d.k==="h") svgLine(0,d.a.y,w,d.a.y);
-    else if(d.k==="v") svgLine(d.a.x,0,d.a.x,h);
-    else if(d.k==="t") svgLine(d.a.x,d.a.y,d.b.x,d.b.y);
+    if(d.k==="h") line(0,d.a.y,r.width,d.a.y);
+    else if(d.k==="v") line(d.a.x,0,d.a.x,r.height);
+    else if(d.k==="t") line(d.a.x,d.a.y,d.b.x,d.b.y);
     else if(d.k==="r"){
-      const dx=d.b.x-d.a.x, dy=d.b.y-d.a.y;
-      if(Math.abs(dx)<0.001) svgLine(d.a.x,d.a.y,d.a.x,dy>=0?h:0);
+      const dx=d.b.x-d.a.x,dy=d.b.y-d.a.y;
+      if(Math.abs(dx)<0.001) line(d.a.x,d.a.y,d.a.x,dy>=0?r.height:0);
       else{
-        const tx=dx>=0?w:0, z=(tx-d.a.x)/dx;
-        svgLine(d.a.x,d.a.y,tx,d.a.y+z*dy);
+        const tx=dx>=0?r.width:0, q=(tx-d.a.x)/dx;
+        line(d.a.x,d.a.y,tx,d.a.y+q*dy);
       }
     }
   });
 }
-overlay.addEventListener("click",e=>{
+drawHit.addEventListener("click",e=>{
   if(!mode)return;
-  const p=point(e);
+  const p=hitPoint(e);
   if(mode==="h"||mode==="v"){
     drawings.push({tf:currentTF,k:mode,a:p});
-    redraw();
-    setMode(null);
-    return;
+    redraw(); setMode(null); return;
   }
-  if(!firstPoint) firstPoint=p;
-  else{
+  if(firstPoint===null){
+    firstPoint=p;
+  }else{
     drawings.push({tf:currentTF,k:mode,a:firstPoint,b:p});
-    firstPoint=null;
-    redraw();
-    setMode(null);
+    firstPoint=null; redraw(); setMode(null);
   }
 });
 
 function setupCrosshairOHLC(){
-  if(!chart || !candleSeries)return;
+  if(!chart||!candleSeries)return;
   chart.subscribeCrosshairMove(param=>{
     if(!param || !param.time){
-      ohlcBox.textContent="Move mouse over a candle to see OHLC";
+      ohlcBox.innerHTML="<span>Hover candle → OHLC</span>";
       return;
     }
-    const d=param.seriesData.get(candleSeries);
-    if(!d || d.open===undefined)return;
-    const date=typeof param.time==="string"?param.time:
-      (param.time.year+"-"+String(param.time.month).padStart(2,"0")+"-"+String(param.time.day).padStart(2,"0"));
-    ohlcBox.innerHTML=
-      "<span>"+date+"</span>"+
-      "<span>O "+Number(d.open).toFixed(2)+"</span>"+
-      "<span>H "+Number(d.high).toFixed(2)+"</span>"+
-      "<span>L "+Number(d.low).toFixed(2)+"</span>"+
-      "<span>C "+Number(d.close).toFixed(2)+"</span>";
+    const d=param.seriesData && param.seriesData.get(candleSeries);
+    if(!d || d.open===undefined){
+      ohlcBox.innerHTML="<span>Hover candle → OHLC</span>";
+      return;
+    }
+    let date="";
+    if(typeof param.time==="string") date=param.time;
+    else if(param.time.year) date=param.time.year+"-"+String(param.time.month).padStart(2,"0")+"-"+String(param.time.day).padStart(2,"0");
+    else date=String(param.time);
+    ohlcBox.innerHTML="<span>"+date+"</span>"+
+      "<span>O: "+Number(d.open).toFixed(2)+"</span>"+
+      "<span>H: "+Number(d.high).toFixed(2)+"</span>"+
+      "<span>L: "+Number(d.low).toFixed(2)+"</span>"+
+      "<span>C: "+Number(d.close).toFixed(2)+"</span>";
   });
 }
 
@@ -237,7 +248,7 @@ window.addEventListener("resize", () => {
   if (!chart) return;
   const holder = document.getElementById("chart");
   chart.applyOptions({ width:holder.clientWidth });
-  redraw();
+  resizeDrawingCanvas();
 });
 </script>
 </body>

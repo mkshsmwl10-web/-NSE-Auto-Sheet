@@ -25,7 +25,7 @@ button.active { background:#2563eb; }
 .ohlc span { margin-right:14px; }
 .toolbar button.tool-active { background:#7c3aed; border-color:#a78bfa; }
 #chartWrap{position:relative;width:100%;height:650px} #chart{position:absolute;inset:0}
-#overlay{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none;overflow:visible}
+#drawCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none} #drawHit{position:absolute;inset:0;z-index:6;pointer-events:none;cursor:crosshair}
 @media(max-width:700px) {
   .status-grid { grid-template-columns:1fr; }
   #chartWrap { height:520px; }
@@ -48,17 +48,19 @@ button.active { background:#2563eb; }
   <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
   <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
   <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
-  <button id="toolH" onclick="drawH()">H-Line</button><button id="toolV" onclick="drawV()">V-Line</button>
-  <button id="toolT" onclick="drawTrend()">Trend Line</button><button id="toolR" onclick="drawRay()">Ray</button>
-  <button onclick="clearDrawings()">Clear Drawings</button>
+  <button id="toolH" onclick="drawH()">H-Line</button> <button id="toolV" onclick="drawV()">V-Line</button>
+  <button id="toolT" onclick="drawTrend()">Trend Line</button> <button id="toolR" onclick="drawRay()">Ray</button>
+  <button id="toolClear" onclick="clearDrawings()">Clear Drawings</button>
 </div>
 <div class="info" id="info"></div><div class="ohlc" id="ohlc">Move mouse over a candle to see OHLC</div>
-<div id="chartWrap"><div id="chart"></div><svg id="overlay" xmlns="http://www.w3.org/2000/svg"></svg></div>
+<div id="chartWrap"><div id="chart"></div><canvas id="drawCanvas"></canvas><div id="drawHit"></div></div>
 <script>
 const DATA = {"name": "INDOMIM", "code": "INDOMIM", "cmp": 1055.9, "Daily": {"trend": "POSITIVE", "reference": 999.0, "bars": [{"time": "2026-07-30", "open": 700.0, "high": 757.75, "low": 700.0, "close": 741.75}, {"time": "2026-07-31", "open": 735.0, "high": 815.9, "low": 725.0, "close": 776.15}, {"time": "2026-08-03", "open": 776.0, "high": 802.7, "low": 765.0, "close": 770.15}, {"time": "2026-08-04", "open": 773.0, "high": 779.7, "low": 750.5, "close": 769.4}, {"time": "2026-08-05", "open": 770.0, "high": 827.4, "low": 761.05, "close": 801.95}, {"time": "2026-08-06", "open": 809.0, "high": 882.1, "low": 804.0, "close": 878.75}, {"time": "2026-08-07", "open": 898.2, "high": 908.0, "low": 850.65, "close": 867.35}, {"time": "2026-08-10", "open": 871.35, "high": 872.6, "low": 821.2, "close": 830.1}, {"time": "2026-08-11", "open": 831.0, "high": 844.7, "low": 816.35, "close": 821.8}, {"time": "2026-08-12", "open": 821.8, "high": 837.9, "low": 808.5, "close": 823.65}, {"time": "2026-08-13", "open": 830.0, "high": 859.3, "low": 825.0, "close": 831.4}, {"time": "2026-08-14", "open": 835.0, "high": 852.35, "low": 815.3, "close": 849.35}, {"time": "2026-08-17", "open": 850.4, "high": 871.15, "low": 838.7, "close": 866.15}, {"time": "2026-08-18", "open": 910.0, "high": 952.75, "low": 905.0, "close": 952.75}, {"time": "2026-08-19", "open": 965.2, "high": 989.9, "low": 936.65, "close": 967.95}, {"time": "2026-08-20", "open": 965.0, "high": 965.0, "low": 907.3, "close": 919.55}, {"time": "2026-08-21", "open": 919.0, "high": 919.0, "low": 877.0, "close": 882.1}, {"time": "2026-08-24", "open": 884.05, "high": 913.8, "low": 880.55, "close": 888.75}, {"time": "2026-08-25", "open": 890.0, "high": 909.0, "low": 878.0, "close": 889.9}, {"time": "2026-08-26", "open": 891.0, "high": 923.9, "low": 882.0, "close": 895.75}, {"time": "2026-08-27", "open": 893.0, "high": 924.45, "low": 871.2, "close": 877.5}, {"time": "2026-08-28", "open": 881.7, "high": 892.0, "low": 864.45, "close": 868.05}, {"time": "2026-08-31", "open": 868.05, "high": 883.0, "low": 854.75, "close": 875.45}, {"time": "2026-09-01", "open": 875.45, "high": 878.35, "low": 846.9, "close": 858.85}, {"time": "2026-09-02", "open": 856.0, "high": 892.0, "low": 839.05, "close": 888.0}, {"time": "2026-09-03", "open": 899.9, "high": 933.0, "low": 888.2, "close": 922.4}, {"time": "2026-09-04", "open": 926.0, "high": 983.6, "low": 926.0, "close": 971.5}, {"time": "2026-09-07", "open": 973.9, "high": 976.95, "low": 941.75, "close": 946.7}, {"time": "2026-09-08", "open": 951.0, "high": 989.0, "low": 943.75, "close": 968.95}, {"time": "2026-09-09", "open": 968.95, "high": 998.0, "low": 947.75, "close": 984.55}, {"time": "2026-09-10", "open": 996.0, "high": 1028.5, "low": 996.0, "close": 1006.55}, {"time": "2026-09-11", "open": 995.0, "high": 1024.5, "low": 978.75, "close": 1018.2}, {"time": "2026-09-14", "open": 1018.2, "high": 1018.2, "low": 1018.2, "close": 1018.2}, {"time": "2026-09-15", "open": 1026.0, "high": 1026.0, "low": 960.1, "close": 975.65}, {"time": "2026-09-16", "open": 970.0, "high": 970.1, "low": 922.55, "close": 946.1}, {"time": "2026-09-17", "open": 955.0, "high": 1008.0, "low": 946.1, "close": 993.2}, {"time": "2026-09-18", "open": 999.0, "high": 1064.0, "low": 990.5, "close": 1055.9}]}, "Weekly": {"trend": "POSITIVE", "reference": 1018.2, "bars": [{"time": "2026-07-31", "open": 700.0, "high": 815.9, "low": 700.0, "close": 776.15}, {"time": "2026-08-07", "open": 776.0, "high": 908.0, "low": 750.5, "close": 867.35}, {"time": "2026-08-14", "open": 871.35, "high": 872.6, "low": 808.5, "close": 849.35}, {"time": "2026-08-21", "open": 850.4, "high": 989.9, "low": 838.7, "close": 882.1}, {"time": "2026-08-28", "open": 884.05, "high": 924.45, "low": 864.45, "close": 868.05}, {"time": "2026-09-04", "open": 868.05, "high": 983.6, "low": 839.05, "close": 971.5}, {"time": "2026-09-11", "open": 973.9, "high": 1028.5, "low": 941.75, "close": 1018.2}, {"time": "2026-09-18", "open": 1018.2, "high": 1064.0, "low": 922.55, "close": 1055.9}]}, "Monthly": {"trend": "POSITIVE", "reference": 776.0, "bars": [{"time": "2026-07-31", "open": 700.0, "high": 815.9, "low": 700.0, "close": 776.15}, {"time": "2026-08-31", "open": 776.0, "high": 989.9, "low": 750.5, "close": 875.45}]}};
 let chart = null;
 let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
-const overlay=document.getElementById("overlay");
+const drawCanvas=document.getElementById("drawCanvas");
+const drawHit=document.getElementById("drawHit");
+const pen=drawCanvas.getContext("2d");
 const ohlcBox=document.getElementById("ohlc");
 
 document.getElementById("title").textContent = DATA.name + " (" + DATA.code + ")";
@@ -80,7 +82,7 @@ function setupStatuses() {
 }
 
 function renderTF(tf) {
-  currentTF=tf; firstPoint=null; mode=null; overlay.style.pointerEvents="none"; redraw();
+  currentTF=tf; firstPoint=null; mode=null; drawHit.style.pointerEvents="none"; redraw();
   document.querySelectorAll(".toolbar button").forEach(b => b.classList.remove("active"));
   const btn = document.getElementById(tf);
   if (btn) btn.classList.add("active");
@@ -126,6 +128,7 @@ function renderTF(tf) {
   }
 
   chart.timeScale().fitContent();
+  setTimeout(resizeDrawingCanvas,0);
 }
 
 function fitChart(){if(chart)chart.timeScale().fitContent();}
@@ -139,87 +142,95 @@ function zoomBy(f){
 function fitChart(){ if(chart) chart.timeScale().fitContent(); }
 function resetChart(){ fitChart(); clearDrawings(); }
 
+function resizeDrawingCanvas(){
+  const r=drawCanvas.getBoundingClientRect();
+  const dpr=window.devicePixelRatio||1;
+  drawCanvas.width=Math.max(1,Math.round(r.width*dpr));
+  drawCanvas.height=Math.max(1,Math.round(r.height*dpr));
+  pen.setTransform(dpr,0,0,dpr,0,0);
+  redraw();
+}
 function setMode(m){
   mode=(mode===m?null:m);
   firstPoint=null;
-  overlay.style.pointerEvents=mode?"auto":"none";
+  drawHit.style.pointerEvents=mode?"auto":"none";
   document.querySelectorAll(".toolbar button").forEach(b=>b.classList.remove("tool-active"));
-  const map={h:"toolH",v:"toolV",t:"toolT",r:"toolR"};
-  if(mode && map[mode]) document.getElementById(map[mode]).classList.add("tool-active");
+  const ids={h:"toolH",v:"toolV",t:"toolT",r:"toolR"};
+  if(mode && ids[mode]) document.getElementById(ids[mode]).classList.add("tool-active");
 }
 function drawH(){setMode("h")}
 function drawV(){setMode("v")}
 function drawTrend(){setMode("t")}
 function drawRay(){setMode("r")}
-
 function clearDrawings(){
   drawings=[];
   firstPoint=null;
+  mode=null;
+  drawHit.style.pointerEvents="none";
+  document.querySelectorAll(".toolbar button").forEach(b=>b.classList.remove("tool-active"));
   redraw();
 }
-function point(e){
-  const r=overlay.getBoundingClientRect();
+function hitPoint(e){
+  const r=drawHit.getBoundingClientRect();
   return {x:e.clientX-r.left,y:e.clientY-r.top};
 }
-function svgLine(x1,y1,x2,y2){
-  const n=document.createElementNS("http://www.w3.org/2000/svg","line");
-  n.setAttribute("x1",x1); n.setAttribute("y1",y1);
-  n.setAttribute("x2",x2); n.setAttribute("y2",y2);
-  n.setAttribute("stroke","#f59e0b"); n.setAttribute("stroke-width","2");
-  overlay.appendChild(n);
+function line(x1,y1,x2,y2){
+  pen.beginPath(); pen.moveTo(x1,y1); pen.lineTo(x2,y2);
+  pen.strokeStyle="#f59e0b"; pen.lineWidth=2; pen.stroke();
 }
 function redraw(){
-  while(overlay.firstChild) overlay.removeChild(overlay.firstChild);
-  const r=overlay.getBoundingClientRect(), w=r.width, h=r.height;
+  const r=drawCanvas.getBoundingClientRect();
+  pen.clearRect(0,0,r.width,r.height);
   drawings.filter(d=>d.tf===currentTF).forEach(d=>{
-    if(d.k==="h") svgLine(0,d.a.y,w,d.a.y);
-    else if(d.k==="v") svgLine(d.a.x,0,d.a.x,h);
-    else if(d.k==="t") svgLine(d.a.x,d.a.y,d.b.x,d.b.y);
+    if(d.k==="h") line(0,d.a.y,r.width,d.a.y);
+    else if(d.k==="v") line(d.a.x,0,d.a.x,r.height);
+    else if(d.k==="t") line(d.a.x,d.a.y,d.b.x,d.b.y);
     else if(d.k==="r"){
-      const dx=d.b.x-d.a.x, dy=d.b.y-d.a.y;
-      if(Math.abs(dx)<0.001) svgLine(d.a.x,d.a.y,d.a.x,dy>=0?h:0);
+      const dx=d.b.x-d.a.x,dy=d.b.y-d.a.y;
+      if(Math.abs(dx)<0.001) line(d.a.x,d.a.y,d.a.x,dy>=0?r.height:0);
       else{
-        const tx=dx>=0?w:0, z=(tx-d.a.x)/dx;
-        svgLine(d.a.x,d.a.y,tx,d.a.y+z*dy);
+        const tx=dx>=0?r.width:0, q=(tx-d.a.x)/dx;
+        line(d.a.x,d.a.y,tx,d.a.y+q*dy);
       }
     }
   });
 }
-overlay.addEventListener("click",e=>{
+drawHit.addEventListener("click",e=>{
   if(!mode)return;
-  const p=point(e);
+  const p=hitPoint(e);
   if(mode==="h"||mode==="v"){
     drawings.push({tf:currentTF,k:mode,a:p});
-    redraw();
-    setMode(null);
-    return;
+    redraw(); setMode(null); return;
   }
-  if(!firstPoint) firstPoint=p;
-  else{
+  if(firstPoint===null){
+    firstPoint=p;
+  }else{
     drawings.push({tf:currentTF,k:mode,a:firstPoint,b:p});
-    firstPoint=null;
-    redraw();
-    setMode(null);
+    firstPoint=null; redraw(); setMode(null);
   }
 });
 
 function setupCrosshairOHLC(){
-  if(!chart || !candleSeries)return;
+  if(!chart||!candleSeries)return;
   chart.subscribeCrosshairMove(param=>{
     if(!param || !param.time){
-      ohlcBox.textContent="Move mouse over a candle to see OHLC";
+      ohlcBox.innerHTML="<span>Hover candle → OHLC</span>";
       return;
     }
-    const d=param.seriesData.get(candleSeries);
-    if(!d || d.open===undefined)return;
-    const date=typeof param.time==="string"?param.time:
-      (param.time.year+"-"+String(param.time.month).padStart(2,"0")+"-"+String(param.time.day).padStart(2,"0"));
-    ohlcBox.innerHTML=
-      "<span>"+date+"</span>"+
-      "<span>O "+Number(d.open).toFixed(2)+"</span>"+
-      "<span>H "+Number(d.high).toFixed(2)+"</span>"+
-      "<span>L "+Number(d.low).toFixed(2)+"</span>"+
-      "<span>C "+Number(d.close).toFixed(2)+"</span>";
+    const d=param.seriesData && param.seriesData.get(candleSeries);
+    if(!d || d.open===undefined){
+      ohlcBox.innerHTML="<span>Hover candle → OHLC</span>";
+      return;
+    }
+    let date="";
+    if(typeof param.time==="string") date=param.time;
+    else if(param.time.year) date=param.time.year+"-"+String(param.time.month).padStart(2,"0")+"-"+String(param.time.day).padStart(2,"0");
+    else date=String(param.time);
+    ohlcBox.innerHTML="<span>"+date+"</span>"+
+      "<span>O: "+Number(d.open).toFixed(2)+"</span>"+
+      "<span>H: "+Number(d.high).toFixed(2)+"</span>"+
+      "<span>L: "+Number(d.low).toFixed(2)+"</span>"+
+      "<span>C: "+Number(d.close).toFixed(2)+"</span>";
   });
 }
 
@@ -237,7 +248,7 @@ window.addEventListener("resize", () => {
   if (!chart) return;
   const holder = document.getElementById("chart");
   chart.applyOptions({ width:holder.clientWidth });
-  redraw();
+  resizeDrawingCanvas();
 });
 </script>
 </body>
