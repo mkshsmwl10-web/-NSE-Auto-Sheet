@@ -114,73 +114,25 @@ def make_monthly(daily):
 
 
 def calculate_dynamic_trend(df):
-    """
-    Reversal-candle trend logic.
-
-    A GREEN candle can establish/confirm POSITIVE.
-    A RED candle can establish/confirm NEGATIVE.
-
-    POSITIVE:
-      - Keep the active Positive reversal candle Open fixed.
-      - Ignore ordinary red/green candles.
-      - Flip to NEGATIVE only when a completed RED candle closes
-        below the active Positive reversal Open.
-      - That RED candle's Open becomes the new Negative reversal Open.
-
-    NEGATIVE:
-      - Keep the active Negative reversal candle Open fixed.
-      - Ignore ordinary red/green candles.
-      - Flip to POSITIVE only when a completed GREEN candle closes
-        above the active Negative reversal Open.
-      - That GREEN candle's Open becomes the new Positive reversal Open.
-
-    This prevents a small green/doji candle below the Negative
-    reversal Open from incorrectly turning the trend POSITIVE.
-    """
-    if df is None or df.empty:
-        return "NO DATA", None, None
-
-    work = df.dropna(subset=["Open", "Close"]).copy()
-    if work.empty:
-        return "NO DATA", None, None
-
-    first_open = float(work.iloc[0]["Open"])
-    first_close = float(work.iloc[0]["Close"])
-
-    # Doji cannot create a fresh direction. Find the first directional candle.
-    start_i = 0
-    while start_i < len(work) and float(work.iloc[start_i]["Close"]) == float(work.iloc[start_i]["Open"]):
-        start_i += 1
-
-    if start_i >= len(work):
-        return "NO DATA", None, None
-
-    first_open = float(work.iloc[start_i]["Open"])
-    first_close = float(work.iloc[start_i]["Close"])
-    trend = "POSITIVE" if first_close > first_open else "NEGATIVE"
-    reference_open = first_open
-    last_change = work.index[start_i]
-
-    for i in range(start_i + 1, len(work)):
-        candle_open = float(work.iloc[i]["Open"])
-        candle_close = float(work.iloc[i]["Close"])
-
-        is_green = candle_close > candle_open
-        is_red = candle_close < candle_open
-
-        if trend == "POSITIVE":
-            if is_red and candle_close < reference_open:
-                trend = "NEGATIVE"
-                reference_open = candle_open
-                last_change = work.index[i]
-
-        elif trend == "NEGATIVE":
-            if is_green and candle_close > reference_open:
-                trend = "POSITIVE"
-                reference_open = candle_open
-                last_change = work.index[i]
-
-    return trend, round(reference_open, 2), last_change
+    """Same-trend colour shifts reference; opposite colour flips only on reference break."""
+    if df is None or df.empty: return "NO DATA", None, None
+    w=df.dropna(subset=["Open","Close"]).copy()
+    if w.empty: return "NO DATA", None, None
+    s=0
+    while s<len(w) and float(w.iloc[s]["Close"])==float(w.iloc[s]["Open"]): s+=1
+    if s>=len(w): return "NO DATA", None, None
+    o=float(w.iloc[s]["Open"]); c=float(w.iloc[s]["Close"])
+    trend="POSITIVE" if c>o else "NEGATIVE"; ref=o; changed=w.index[s]
+    for i in range(s+1,len(w)):
+        o=float(w.iloc[i]["Open"]); c=float(w.iloc[i]["Close"])
+        green=c>o; red=c<o
+        if trend=="POSITIVE":
+            if green: ref=o
+            elif red and c<ref: trend="NEGATIVE"; ref=o; changed=w.index[i]
+        else:
+            if red: ref=o
+            elif green and c>ref: trend="POSITIVE"; ref=o; changed=w.index[i]
+    return trend, round(ref,2), changed
 
 
 def read_nifty200(book):
@@ -252,10 +204,11 @@ body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,
 button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
 button.active { background:#2563eb; }
 .info { padding:0 20px 10px; color:#cbd5e1; }
-#chart { width:100%; height:650px; }
+#chartWrap{position:relative;width:100%;height:650px} #chart{position:absolute;inset:0}
+#overlay{position:absolute;inset:0;z-index:5;pointer-events:none}
 @media(max-width:700px) {
   .status-grid { grid-template-columns:1fr; }
-  #chart { height:520px; }
+  #chartWrap { height:520px; }
 }
 </style>
 </head>
@@ -273,14 +226,19 @@ button.active { background:#2563eb; }
   <button id="Daily" onclick="renderTF('Daily')">1D</button>
   <button id="Weekly" onclick="renderTF('Weekly')">1W</button>
   <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
-  <button onclick="fitChart()">Fit</button>
+  <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
+  <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
+  <button onclick="drawH()">H-Line</button><button onclick="drawV()">V-Line</button>
+  <button onclick="drawTrend()">Trend Line</button><button onclick="drawRay()">Ray</button>
+  <button onclick="clearDrawings()">Clear Drawings</button>
 </div>
 <div class="info" id="info"></div>
-<div id="chart"></div>
+<div id="chartWrap"><div id="chart"></div><canvas id="overlay"></canvas></div>
 <script>
 const DATA = __DATA_JSON__;
 let chart = null;
-let candleSeries = null;
+let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
+const overlay=document.getElementById("overlay"), pen=overlay.getContext("2d");
 
 document.getElementById("title").textContent = DATA.name + " (" + DATA.code + ")";
 document.getElementById("subtitle").textContent = "CMP: " + DATA.cmp;
@@ -301,6 +259,7 @@ function setupStatuses() {
 }
 
 function renderTF(tf) {
+  currentTF=tf; firstPoint=null;
   document.querySelectorAll(".toolbar button").forEach(b => b.classList.remove("active"));
   const btn = document.getElementById(tf);
   if (btn) btn.classList.add("active");
@@ -345,11 +304,24 @@ function renderTF(tf) {
   }
 
   chart.timeScale().fitContent();
+  setTimeout(sizeOverlay,0);
 }
 
-function fitChart() {
-  if (chart) chart.timeScale().fitContent();
-}
+function fitChart(){if(chart)chart.timeScale().fitContent();}
+function zoomBy(f){if(!chart)return;let t=chart.timeScale(),r=t.getVisibleLogicalRange();if(!r)return;let m=(r.from+r.to)/2,h=(r.to-r.from)*f/2;t.setVisibleLogicalRange({from:m-h,to:m+h});}
+function resetChart(){fitChart();clearDrawings();}
+function sizeOverlay(){let r=overlay.getBoundingClientRect(),d=window.devicePixelRatio||1;overlay.width=r.width*d;overlay.height=r.height*d;pen.setTransform(d,0,0,d,0,0);redraw();}
+function pick(e){let r=overlay.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+function setMode(m){mode=m;firstPoint=null;overlay.style.pointerEvents="auto";}
+function drawH(){setMode("h")} function drawV(){setMode("v")} function drawTrend(){setMode("t")} function drawRay(){setMode("r")}
+function clearDrawings(){drawings=[];firstPoint=null;redraw();}
+function one(d){let w=overlay.getBoundingClientRect().width,h=overlay.getBoundingClientRect().height;pen.beginPath();pen.strokeStyle="#f59e0b";pen.lineWidth=2;
+if(d.k=="h"){pen.moveTo(0,d.a.y);pen.lineTo(w,d.a.y)}else if(d.k=="v"){pen.moveTo(d.a.x,0);pen.lineTo(d.a.x,h)}
+else if(d.k=="t"){pen.moveTo(d.a.x,d.a.y);pen.lineTo(d.b.x,d.b.y)}else{let dx=d.b.x-d.a.x,dy=d.b.y-d.a.y,x=dx>=0?w:0,t=(x-d.a.x)/(dx||.001);pen.moveTo(d.a.x,d.a.y);pen.lineTo(x,d.a.y+t*dy)}pen.stroke();}
+function redraw(){let r=overlay.getBoundingClientRect();pen.clearRect(0,0,r.width,r.height);drawings.filter(x=>x.tf==currentTF).forEach(one);}
+overlay.addEventListener("click",e=>{if(!mode)return;let p=pick(e);if(mode=="h"||mode=="v"){drawings.push({tf:currentTF,k:mode,a:p});redraw();mode=null;overlay.style.pointerEvents="none";return}
+if(!firstPoint)firstPoint=p;else{drawings.push({tf:currentTF,k:mode,a:firstPoint,b:p});firstPoint=null;redraw();mode=null;overlay.style.pointerEvents="none";}});
+
 
 setupStatuses();
 try {
@@ -365,6 +337,7 @@ window.addEventListener("resize", () => {
   if (!chart) return;
   const holder = document.getElementById("chart");
   chart.applyOptions({ width:holder.clientWidth });
+  sizeOverlay();
 });
 </script>
 </body>
@@ -376,7 +349,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=8"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=9"
 
     payload = {
         "name": stock_name,
