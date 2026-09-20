@@ -21,10 +21,11 @@ body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,
 button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
 button.active { background:#2563eb; }
 .info { padding:0 20px 10px; color:#cbd5e1; }
-#chart { width:100%; height:650px; }
+#chartWrap{position:relative;width:100%;height:650px} #chart{position:absolute;inset:0}
+#overlay{position:absolute;inset:0;z-index:5;pointer-events:none}
 @media(max-width:700px) {
   .status-grid { grid-template-columns:1fr; }
-  #chart { height:520px; }
+  #chartWrap { height:520px; }
 }
 </style>
 </head>
@@ -42,14 +43,19 @@ button.active { background:#2563eb; }
   <button id="Daily" onclick="renderTF('Daily')">1D</button>
   <button id="Weekly" onclick="renderTF('Weekly')">1W</button>
   <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
-  <button onclick="fitChart()">Fit</button>
+  <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
+  <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
+  <button onclick="drawH()">H-Line</button><button onclick="drawV()">V-Line</button>
+  <button onclick="drawTrend()">Trend Line</button><button onclick="drawRay()">Ray</button>
+  <button onclick="clearDrawings()">Clear Drawings</button>
 </div>
 <div class="info" id="info"></div>
-<div id="chart"></div>
+<div id="chartWrap"><div id="chart"></div><canvas id="overlay"></canvas></div>
 <script>
-const DATA = {"name": "LUMINO", "code": "LUMINO", "cmp": 111.52, "Daily": {"trend": "NEGATIVE", "reference": 116.23, "bars": [{"time": "2026-09-03", "open": 110.0, "high": 118.99, "low": 106.54, "close": 110.32}, {"time": "2026-09-04", "open": 112.4, "high": 122.0, "low": 111.22, "close": 114.5}, {"time": "2026-09-07", "open": 116.75, "high": 121.0, "low": 114.4, "close": 114.82}, {"time": "2026-09-08", "open": 116.23, "high": 118.0, "low": 107.2, "close": 108.12}, {"time": "2026-09-09", "open": 109.6, "high": 110.25, "low": 105.41, "close": 106.32}, {"time": "2026-09-10", "open": 106.49, "high": 110.75, "low": 102.5, "close": 107.93}, {"time": "2026-09-11", "open": 106.0, "high": 112.8, "low": 105.65, "close": 108.81}, {"time": "2026-09-14", "open": 108.81, "high": 108.81, "low": 108.81, "close": 108.81}, {"time": "2026-09-15", "open": 109.7, "high": 110.64, "low": 100.62, "close": 103.16}, {"time": "2026-09-16", "open": 102.99, "high": 102.99, "low": 98.05, "close": 100.29}, {"time": "2026-09-17", "open": 100.1, "high": 108.6, "low": 98.51, "close": 107.14}, {"time": "2026-09-18", "open": 109.4, "high": 112.9, "low": 107.2, "close": 111.52}]}, "Weekly": {"trend": "NEGATIVE", "reference": 116.75, "bars": [{"time": "2026-09-04", "open": 110.0, "high": 122.0, "low": 106.54, "close": 114.5}, {"time": "2026-09-11", "open": 116.75, "high": 121.0, "low": 102.5, "close": 108.81}, {"time": "2026-09-18", "open": 108.81, "high": 112.9, "low": 98.05, "close": 111.52}]}, "Monthly": {"trend": "NO DATA", "reference": null, "bars": []}};
+const DATA = {"name": "LUMINO", "code": "LUMINO", "cmp": 111.52, "Daily": {"trend": "POSITIVE", "reference": 109.4, "bars": [{"time": "2026-09-03", "open": 110.0, "high": 118.99, "low": 106.54, "close": 110.32}, {"time": "2026-09-04", "open": 112.4, "high": 122.0, "low": 111.22, "close": 114.5}, {"time": "2026-09-07", "open": 116.75, "high": 121.0, "low": 114.4, "close": 114.82}, {"time": "2026-09-08", "open": 116.23, "high": 118.0, "low": 107.2, "close": 108.12}, {"time": "2026-09-09", "open": 109.6, "high": 110.25, "low": 105.41, "close": 106.32}, {"time": "2026-09-10", "open": 106.49, "high": 110.75, "low": 102.5, "close": 107.93}, {"time": "2026-09-11", "open": 106.0, "high": 112.8, "low": 105.65, "close": 108.81}, {"time": "2026-09-14", "open": 108.81, "high": 108.81, "low": 108.81, "close": 108.81}, {"time": "2026-09-15", "open": 109.7, "high": 110.64, "low": 100.62, "close": 103.16}, {"time": "2026-09-16", "open": 102.99, "high": 102.99, "low": 98.05, "close": 100.29}, {"time": "2026-09-17", "open": 100.1, "high": 108.6, "low": 98.51, "close": 107.14}, {"time": "2026-09-18", "open": 109.4, "high": 112.9, "low": 107.2, "close": 111.52}]}, "Weekly": {"trend": "NEGATIVE", "reference": 116.75, "bars": [{"time": "2026-09-04", "open": 110.0, "high": 122.0, "low": 106.54, "close": 114.5}, {"time": "2026-09-11", "open": 116.75, "high": 121.0, "low": 102.5, "close": 108.81}, {"time": "2026-09-18", "open": 108.81, "high": 112.9, "low": 98.05, "close": 111.52}]}, "Monthly": {"trend": "NO DATA", "reference": null, "bars": []}};
 let chart = null;
-let candleSeries = null;
+let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
+const overlay=document.getElementById("overlay"), pen=overlay.getContext("2d");
 
 document.getElementById("title").textContent = DATA.name + " (" + DATA.code + ")";
 document.getElementById("subtitle").textContent = "CMP: " + DATA.cmp;
@@ -70,6 +76,7 @@ function setupStatuses() {
 }
 
 function renderTF(tf) {
+  currentTF=tf; firstPoint=null;
   document.querySelectorAll(".toolbar button").forEach(b => b.classList.remove("active"));
   const btn = document.getElementById(tf);
   if (btn) btn.classList.add("active");
@@ -114,11 +121,24 @@ function renderTF(tf) {
   }
 
   chart.timeScale().fitContent();
+  setTimeout(sizeOverlay,0);
 }
 
-function fitChart() {
-  if (chart) chart.timeScale().fitContent();
-}
+function fitChart(){if(chart)chart.timeScale().fitContent();}
+function zoomBy(f){if(!chart)return;let t=chart.timeScale(),r=t.getVisibleLogicalRange();if(!r)return;let m=(r.from+r.to)/2,h=(r.to-r.from)*f/2;t.setVisibleLogicalRange({from:m-h,to:m+h});}
+function resetChart(){fitChart();clearDrawings();}
+function sizeOverlay(){let r=overlay.getBoundingClientRect(),d=window.devicePixelRatio||1;overlay.width=r.width*d;overlay.height=r.height*d;pen.setTransform(d,0,0,d,0,0);redraw();}
+function pick(e){let r=overlay.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+function setMode(m){mode=m;firstPoint=null;overlay.style.pointerEvents="auto";}
+function drawH(){setMode("h")} function drawV(){setMode("v")} function drawTrend(){setMode("t")} function drawRay(){setMode("r")}
+function clearDrawings(){drawings=[];firstPoint=null;redraw();}
+function one(d){let w=overlay.getBoundingClientRect().width,h=overlay.getBoundingClientRect().height;pen.beginPath();pen.strokeStyle="#f59e0b";pen.lineWidth=2;
+if(d.k=="h"){pen.moveTo(0,d.a.y);pen.lineTo(w,d.a.y)}else if(d.k=="v"){pen.moveTo(d.a.x,0);pen.lineTo(d.a.x,h)}
+else if(d.k=="t"){pen.moveTo(d.a.x,d.a.y);pen.lineTo(d.b.x,d.b.y)}else{let dx=d.b.x-d.a.x,dy=d.b.y-d.a.y,x=dx>=0?w:0,t=(x-d.a.x)/(dx||.001);pen.moveTo(d.a.x,d.a.y);pen.lineTo(x,d.a.y+t*dy)}pen.stroke();}
+function redraw(){let r=overlay.getBoundingClientRect();pen.clearRect(0,0,r.width,r.height);drawings.filter(x=>x.tf==currentTF).forEach(one);}
+overlay.addEventListener("click",e=>{if(!mode)return;let p=pick(e);if(mode=="h"||mode=="v"){drawings.push({tf:currentTF,k:mode,a:p});redraw();mode=null;overlay.style.pointerEvents="none";return}
+if(!firstPoint)firstPoint=p;else{drawings.push({tf:currentTF,k:mode,a:firstPoint,b:p});firstPoint=null;redraw();mode=null;overlay.style.pointerEvents="none";}});
+
 
 setupStatuses();
 try {
@@ -134,6 +154,7 @@ window.addEventListener("resize", () => {
   if (!chart) return;
   const holder = document.getElementById("chart");
   chart.applyOptions({ width:holder.clientWidth });
+  sizeOverlay();
 });
 </script>
 </body>

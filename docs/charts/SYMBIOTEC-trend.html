@@ -21,10 +21,11 @@ body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,
 button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
 button.active { background:#2563eb; }
 .info { padding:0 20px 10px; color:#cbd5e1; }
-#chart { width:100%; height:650px; }
+#chartWrap{position:relative;width:100%;height:650px} #chart{position:absolute;inset:0}
+#overlay{position:absolute;inset:0;z-index:5;pointer-events:none}
 @media(max-width:700px) {
   .status-grid { grid-template-columns:1fr; }
-  #chart { height:520px; }
+  #chartWrap { height:520px; }
 }
 </style>
 </head>
@@ -42,14 +43,19 @@ button.active { background:#2563eb; }
   <button id="Daily" onclick="renderTF('Daily')">1D</button>
   <button id="Weekly" onclick="renderTF('Weekly')">1W</button>
   <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
-  <button onclick="fitChart()">Fit</button>
+  <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
+  <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
+  <button onclick="drawH()">H-Line</button><button onclick="drawV()">V-Line</button>
+  <button onclick="drawTrend()">Trend Line</button><button onclick="drawRay()">Ray</button>
+  <button onclick="clearDrawings()">Clear Drawings</button>
 </div>
 <div class="info" id="info"></div>
-<div id="chart"></div>
+<div id="chartWrap"><div id="chart"></div><canvas id="overlay"></canvas></div>
 <script>
-const DATA = {"name": "SYMBIOTEC", "code": "SYMBIOTEC", "cmp": 1095.1, "Daily": {"trend": "POSITIVE", "reference": 988.0, "bars": [{"time": "2026-09-01", "open": 988.0, "high": 1180.0, "low": 934.2, "close": 1097.7}, {"time": "2026-09-02", "open": 1110.0, "high": 1161.0, "low": 1085.1, "close": 1092.8}, {"time": "2026-09-03", "open": 1115.05, "high": 1126.75, "low": 1068.55, "close": 1076.85}, {"time": "2026-09-04", "open": 1085.05, "high": 1099.7, "low": 1056.0, "close": 1078.25}, {"time": "2026-09-07", "open": 1068.0, "high": 1141.0, "low": 1068.0, "close": 1098.7}, {"time": "2026-09-08", "open": 1105.0, "high": 1108.6, "low": 1071.1, "close": 1094.1}, {"time": "2026-09-09", "open": 1095.0, "high": 1161.65, "low": 1076.2, "close": 1133.7}, {"time": "2026-09-10", "open": 1142.0, "high": 1193.7, "low": 1115.35, "close": 1138.95}, {"time": "2026-09-11", "open": 1128.0, "high": 1148.0, "low": 1105.0, "close": 1133.45}, {"time": "2026-09-14", "open": 1133.45, "high": 1133.45, "low": 1133.45, "close": 1133.45}, {"time": "2026-09-15", "open": 1133.5, "high": 1174.9, "low": 1070.05, "close": 1080.1}, {"time": "2026-09-16", "open": 1085.0, "high": 1087.9, "low": 1021.55, "close": 1042.8}, {"time": "2026-09-17", "open": 1040.0, "high": 1057.0, "low": 1020.6, "close": 1045.6}, {"time": "2026-09-18", "open": 1050.0, "high": 1106.9, "low": 1048.0, "close": 1095.1}]}, "Weekly": {"trend": "POSITIVE", "reference": 988.0, "bars": [{"time": "2026-09-04", "open": 988.0, "high": 1180.0, "low": 934.2, "close": 1078.25}, {"time": "2026-09-11", "open": 1068.0, "high": 1193.7, "low": 1068.0, "close": 1133.45}, {"time": "2026-09-18", "open": 1133.45, "high": 1174.9, "low": 1020.6, "close": 1095.1}]}, "Monthly": {"trend": "NO DATA", "reference": null, "bars": []}};
+const DATA = {"name": "SYMBIOTEC", "code": "SYMBIOTEC", "cmp": 1095.1, "Daily": {"trend": "POSITIVE", "reference": 1050.0, "bars": [{"time": "2026-09-01", "open": 988.0, "high": 1180.0, "low": 934.2, "close": 1097.7}, {"time": "2026-09-02", "open": 1110.0, "high": 1161.0, "low": 1085.1, "close": 1092.8}, {"time": "2026-09-03", "open": 1115.05, "high": 1126.75, "low": 1068.55, "close": 1076.85}, {"time": "2026-09-04", "open": 1085.05, "high": 1099.7, "low": 1056.0, "close": 1078.25}, {"time": "2026-09-07", "open": 1068.0, "high": 1141.0, "low": 1068.0, "close": 1098.7}, {"time": "2026-09-08", "open": 1105.0, "high": 1108.6, "low": 1071.1, "close": 1094.1}, {"time": "2026-09-09", "open": 1095.0, "high": 1161.65, "low": 1076.2, "close": 1133.7}, {"time": "2026-09-10", "open": 1142.0, "high": 1193.7, "low": 1115.35, "close": 1138.95}, {"time": "2026-09-11", "open": 1128.0, "high": 1148.0, "low": 1105.0, "close": 1133.45}, {"time": "2026-09-14", "open": 1133.45, "high": 1133.45, "low": 1133.45, "close": 1133.45}, {"time": "2026-09-15", "open": 1133.5, "high": 1174.9, "low": 1070.05, "close": 1080.1}, {"time": "2026-09-16", "open": 1085.0, "high": 1087.9, "low": 1021.55, "close": 1042.8}, {"time": "2026-09-17", "open": 1040.0, "high": 1057.0, "low": 1020.6, "close": 1045.6}, {"time": "2026-09-18", "open": 1050.0, "high": 1106.9, "low": 1048.0, "close": 1095.1}]}, "Weekly": {"trend": "POSITIVE", "reference": 1068.0, "bars": [{"time": "2026-09-04", "open": 988.0, "high": 1180.0, "low": 934.2, "close": 1078.25}, {"time": "2026-09-11", "open": 1068.0, "high": 1193.7, "low": 1068.0, "close": 1133.45}, {"time": "2026-09-18", "open": 1133.45, "high": 1174.9, "low": 1020.6, "close": 1095.1}]}, "Monthly": {"trend": "NO DATA", "reference": null, "bars": []}};
 let chart = null;
-let candleSeries = null;
+let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
+const overlay=document.getElementById("overlay"), pen=overlay.getContext("2d");
 
 document.getElementById("title").textContent = DATA.name + " (" + DATA.code + ")";
 document.getElementById("subtitle").textContent = "CMP: " + DATA.cmp;
@@ -70,6 +76,7 @@ function setupStatuses() {
 }
 
 function renderTF(tf) {
+  currentTF=tf; firstPoint=null;
   document.querySelectorAll(".toolbar button").forEach(b => b.classList.remove("active"));
   const btn = document.getElementById(tf);
   if (btn) btn.classList.add("active");
@@ -114,11 +121,24 @@ function renderTF(tf) {
   }
 
   chart.timeScale().fitContent();
+  setTimeout(sizeOverlay,0);
 }
 
-function fitChart() {
-  if (chart) chart.timeScale().fitContent();
-}
+function fitChart(){if(chart)chart.timeScale().fitContent();}
+function zoomBy(f){if(!chart)return;let t=chart.timeScale(),r=t.getVisibleLogicalRange();if(!r)return;let m=(r.from+r.to)/2,h=(r.to-r.from)*f/2;t.setVisibleLogicalRange({from:m-h,to:m+h});}
+function resetChart(){fitChart();clearDrawings();}
+function sizeOverlay(){let r=overlay.getBoundingClientRect(),d=window.devicePixelRatio||1;overlay.width=r.width*d;overlay.height=r.height*d;pen.setTransform(d,0,0,d,0,0);redraw();}
+function pick(e){let r=overlay.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};}
+function setMode(m){mode=m;firstPoint=null;overlay.style.pointerEvents="auto";}
+function drawH(){setMode("h")} function drawV(){setMode("v")} function drawTrend(){setMode("t")} function drawRay(){setMode("r")}
+function clearDrawings(){drawings=[];firstPoint=null;redraw();}
+function one(d){let w=overlay.getBoundingClientRect().width,h=overlay.getBoundingClientRect().height;pen.beginPath();pen.strokeStyle="#f59e0b";pen.lineWidth=2;
+if(d.k=="h"){pen.moveTo(0,d.a.y);pen.lineTo(w,d.a.y)}else if(d.k=="v"){pen.moveTo(d.a.x,0);pen.lineTo(d.a.x,h)}
+else if(d.k=="t"){pen.moveTo(d.a.x,d.a.y);pen.lineTo(d.b.x,d.b.y)}else{let dx=d.b.x-d.a.x,dy=d.b.y-d.a.y,x=dx>=0?w:0,t=(x-d.a.x)/(dx||.001);pen.moveTo(d.a.x,d.a.y);pen.lineTo(x,d.a.y+t*dy)}pen.stroke();}
+function redraw(){let r=overlay.getBoundingClientRect();pen.clearRect(0,0,r.width,r.height);drawings.filter(x=>x.tf==currentTF).forEach(one);}
+overlay.addEventListener("click",e=>{if(!mode)return;let p=pick(e);if(mode=="h"||mode=="v"){drawings.push({tf:currentTF,k:mode,a:p});redraw();mode=null;overlay.style.pointerEvents="none";return}
+if(!firstPoint)firstPoint=p;else{drawings.push({tf:currentTF,k:mode,a:firstPoint,b:p});firstPoint=null;redraw();mode=null;overlay.style.pointerEvents="none";}});
+
 
 setupStatuses();
 try {
@@ -134,6 +154,7 @@ window.addEventListener("resize", () => {
   if (!chart) return;
   const holder = document.getElementById("chart");
   chart.applyOptions({ width:holder.clientWidth });
+  sizeOverlay();
 });
 </script>
 </body>
