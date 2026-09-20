@@ -19,9 +19,7 @@ h1{font-size:23px;margin:0 0 5px;color:#f0f3fa}
 .summary{font-size:12px;color:#b2b5be;margin-top:5px;line-height:1.35}
 .tvwrap{flex:1;min-height:650px}
 .tradingview-widget-container{height:100%;width:100%}
-.tradingview-widget-container__widget{height:calc(100% - 28px);width:100%}
-.tradingview-widget-copyright{height:28px;padding:5px 10px;font-size:12px;background:#131722;color:#787b86}
-.tradingview-widget-copyright a{color:#2962ff;text-decoration:none}
+.tradingview-widget-container__widget{height:100%;width:100%}
 @media(max-width:850px){
  .scanner{grid-template-columns:1fr}
  .cell+.cell{border-left:0;border-top:1px solid #2a2e39}
@@ -44,47 +42,16 @@ h1{font-size:23px;margin:0 0 5px;color:#f0f3fa}
     <div class="cell">
       <div class="label">Detected setup</div>
       <div class="value setup">Cup Pattern</div>
-      <div class="summary">TradingView opens on scanner timeframe: Monthly</div>
+      <div class="summary">TradingView symbol: NSE:TCS · scanner timeframe: Monthly</div>
     </div>
   </div>
 
   <div class="tvwrap">
     <div class="tradingview-widget-container">
       <div class="tradingview-widget-container__widget"></div>
-      <div class="tradingview-widget-copyright">
-        <a href="https://www.tradingview.com/symbols/TCS/" rel="noopener nofollow" target="_blank">
-          TCS chart
-        </a> by TradingView
-      </div>
       <script type="text/javascript"
         src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
-        async>
-      {
-        "autosize": true,
-        "symbol": "NSE:TCS",
-        "interval": "M",
-        "timezone": "Asia/Kolkata",
-        "theme": "dark",
-        "backgroundColor": "rgba(11, 14, 17, 1)",
-        "style": "1",
-        "locale": "en",
-        "withdateranges": true,
-        "hide_side_toolbar": false,
-        "allow_symbol_change": true,
-        "save_image": false,
-        "calendar": false,
-        "details": true,
-        "hotlist": false,
-        "show_popup_button": true,
-        "popup_width": "1200",
-        "popup_height": "750",
-        "studies": [
-          "RSI@tv-basicstudies",
-          "Volume@tv-basicstudies"
-        ],
-        "support_host": "https://www.tradingview.com"
-      }
-      </script>
+        async>{"autosize": true, "symbol": "NSE:TCS", "interval": "M", "timezone": "Asia/Kolkata", "theme": "dark", "backgroundColor": "rgba(11, 14, 17, 1)", "style": "1", "locale": "en", "withdateranges": true, "hide_side_toolbar": false, "allow_symbol_change": true, "save_image": false, "calendar": false, "details": true, "hotlist": false, "show_popup_button": true, "popup_width": "1200", "popup_height": "750", "studies": ["RSI@tv-basicstudies", "Volume@tv-basicstudies"], "support_host": "https://www.tradingview.com"}</script>
     </div>
   </div>
 </div>
