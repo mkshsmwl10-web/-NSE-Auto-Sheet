@@ -203,7 +203,7 @@ HTML_TEMPLATE = r"""
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>__PAGE_TITLE__</title>
-<script src="https://unpkg.com/lightweight-charts@5.0.8/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 * { box-sizing:border-box; }
 body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,sans-serif; }
@@ -290,7 +290,7 @@ function renderTF(tf) {
     timeScale:{ borderColor:"#475569", timeVisible:true }
   });
 
-  candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+  candleSeries = chart.addCandlestickSeries({
     upColor:"#22c55e",
     downColor:"#ef4444",
     borderVisible:false,
@@ -319,7 +319,14 @@ function fitChart() {
 }
 
 setupStatuses();
-renderTF("Daily");
+try {
+  renderTF("Daily");
+} catch (err) {
+  document.getElementById("chart").innerHTML =
+    '<div style="padding:24px;color:#fecaca;font-weight:700;">Chart error: ' +
+    String(err) + '</div>';
+  console.error(err);
+}
 
 window.addEventListener("resize", () => {
   if (!chart) return;
@@ -336,7 +343,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=3"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=4"
 
     payload = {
         "name": stock_name,
