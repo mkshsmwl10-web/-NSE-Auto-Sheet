@@ -412,7 +412,7 @@ def write_sheet(book, results):
     for r in results:
         values.append([
             r["name"], r["code"], r["cmp"], r["daily"], r["weekly"], r["monthly"],
-            f'=HYPERLINK("{r["chart"]}","OPEN CHART")',
+            "OPEN CHART",
         ])
 
     ws.update(
@@ -531,6 +531,56 @@ def write_sheet(book, results):
 
     if requests:
         book.batch_update({"requests":requests})
+
+    # TRUE CLICKABLE CHART LINKS
+    # Same Google Sheets rich-text method used by the working Final List.
+    try:
+        rich_link_requests = []
+
+        for row_index, row in enumerate(results, start=2):
+            chart_url = str(row.get("chart", "") or "").strip()
+
+            if not chart_url.startswith(("http://", "https://")):
+                continue
+
+            rich_link_requests.append({
+                "updateCells": {
+                    "range": {
+                        "sheetId": ws.id,
+                        "startRowIndex": row_index - 1,
+                        "endRowIndex": row_index,
+                        "startColumnIndex": 6,
+                        "endColumnIndex": 7,
+                    },
+                    "rows": [{
+                        "values": [{
+                            "userEnteredValue": {
+                                "stringValue": "OPEN CHART"
+                            },
+                            "textFormatRuns": [{
+                                "startIndex": 0,
+                                "format": {
+                                    "link": {"uri": chart_url},
+                                    "underline": True,
+                                },
+                            }],
+                        }]
+                    }],
+                    "fields": "userEnteredValue,textFormatRuns",
+                }
+            })
+
+        for batch_start in range(0, len(rich_link_requests), 100):
+            book.batch_update({
+                "requests": rich_link_requests[
+                    batch_start:batch_start + 100
+                ]
+            })
+
+        print("Clickable rich-text chart links applied:", len(rich_link_requests))
+
+    except Exception as exc:
+        print("WARNING: Rich-text chart link formatting failed:", exc)
 
 
 def main():
