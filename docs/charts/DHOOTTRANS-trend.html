@@ -1,0 +1,140 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DHOOTTRANS Trend Chart</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+* { box-sizing:border-box; }
+body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,sans-serif; }
+.header { padding:18px 22px; background:#111827; border-bottom:1px solid #334155; }
+.title { font-size:24px; font-weight:700; }
+.subtitle { margin-top:6px; color:#94a3b8; }
+.status-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; padding:14px 20px; }
+.status { padding:12px; border-radius:8px; text-align:center; font-weight:700; }
+.positive { background:#14532d; color:#dcfce7; }
+.negative { background:#7f1d1d; color:#fee2e2; }
+.nodata { background:#374151; color:#f8fafc; }
+.toolbar { padding:8px 20px 14px; }
+button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
+button.active { background:#2563eb; }
+.info { padding:0 20px 10px; color:#cbd5e1; }
+#chart { width:100%; height:650px; }
+@media(max-width:700px) {
+  .status-grid { grid-template-columns:1fr; }
+  #chart { height:520px; }
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="title" id="title"></div>
+  <div class="subtitle" id="subtitle"></div>
+</div>
+<div class="status-grid">
+  <div id="dailyStatus" class="status">Daily</div>
+  <div id="weeklyStatus" class="status">Weekly</div>
+  <div id="monthlyStatus" class="status">Monthly</div>
+</div>
+<div class="toolbar">
+  <button id="Daily" onclick="renderTF('Daily')">1D</button>
+  <button id="Weekly" onclick="renderTF('Weekly')">1W</button>
+  <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
+  <button onclick="fitChart()">Fit</button>
+</div>
+<div class="info" id="info"></div>
+<div id="chart"></div>
+<script>
+const DATA = {"name": "DHOOTTRANS", "code": "DHOOTTRANS", "cmp": 1590.7, "Daily": {"trend": "POSITIVE", "reference": 1170.0, "bars": [{"time": "2026-08-17", "open": 1200.0, "high": 1205.0, "low": 1131.0, "close": 1187.05}, {"time": "2026-08-18", "open": 1170.0, "high": 1305.75, "low": 1165.0, "close": 1305.75}, {"time": "2026-08-19", "open": 1297.7, "high": 1436.3, "low": 1272.0, "close": 1404.05}, {"time": "2026-08-20", "open": 1400.0, "high": 1495.0, "low": 1355.0, "close": 1468.65}, {"time": "2026-08-21", "open": 1440.0, "high": 1523.0, "low": 1429.1, "close": 1478.95}, {"time": "2026-08-24", "open": 1460.0, "high": 1477.7, "low": 1416.6, "close": 1443.4}, {"time": "2026-08-25", "open": 1443.4, "high": 1541.1, "low": 1410.1, "close": 1521.75}, {"time": "2026-08-26", "open": 1526.05, "high": 1665.2, "low": 1512.2, "close": 1575.55}, {"time": "2026-08-27", "open": 1577.05, "high": 1584.85, "low": 1473.0, "close": 1499.85}, {"time": "2026-08-28", "open": 1509.0, "high": 1510.9, "low": 1431.25, "close": 1454.9}, {"time": "2026-08-31", "open": 1459.95, "high": 1511.75, "low": 1437.4, "close": 1474.6}, {"time": "2026-09-01", "open": 1490.2, "high": 1510.0, "low": 1402.8, "close": 1450.1}, {"time": "2026-09-02", "open": 1433.1, "high": 1595.0, "low": 1424.0, "close": 1522.1}, {"time": "2026-09-03", "open": 1525.0, "high": 1614.2, "low": 1513.2, "close": 1583.5}, {"time": "2026-09-04", "open": 1615.0, "high": 1665.0, "low": 1570.1, "close": 1615.7}, {"time": "2026-09-07", "open": 1580.0, "high": 1584.0, "low": 1526.1, "close": 1551.7}, {"time": "2026-09-08", "open": 1551.7, "high": 1608.5, "low": 1537.0, "close": 1597.6}, {"time": "2026-09-09", "open": 1609.9, "high": 1610.0, "low": 1565.1, "close": 1596.5}, {"time": "2026-09-10", "open": 1607.0, "high": 1609.5, "low": 1550.9, "close": 1571.6}, {"time": "2026-09-11", "open": 1552.0, "high": 1728.7, "low": 1531.5, "close": 1728.7}, {"time": "2026-09-14", "open": 1728.7, "high": 1728.7, "low": 1728.7, "close": 1728.7}, {"time": "2026-09-15", "open": 1735.3, "high": 1735.3, "low": 1555.9, "close": 1555.9}, {"time": "2026-09-16", "open": 1525.0, "high": 1614.4, "low": 1400.4, "close": 1590.9}, {"time": "2026-09-17", "open": 1575.1, "high": 1633.3, "low": 1517.0, "close": 1579.8}, {"time": "2026-09-18", "open": 1575.0, "high": 1603.8, "low": 1558.0, "close": 1590.7}]}, "Weekly": {"trend": "POSITIVE", "reference": 1200.0, "bars": [{"time": "2026-08-21", "open": 1200.0, "high": 1523.0, "low": 1131.0, "close": 1478.95}, {"time": "2026-08-28", "open": 1460.0, "high": 1665.2, "low": 1410.1, "close": 1454.9}, {"time": "2026-09-04", "open": 1459.95, "high": 1665.0, "low": 1402.8, "close": 1615.7}, {"time": "2026-09-11", "open": 1580.0, "high": 1728.7, "low": 1526.1, "close": 1728.7}, {"time": "2026-09-18", "open": 1728.7, "high": 1735.3, "low": 1400.4, "close": 1590.7}]}, "Monthly": {"trend": "POSITIVE", "reference": 1200.0, "bars": [{"time": "2026-08-31", "open": 1200.0, "high": 1665.2, "low": 1131.0, "close": 1474.6}]}};
+let chart = null;
+let candleSeries = null;
+
+document.getElementById("title").textContent = DATA.name + " (" + DATA.code + ")";
+document.getElementById("subtitle").textContent = "CMP: " + DATA.cmp;
+
+function statusClass(trend) {
+  if (trend === "POSITIVE") return "status positive";
+  if (trend === "NEGATIVE") return "status negative";
+  return "status nodata";
+}
+
+function setupStatuses() {
+  [["dailyStatus","Daily"],["weeklyStatus","Weekly"],["monthlyStatus","Monthly"]].forEach(pair => {
+    const el = document.getElementById(pair[0]);
+    const tf = pair[1];
+    el.className = statusClass(DATA[tf].trend);
+    el.innerHTML = tf + "<br>" + DATA[tf].trend;
+  });
+}
+
+function renderTF(tf) {
+  document.querySelectorAll(".toolbar button").forEach(b => b.classList.remove("active"));
+  const btn = document.getElementById(tf);
+  if (btn) btn.classList.add("active");
+
+  const holder = document.getElementById("chart");
+  holder.innerHTML = "";
+  const item = DATA[tf];
+
+  document.getElementById("info").innerHTML =
+    "<b>" + tf + " Trend:</b> " + item.trend +
+    " &nbsp;&nbsp; <b>Active Reversal Open:</b> " +
+    (item.reference === null ? "-" : item.reference);
+
+  chart = LightweightCharts.createChart(holder, {
+    width:holder.clientWidth,
+    height:holder.clientHeight,
+    layout:{ background:{ color:"#0f172a" }, textColor:"#cbd5e1" },
+    grid:{ vertLines:{ color:"#1e293b" }, horzLines:{ color:"#1e293b" } },
+    rightPriceScale:{ borderColor:"#475569" },
+    timeScale:{ borderColor:"#475569", timeVisible:true }
+  });
+
+  candleSeries = chart.addCandlestickSeries({
+    upColor:"#22c55e",
+    downColor:"#ef4444",
+    borderVisible:false,
+    wickUpColor:"#22c55e",
+    wickDownColor:"#ef4444"
+  });
+
+  candleSeries.setData(item.bars);
+
+  if (item.reference !== null) {
+    candleSeries.createPriceLine({
+      price:item.reference,
+      color:"#f59e0b",
+      lineWidth:2,
+      lineStyle:2,
+      axisLabelVisible:true,
+      title:"Reference Open"
+    });
+  }
+
+  chart.timeScale().fitContent();
+}
+
+function fitChart() {
+  if (chart) chart.timeScale().fitContent();
+}
+
+setupStatuses();
+try {
+  renderTF("Daily");
+} catch (err) {
+  document.getElementById("chart").innerHTML =
+    '<div style="padding:24px;color:#fecaca;font-weight:700;">Chart error: ' +
+    String(err) + '</div>';
+  console.error(err);
+}
+
+window.addEventListener("resize", () => {
+  if (!chart) return;
+  const holder = document.getElementById("chart");
+  chart.applyOptions({ width:holder.clientWidth });
+});
+</script>
+</body>
+</html>
