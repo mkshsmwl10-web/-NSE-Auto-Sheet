@@ -31,10 +31,15 @@ jobs:
           pip install requests
           pip install yfinance
 
-      - name: Run Python Script
+      - name: Run Main Scanner
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
         run: python update_sheet.py
+
+      - name: Run Trend Scanner Test
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+        run: python trend_scanner.py
 
       - name: Save Pattern Charts to GitHub
         run: |
