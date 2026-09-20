@@ -13,10 +13,10 @@ from google.oauth2.service_account import Credentials
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E")
 INPUT_SHEET = os.environ.get("INPUT_SHEET", "NIFTY200")
 OUTPUT_SHEET = os.environ.get("TREND_SHEET", "Trend Scanner")
-CHART_OUTPUT_DIR = Path(os.environ.get("TREND_CHART_OUTPUT_DIR", "docs/trend-charts"))
+CHART_OUTPUT_DIR = Path(os.environ.get("TREND_CHART_OUTPUT_DIR", "docs/charts"))
 CHART_BASE_URL = os.environ.get(
     "TREND_CHART_BASE_URL",
-    "https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/trend-charts",
+    "https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/charts",
 )
 DOWNLOAD_PERIOD = "5y"
 IST = ZoneInfo("Asia/Kolkata")
@@ -115,11 +115,8 @@ def make_monthly(daily):
 
 def calculate_dynamic_trend(df):
     """
-    First candle: Close >= Open => POSITIVE, else NEGATIVE.
-    POSITIVE flips if Close < previous reference Open.
-    NEGATIVE flips if Close > previous reference Open.
-    After EVERY completed candle, that candle's Open becomes next reference Open.
-    Equality does not flip.
+    Reversal-reference trend logic.
+    Reference Open changes ONLY when a trend reversal is confirmed.
     """
     if df is None or df.empty:
         return "NO DATA", None, None
@@ -140,12 +137,12 @@ def calculate_dynamic_trend(df):
 
         if trend == "POSITIVE" and candle_close < reference_open:
             trend = "NEGATIVE"
+            reference_open = candle_open
             last_change = work.index[i]
         elif trend == "NEGATIVE" and candle_close > reference_open:
             trend = "POSITIVE"
+            reference_open = candle_open
             last_change = work.index[i]
-
-        reference_open = candle_open
 
     return trend, round(reference_open, 2), last_change
 
@@ -278,7 +275,7 @@ function renderTF(tf) {
 
   document.getElementById("info").innerHTML =
     "<b>" + tf + " Trend:</b> " + item.trend +
-    " &nbsp;&nbsp; <b>Current Reference Open:</b> " +
+    " &nbsp;&nbsp; <b>Active Reversal Open:</b> " +
     (item.reference === null ? "-" : item.reference);
 
   chart = LightweightCharts.createChart(holder, {
@@ -343,7 +340,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=4"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=7"
 
     payload = {
         "name": stock_name,
@@ -379,12 +376,11 @@ def scan_stock(stock):
     weekly_info = calculate_dynamic_trend(weekly)
     monthly_info = calculate_dynamic_trend(monthly)
 
-    # Reuse the existing working Final List chart page.
-    # Example: ABB -> docs/charts/ABB-all-patterns.html?v=5
-    safe_code = stock["code"].replace("^", "").replace("/", "-").replace(":", "-")
-    chart_url = (
-        "https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/"
-        f"docs/charts/{safe_code}-all-patterns.html?v=5"
+    # Generate dedicated trend chart for every instrument, including NIFTY 50 SPOT.
+    chart_url = generate_chart(
+        stock["code"], stock["name"], cmp_price,
+        daily, weekly, monthly,
+        daily_info, weekly_info, monthly_info,
     )
 
     return {
