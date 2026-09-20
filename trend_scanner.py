@@ -379,10 +379,12 @@ def scan_stock(stock):
     weekly_info = calculate_dynamic_trend(weekly)
     monthly_info = calculate_dynamic_trend(monthly)
 
-    chart_url = generate_chart(
-        stock["code"], stock["name"], cmp_price,
-        daily, weekly, monthly,
-        daily_info, weekly_info, monthly_info,
+    # Reuse the existing working Final List chart page.
+    # Example: ABB -> docs/charts/ABB-all-patterns.html?v=5
+    safe_code = stock["code"].replace("^", "").replace("/", "-").replace(":", "-")
+    chart_url = (
+        "https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/"
+        f"docs/charts/{safe_code}-all-patterns.html?v=5"
     )
 
     return {
