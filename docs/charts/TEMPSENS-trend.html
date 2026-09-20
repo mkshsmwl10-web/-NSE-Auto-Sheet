@@ -1,0 +1,140 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TEMPSENS Trend Chart</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+* { box-sizing:border-box; }
+body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,sans-serif; }
+.header { padding:18px 22px; background:#111827; border-bottom:1px solid #334155; }
+.title { font-size:24px; font-weight:700; }
+.subtitle { margin-top:6px; color:#94a3b8; }
+.status-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; padding:14px 20px; }
+.status { padding:12px; border-radius:8px; text-align:center; font-weight:700; }
+.positive { background:#14532d; color:#dcfce7; }
+.negative { background:#7f1d1d; color:#fee2e2; }
+.nodata { background:#374151; color:#f8fafc; }
+.toolbar { padding:8px 20px 14px; }
+button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
+button.active { background:#2563eb; }
+.info { padding:0 20px 10px; color:#cbd5e1; }
+#chart { width:100%; height:650px; }
+@media(max-width:700px) {
+  .status-grid { grid-template-columns:1fr; }
+  #chart { height:520px; }
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="title" id="title"></div>
+  <div class="subtitle" id="subtitle"></div>
+</div>
+<div class="status-grid">
+  <div id="dailyStatus" class="status">Daily</div>
+  <div id="weeklyStatus" class="status">Weekly</div>
+  <div id="monthlyStatus" class="status">Monthly</div>
+</div>
+<div class="toolbar">
+  <button id="Daily" onclick="renderTF('Daily')">1D</button>
+  <button id="Weekly" onclick="renderTF('Weekly')">1W</button>
+  <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
+  <button onclick="fitChart()">Fit</button>
+</div>
+<div class="info" id="info"></div>
+<div id="chart"></div>
+<script>
+const DATA = {"name": "TEMPSENS", "code": "TEMPSENS", "cmp": 531.6, "Daily": {"trend": "POSITIVE", "reference": 542.8, "bars": [{"time": "2026-08-28", "open": 634.0, "high": 634.85, "low": 551.15, "close": 586.65}, {"time": "2026-08-31", "open": 579.0, "high": 585.0, "low": 557.1, "close": 563.6}, {"time": "2026-09-01", "open": 560.2, "high": 574.8, "low": 534.7, "close": 539.05}, {"time": "2026-09-02", "open": 536.0, "high": 589.0, "low": 535.05, "close": 566.3}, {"time": "2026-09-03", "open": 577.5, "high": 584.95, "low": 556.05, "close": 568.55}, {"time": "2026-09-04", "open": 570.8, "high": 573.75, "low": 547.55, "close": 554.8}, {"time": "2026-09-07", "open": 559.0, "high": 559.0, "low": 540.0, "close": 546.2}, {"time": "2026-09-08", "open": 546.0, "high": 573.75, "low": 537.35, "close": 571.35}, {"time": "2026-09-09", "open": 574.7, "high": 609.8, "low": 572.0, "close": 588.65}, {"time": "2026-09-10", "open": 600.0, "high": 602.4, "low": 575.8, "close": 581.3}, {"time": "2026-09-11", "open": 578.9, "high": 594.15, "low": 561.2, "close": 584.8}, {"time": "2026-09-14", "open": 584.8, "high": 584.8, "low": 584.8, "close": 584.8}, {"time": "2026-09-15", "open": 589.0, "high": 592.0, "low": 517.25, "close": 523.65}, {"time": "2026-09-16", "open": 530.0, "high": 546.0, "low": 521.1, "close": 540.55}, {"time": "2026-09-17", "open": 514.9, "high": 562.3, "low": 505.05, "close": 541.55}, {"time": "2026-09-18", "open": 542.8, "high": 552.4, "low": 524.5, "close": 531.6}]}, "Weekly": {"trend": "NEGATIVE", "reference": 584.8, "bars": [{"time": "2026-08-28", "open": 634.0, "high": 634.85, "low": 551.15, "close": 586.65}, {"time": "2026-09-04", "open": 579.0, "high": 589.0, "low": 534.7, "close": 554.8}, {"time": "2026-09-11", "open": 559.0, "high": 609.8, "low": 537.35, "close": 584.8}, {"time": "2026-09-18", "open": 584.8, "high": 592.0, "low": 505.05, "close": 531.6}]}, "Monthly": {"trend": "NEGATIVE", "reference": 634.0, "bars": [{"time": "2026-08-31", "open": 634.0, "high": 634.85, "low": 551.15, "close": 563.6}]}};
+let chart = null;
+let candleSeries = null;
+
+document.getElementById("title").textContent = DATA.name + " (" + DATA.code + ")";
+document.getElementById("subtitle").textContent = "CMP: " + DATA.cmp;
+
+function statusClass(trend) {
+  if (trend === "POSITIVE") return "status positive";
+  if (trend === "NEGATIVE") return "status negative";
+  return "status nodata";
+}
+
+function setupStatuses() {
+  [["dailyStatus","Daily"],["weeklyStatus","Weekly"],["monthlyStatus","Monthly"]].forEach(pair => {
+    const el = document.getElementById(pair[0]);
+    const tf = pair[1];
+    el.className = statusClass(DATA[tf].trend);
+    el.innerHTML = tf + "<br>" + DATA[tf].trend;
+  });
+}
+
+function renderTF(tf) {
+  document.querySelectorAll(".toolbar button").forEach(b => b.classList.remove("active"));
+  const btn = document.getElementById(tf);
+  if (btn) btn.classList.add("active");
+
+  const holder = document.getElementById("chart");
+  holder.innerHTML = "";
+  const item = DATA[tf];
+
+  document.getElementById("info").innerHTML =
+    "<b>" + tf + " Trend:</b> " + item.trend +
+    " &nbsp;&nbsp; <b>Current Reference Open:</b> " +
+    (item.reference === null ? "-" : item.reference);
+
+  chart = LightweightCharts.createChart(holder, {
+    width:holder.clientWidth,
+    height:holder.clientHeight,
+    layout:{ background:{ color:"#0f172a" }, textColor:"#cbd5e1" },
+    grid:{ vertLines:{ color:"#1e293b" }, horzLines:{ color:"#1e293b" } },
+    rightPriceScale:{ borderColor:"#475569" },
+    timeScale:{ borderColor:"#475569", timeVisible:true }
+  });
+
+  candleSeries = chart.addCandlestickSeries({
+    upColor:"#22c55e",
+    downColor:"#ef4444",
+    borderVisible:false,
+    wickUpColor:"#22c55e",
+    wickDownColor:"#ef4444"
+  });
+
+  candleSeries.setData(item.bars);
+
+  if (item.reference !== null) {
+    candleSeries.createPriceLine({
+      price:item.reference,
+      color:"#f59e0b",
+      lineWidth:2,
+      lineStyle:2,
+      axisLabelVisible:true,
+      title:"Reference Open"
+    });
+  }
+
+  chart.timeScale().fitContent();
+}
+
+function fitChart() {
+  if (chart) chart.timeScale().fitContent();
+}
+
+setupStatuses();
+try {
+  renderTF("Daily");
+} catch (err) {
+  document.getElementById("chart").innerHTML =
+    '<div style="padding:24px;color:#fecaca;font-weight:700;">Chart error: ' +
+    String(err) + '</div>';
+  console.error(err);
+}
+
+window.addEventListener("resize", () => {
+  if (!chart) return;
+  const holder = document.getElementById("chart");
+  chart.applyOptions({ width:holder.clientWidth });
+});
+</script>
+</body>
+</html>

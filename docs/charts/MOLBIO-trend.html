@@ -1,0 +1,140 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MOLBIO Trend Chart</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+* { box-sizing:border-box; }
+body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,sans-serif; }
+.header { padding:18px 22px; background:#111827; border-bottom:1px solid #334155; }
+.title { font-size:24px; font-weight:700; }
+.subtitle { margin-top:6px; color:#94a3b8; }
+.status-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; padding:14px 20px; }
+.status { padding:12px; border-radius:8px; text-align:center; font-weight:700; }
+.positive { background:#14532d; color:#dcfce7; }
+.negative { background:#7f1d1d; color:#fee2e2; }
+.nodata { background:#374151; color:#f8fafc; }
+.toolbar { padding:8px 20px 14px; }
+button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
+button.active { background:#2563eb; }
+.info { padding:0 20px 10px; color:#cbd5e1; }
+#chart { width:100%; height:650px; }
+@media(max-width:700px) {
+  .status-grid { grid-template-columns:1fr; }
+  #chart { height:520px; }
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="title" id="title"></div>
+  <div class="subtitle" id="subtitle"></div>
+</div>
+<div class="status-grid">
+  <div id="dailyStatus" class="status">Daily</div>
+  <div id="weeklyStatus" class="status">Weekly</div>
+  <div id="monthlyStatus" class="status">Monthly</div>
+</div>
+<div class="toolbar">
+  <button id="Daily" onclick="renderTF('Daily')">1D</button>
+  <button id="Weekly" onclick="renderTF('Weekly')">1W</button>
+  <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
+  <button onclick="fitChart()">Fit</button>
+</div>
+<div class="info" id="info"></div>
+<div id="chart"></div>
+<script>
+const DATA = {"name": "MOLBIO", "code": "MOLBIO", "cmp": 1288.3, "Daily": {"trend": "NEGATIVE", "reference": 1297.1, "bars": [{"time": "2026-08-17", "open": 980.0, "high": 1064.75, "low": 926.35, "close": 1041.7}, {"time": "2026-08-18", "open": 1037.0, "high": 1177.0, "low": 1022.65, "close": 1110.9}, {"time": "2026-08-19", "open": 1085.0, "high": 1132.85, "low": 1012.0, "close": 1036.65}, {"time": "2026-08-20", "open": 1046.9, "high": 1083.5, "low": 1020.05, "close": 1036.65}, {"time": "2026-08-21", "open": 1047.05, "high": 1118.4, "low": 1041.2, "close": 1098.45}, {"time": "2026-08-24", "open": 1125.0, "high": 1219.95, "low": 1125.0, "close": 1199.3}, {"time": "2026-08-25", "open": 1224.15, "high": 1247.0, "low": 1180.05, "close": 1227.35}, {"time": "2026-08-26", "open": 1242.0, "high": 1264.6, "low": 1215.0, "close": 1238.85}, {"time": "2026-08-27", "open": 1234.0, "high": 1243.7, "low": 1130.1, "close": 1144.15}, {"time": "2026-08-28", "open": 1153.95, "high": 1156.1, "low": 1077.5, "close": 1094.75}, {"time": "2026-08-31", "open": 1102.1, "high": 1161.1, "low": 1065.2, "close": 1086.3}, {"time": "2026-09-01", "open": 1072.3, "high": 1089.2, "low": 1035.2, "close": 1053.3}, {"time": "2026-09-02", "open": 1047.2, "high": 1132.1, "low": 1043.8, "close": 1107.8}, {"time": "2026-09-03", "open": 1120.0, "high": 1141.8, "low": 1103.0, "close": 1135.2}, {"time": "2026-09-04", "open": 1139.9, "high": 1177.0, "low": 1117.2, "close": 1160.5}, {"time": "2026-09-07", "open": 1170.0, "high": 1183.7, "low": 1098.2, "close": 1127.2}, {"time": "2026-09-08", "open": 1127.2, "high": 1155.0, "low": 1110.2, "close": 1117.5}, {"time": "2026-09-09", "open": 1119.0, "high": 1293.5, "low": 1111.5, "close": 1257.9}, {"time": "2026-09-10", "open": 1271.0, "high": 1509.4, "low": 1271.0, "close": 1509.4}, {"time": "2026-09-11", "open": 1545.0, "high": 1686.8, "low": 1391.7, "close": 1438.2}, {"time": "2026-09-14", "open": 1438.2, "high": 1438.2, "low": 1438.2, "close": 1438.2}, {"time": "2026-09-15", "open": 1419.7, "high": 1419.7, "low": 1273.0, "close": 1356.8}, {"time": "2026-09-16", "open": 1385.0, "high": 1437.6, "low": 1196.2, "close": 1307.0}, {"time": "2026-09-17", "open": 1313.5, "high": 1382.0, "low": 1272.1, "close": 1285.3}, {"time": "2026-09-18", "open": 1297.1, "high": 1314.8, "low": 1262.2, "close": 1288.3}]}, "Weekly": {"trend": "POSITIVE", "reference": 1438.2, "bars": [{"time": "2026-08-21", "open": 980.0, "high": 1177.0, "low": 926.35, "close": 1098.45}, {"time": "2026-08-28", "open": 1125.0, "high": 1264.6, "low": 1077.5, "close": 1094.75}, {"time": "2026-09-04", "open": 1102.1, "high": 1177.0, "low": 1035.2, "close": 1160.5}, {"time": "2026-09-11", "open": 1170.0, "high": 1686.8, "low": 1098.2, "close": 1438.2}, {"time": "2026-09-18", "open": 1438.2, "high": 1438.2, "low": 1196.2, "close": 1288.3}]}, "Monthly": {"trend": "POSITIVE", "reference": 980.0, "bars": [{"time": "2026-08-31", "open": 980.0, "high": 1264.6, "low": 926.35, "close": 1086.3}]}};
+let chart = null;
+let candleSeries = null;
+
+document.getElementById("title").textContent = DATA.name + " (" + DATA.code + ")";
+document.getElementById("subtitle").textContent = "CMP: " + DATA.cmp;
+
+function statusClass(trend) {
+  if (trend === "POSITIVE") return "status positive";
+  if (trend === "NEGATIVE") return "status negative";
+  return "status nodata";
+}
+
+function setupStatuses() {
+  [["dailyStatus","Daily"],["weeklyStatus","Weekly"],["monthlyStatus","Monthly"]].forEach(pair => {
+    const el = document.getElementById(pair[0]);
+    const tf = pair[1];
+    el.className = statusClass(DATA[tf].trend);
+    el.innerHTML = tf + "<br>" + DATA[tf].trend;
+  });
+}
+
+function renderTF(tf) {
+  document.querySelectorAll(".toolbar button").forEach(b => b.classList.remove("active"));
+  const btn = document.getElementById(tf);
+  if (btn) btn.classList.add("active");
+
+  const holder = document.getElementById("chart");
+  holder.innerHTML = "";
+  const item = DATA[tf];
+
+  document.getElementById("info").innerHTML =
+    "<b>" + tf + " Trend:</b> " + item.trend +
+    " &nbsp;&nbsp; <b>Current Reference Open:</b> " +
+    (item.reference === null ? "-" : item.reference);
+
+  chart = LightweightCharts.createChart(holder, {
+    width:holder.clientWidth,
+    height:holder.clientHeight,
+    layout:{ background:{ color:"#0f172a" }, textColor:"#cbd5e1" },
+    grid:{ vertLines:{ color:"#1e293b" }, horzLines:{ color:"#1e293b" } },
+    rightPriceScale:{ borderColor:"#475569" },
+    timeScale:{ borderColor:"#475569", timeVisible:true }
+  });
+
+  candleSeries = chart.addCandlestickSeries({
+    upColor:"#22c55e",
+    downColor:"#ef4444",
+    borderVisible:false,
+    wickUpColor:"#22c55e",
+    wickDownColor:"#ef4444"
+  });
+
+  candleSeries.setData(item.bars);
+
+  if (item.reference !== null) {
+    candleSeries.createPriceLine({
+      price:item.reference,
+      color:"#f59e0b",
+      lineWidth:2,
+      lineStyle:2,
+      axisLabelVisible:true,
+      title:"Reference Open"
+    });
+  }
+
+  chart.timeScale().fitContent();
+}
+
+function fitChart() {
+  if (chart) chart.timeScale().fitContent();
+}
+
+setupStatuses();
+try {
+  renderTF("Daily");
+} catch (err) {
+  document.getElementById("chart").innerHTML =
+    '<div style="padding:24px;color:#fecaca;font-weight:700;">Chart error: ' +
+    String(err) + '</div>';
+  console.error(err);
+}
+
+window.addEventListener("resize", () => {
+  if (!chart) return;
+  const holder = document.getElementById("chart");
+  chart.applyOptions({ width:holder.clientWidth });
+});
+</script>
+</body>
+</html>
