@@ -525,7 +525,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=12"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=13"
 
     payload = {
         "name": stock_name,
@@ -579,6 +579,25 @@ def scan_stock(stock):
     }
 
 
+
+def classify_signal(code, daily, weekly, monthly):
+    """Classify stock alignment. NIFTY spot is intentionally excluded."""
+    if code == "^NSEI":
+        return ""
+
+    combo = (daily, weekly, monthly)
+
+    if combo == ("POSITIVE", "POSITIVE", "POSITIVE"):
+        return "ALL POSITIVE"
+    if combo == ("NEGATIVE", "NEGATIVE", "NEGATIVE"):
+        return "ALL NEGATIVE"
+    if combo == ("NEGATIVE", "POSITIVE", "POSITIVE"):
+        return "PULLBACK WATCH"
+    if combo == ("POSITIVE", "NEGATIVE", "POSITIVE"):
+        return "REVERSAL WATCH"
+
+    return ""
+
 def write_sheet(book, results):
     try:
         ws = book.worksheet(OUTPUT_SHEET)
@@ -587,7 +606,7 @@ def write_sheet(book, results):
 
     ws.clear()
 
-    headers = ["Stock Name", "NSE Code", "CMP", "Daily Trend", "Weekly Trend", "Monthly Trend", "Chart"]
+    headers = ["Stock Name", "NSE Code", "CMP", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "Chart"]
     values = [headers]
 
     for r in results:
@@ -730,8 +749,8 @@ def write_sheet(book, results):
                         "sheetId": ws.id,
                         "startRowIndex": row_index - 1,
                         "endRowIndex": row_index,
-                        "startColumnIndex": 6,
-                        "endColumnIndex": 7,
+                        "startColumnIndex": 7,
+                        "endColumnIndex": 8,
                     },
                     "rows": [{
                         "values": [{
