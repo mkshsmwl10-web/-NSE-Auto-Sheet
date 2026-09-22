@@ -616,13 +616,13 @@ def write_sheet(book, results):
         ])
 
     ws.update(
-        range_name=f"A1:G{len(values)}",
+        range_name=f"A1:H{len(values)}",
         values=values,
         value_input_option="USER_ENTERED",
     )
     ws.freeze(rows=1, cols=1)
 
-    ws.format("A1:G1", {
+    ws.format("A1:H1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{
             "foregroundColor":{"red":1,"green":1,"blue":1},
