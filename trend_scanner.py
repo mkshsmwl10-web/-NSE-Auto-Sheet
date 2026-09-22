@@ -525,7 +525,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=15"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=16"
 
     payload = {
         "name": stock_name,
@@ -618,6 +618,51 @@ def classify_signal(code, daily, weekly, monthly):
         return "REVERSAL WATCH"
 
     return ""
+
+
+def sort_results_for_positional(results):
+    """
+    Keep NIFTY first, then prioritize positional-long candidates:
+
+      1) ALL POSITIVE + OUTPERFORM
+      2) PULLBACK WATCH + OUTPERFORM
+      3) REVERSAL WATCH + OUTPERFORM
+      4) Other OUTPERFORM stocks
+      5) UNDERPERFORM / remaining stocks
+
+    Within the same bucket, higher RS vs NIFTY comes first.
+    Trend calculation and RS calculation are NOT changed here.
+    """
+    def key(r):
+        code = r.get("code", "")
+        if code == "^NSEI":
+            return (-1, 0.0, "")
+
+        signal = classify_signal(
+            code,
+            r.get("daily", ""),
+            r.get("weekly", ""),
+            r.get("monthly", ""),
+        )
+        strength = r.get("rs_strength", "")
+        rs = r.get("rs_vs_nifty")
+        rs_num = float(rs) if rs is not None else -999999.0
+
+        if strength == "OUTPERFORM" and signal == "ALL POSITIVE":
+            bucket = 0
+        elif strength == "OUTPERFORM" and signal == "PULLBACK WATCH":
+            bucket = 1
+        elif strength == "OUTPERFORM" and signal == "REVERSAL WATCH":
+            bucket = 2
+        elif strength == "OUTPERFORM":
+            bucket = 3
+        else:
+            bucket = 4
+
+        return (bucket, -rs_num, r.get("name", ""))
+
+    return sorted(results, key=key)
+
 
 def write_sheet(book, results):
     try:
@@ -849,6 +894,7 @@ def main():
                 r.get("_daily_df"), nifty_daily
             )
 
+    results = sort_results_for_positional(results)
     write_sheet(book, results)
 
     print("=" * 72)
