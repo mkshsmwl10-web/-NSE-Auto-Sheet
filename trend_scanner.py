@@ -525,7 +525,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=13"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=14"
 
     payload = {
         "name": stock_name,
@@ -611,7 +611,13 @@ def write_sheet(book, results):
 
     for r in results:
         values.append([
-            r["name"], r["code"], r["cmp"], r["daily"], r["weekly"], r["monthly"],
+            r["name"],
+            r["code"],
+            r["cmp"],
+            r["daily"],
+            r["weekly"],
+            r["monthly"],
+            classify_signal(r["code"], r["daily"], r["weekly"], r["monthly"]),
             "OPEN CHART",
         ])
 
@@ -634,8 +640,8 @@ def write_sheet(book, results):
     })
 
     if len(values) > 1:
-        ws.format(f"A2:G{len(values)}", {"verticalAlignment":"MIDDLE"})
-        ws.format(f"B2:G{len(values)}", {"horizontalAlignment":"CENTER"})
+        ws.format(f"A2:H{len(values)}", {"verticalAlignment":"MIDDLE"})
+        ws.format(f"B2:H{len(values)}", {"horizontalAlignment":"CENTER"})
         ws.format("A2:G2", {
             "backgroundColor":{"red":0.88,"green":0.93,"blue":1.0},
             "textFormat":{"bold":True},
@@ -714,7 +720,7 @@ def write_sheet(book, results):
             }
         })
 
-    widths = {0:190, 1:110, 2:100, 3:120, 4:120, 5:130, 6:130}
+    widths = {0:190, 1:110, 2:100, 3:120, 4:120, 5:130, 6:170, 7:130}
     for col, pixels in widths.items():
         requests.append({
             "updateDimensionProperties":{
