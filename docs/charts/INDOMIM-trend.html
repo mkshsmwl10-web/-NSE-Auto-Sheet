@@ -20,6 +20,8 @@ body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,
 .toolbar { padding:8px 20px 14px; }
 button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
 button.active { background:#2563eb; }
+select,input { border:1px solid #475569; background:#1e293b; color:white; padding:8px 9px; margin-right:7px; border-radius:6px; font-weight:700; }
+input { width:72px; }
 .info { padding:0 20px 10px; color:#cbd5e1; }
 .ohlc { padding:0 20px 10px; min-height:24px; color:#e2e8f0; font-weight:700; }
 .ohlc span { margin-right:14px; }
@@ -48,6 +50,18 @@ button.active { background:#2563eb; }
   <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
   <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
   <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
+  <button id="scalePrice" class="active" onclick="setScaleMode('price')">Price</button>
+  <button id="scalePct" onclick="setScaleMode('percent')">% Scale</button>
+  <select id="indicatorType">
+    <option value="">Indicator</option>
+    <option value="SMA">SMA</option>
+    <option value="EMA">EMA</option>
+    <option value="BB">Bollinger Bands</option>
+  </select>
+  <input id="indicatorPeriod" type="number" min="2" max="250" value="20" title="Period">
+  <input id="bbMult" type="number" min="0.5" max="5" step="0.1" value="2" title="BB multiplier">
+  <button onclick="addIndicator()">Add</button>
+  <button onclick="clearIndicators()">Clear Indicators</button>
   <button id="toolH" onclick="drawH()">H-Line</button> <button id="toolV" onclick="drawV()">V-Line</button>
   <button id="toolT" onclick="drawTrend()">Trend Line</button> <button id="toolR" onclick="drawRay()">Ray</button>
   <button id="toolClear" onclick="clearDrawings()">Clear Drawings</button>
@@ -57,7 +71,7 @@ button.active { background:#2563eb; }
 <script>
 const DATA = {"name": "INDOMIM", "code": "INDOMIM", "cmp": 1233.3, "Daily": {"trend": "POSITIVE", "reference": 1155.0, "bars": [{"time": "2026-07-30", "open": 700.0, "high": 757.75, "low": 700.0, "close": 741.75}, {"time": "2026-07-31", "open": 735.0, "high": 815.9, "low": 725.0, "close": 776.15}, {"time": "2026-08-03", "open": 776.0, "high": 802.7, "low": 765.0, "close": 770.15}, {"time": "2026-08-04", "open": 773.0, "high": 779.7, "low": 750.5, "close": 769.4}, {"time": "2026-08-05", "open": 770.0, "high": 827.4, "low": 761.05, "close": 801.95}, {"time": "2026-08-06", "open": 809.0, "high": 882.1, "low": 804.0, "close": 878.75}, {"time": "2026-08-07", "open": 898.2, "high": 908.0, "low": 850.65, "close": 867.35}, {"time": "2026-08-10", "open": 871.35, "high": 872.6, "low": 821.2, "close": 830.1}, {"time": "2026-08-11", "open": 831.0, "high": 844.7, "low": 816.35, "close": 821.8}, {"time": "2026-08-12", "open": 821.8, "high": 837.9, "low": 808.5, "close": 823.65}, {"time": "2026-08-13", "open": 830.0, "high": 859.3, "low": 825.0, "close": 831.4}, {"time": "2026-08-14", "open": 835.0, "high": 852.35, "low": 815.3, "close": 849.35}, {"time": "2026-08-17", "open": 850.4, "high": 871.15, "low": 838.7, "close": 866.15}, {"time": "2026-08-18", "open": 910.0, "high": 952.75, "low": 905.0, "close": 952.75}, {"time": "2026-08-19", "open": 965.2, "high": 989.9, "low": 936.65, "close": 967.95}, {"time": "2026-08-20", "open": 965.0, "high": 965.0, "low": 907.3, "close": 919.55}, {"time": "2026-08-21", "open": 919.0, "high": 919.0, "low": 877.0, "close": 882.1}, {"time": "2026-08-24", "open": 884.05, "high": 913.8, "low": 880.55, "close": 888.75}, {"time": "2026-08-25", "open": 890.0, "high": 909.0, "low": 878.0, "close": 889.9}, {"time": "2026-08-26", "open": 891.0, "high": 923.9, "low": 882.0, "close": 895.75}, {"time": "2026-08-27", "open": 893.0, "high": 924.45, "low": 871.2, "close": 877.5}, {"time": "2026-08-28", "open": 881.7, "high": 892.0, "low": 864.45, "close": 868.05}, {"time": "2026-08-31", "open": 868.05, "high": 883.0, "low": 854.75, "close": 875.45}, {"time": "2026-09-01", "open": 875.45, "high": 878.35, "low": 846.9, "close": 858.85}, {"time": "2026-09-02", "open": 856.0, "high": 892.0, "low": 839.05, "close": 888.0}, {"time": "2026-09-03", "open": 899.9, "high": 933.0, "low": 888.2, "close": 922.4}, {"time": "2026-09-04", "open": 926.0, "high": 983.6, "low": 926.0, "close": 971.5}, {"time": "2026-09-07", "open": 973.9, "high": 976.95, "low": 941.75, "close": 946.7}, {"time": "2026-09-08", "open": 951.0, "high": 989.0, "low": 943.75, "close": 968.95}, {"time": "2026-09-09", "open": 968.95, "high": 998.0, "low": 947.75, "close": 984.55}, {"time": "2026-09-10", "open": 996.0, "high": 1028.5, "low": 996.0, "close": 1006.55}, {"time": "2026-09-11", "open": 995.0, "high": 1024.5, "low": 978.75, "close": 1018.2}, {"time": "2026-09-14", "open": 1018.2, "high": 1018.2, "low": 1018.2, "close": 1018.2}, {"time": "2026-09-15", "open": 1026.0, "high": 1026.0, "low": 960.1, "close": 975.65}, {"time": "2026-09-16", "open": 970.0, "high": 970.1, "low": 922.55, "close": 946.1}, {"time": "2026-09-17", "open": 955.0, "high": 1008.0, "low": 946.1, "close": 993.2}, {"time": "2026-09-18", "open": 999.0, "high": 1064.0, "low": 990.5, "close": 1055.9}, {"time": "2026-09-21", "open": 1067.0, "high": 1161.45, "low": 1065.25, "close": 1161.45}, {"time": "2026-09-22", "open": 1155.0, "high": 1248.0, "low": 1146.65, "close": 1233.3}]}, "Weekly": {"trend": "POSITIVE", "reference": 1018.2, "bars": [{"time": "2026-07-31", "open": 700.0, "high": 815.9, "low": 700.0, "close": 776.15}, {"time": "2026-08-07", "open": 776.0, "high": 908.0, "low": 750.5, "close": 867.35}, {"time": "2026-08-14", "open": 871.35, "high": 872.6, "low": 808.5, "close": 849.35}, {"time": "2026-08-21", "open": 850.4, "high": 989.9, "low": 838.7, "close": 882.1}, {"time": "2026-08-28", "open": 884.05, "high": 924.45, "low": 864.45, "close": 868.05}, {"time": "2026-09-04", "open": 868.05, "high": 983.6, "low": 839.05, "close": 971.5}, {"time": "2026-09-11", "open": 973.9, "high": 1028.5, "low": 941.75, "close": 1018.2}, {"time": "2026-09-18", "open": 1018.2, "high": 1064.0, "low": 922.55, "close": 1055.9}]}, "Monthly": {"trend": "POSITIVE", "reference": 776.0, "bars": [{"time": "2026-07-31", "open": 700.0, "high": 815.9, "low": 700.0, "close": 776.15}, {"time": "2026-08-31", "open": 776.0, "high": 989.9, "low": 750.5, "close": 875.45}]}};
 let chart = null;
-let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
+let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null, indicatorSeries=[], scaleMode="price";
 const drawCanvas=document.getElementById("drawCanvas");
 const drawHit=document.getElementById("drawHit");
 const pen=drawCanvas.getContext("2d");
@@ -114,6 +128,8 @@ function renderTF(tf) {
   });
 
   candleSeries.setData(item.bars);
+  applyScaleMode();
+  renderIndicators();
   setupCrosshairOHLC();
 
   if (item.reference !== null) {
@@ -131,6 +147,71 @@ function renderTF(tf) {
   setTimeout(resizeDrawingCanvas,0);
 }
 
+
+function setScaleMode(mode){
+  scaleMode=mode;
+  document.getElementById("scalePrice").classList.toggle("active", mode==="price");
+  document.getElementById("scalePct").classList.toggle("active", mode==="percent");
+  applyScaleMode();
+}
+function applyScaleMode(){
+  if(!chart)return;
+  const m=(scaleMode==="percent" && LightweightCharts.PriceScaleMode)
+    ? LightweightCharts.PriceScaleMode.Percentage
+    : (LightweightCharts.PriceScaleMode ? LightweightCharts.PriceScaleMode.Normal : 0);
+  chart.priceScale("right").applyOptions({mode:m});
+}
+function smaData(bars,p){
+  const out=[], q=[];
+  for(const b of bars){
+    q.push(Number(b.close));
+    if(q.length>p)q.shift();
+    if(q.length===p) out.push({time:b.time,value:q.reduce((a,x)=>a+x,0)/p});
+  }
+  return out;
+}
+function emaData(bars,p){
+  const out=[]; if(!bars.length)return out;
+  const k=2/(p+1); let e=Number(bars[0].close);
+  bars.forEach((b,i)=>{e=i===0?Number(b.close):Number(b.close)*k+e*(1-k); if(i>=p-1)out.push({time:b.time,value:e});});
+  return out;
+}
+function bbData(bars,p,m){
+  const mid=[],up=[],lo=[],q=[];
+  for(const b of bars){
+    q.push(Number(b.close)); if(q.length>p)q.shift();
+    if(q.length===p){
+      const avg=q.reduce((a,x)=>a+x,0)/p;
+      const sd=Math.sqrt(q.reduce((a,x)=>a+(x-avg)*(x-avg),0)/p);
+      mid.push({time:b.time,value:avg}); up.push({time:b.time,value:avg+m*sd}); lo.push({time:b.time,value:avg-m*sd});
+    }
+  }
+  return [mid,up,lo];
+}
+function addLine(data,title){
+  if(!chart)return;
+  const ls=chart.addLineSeries({lineWidth:2,title:title,priceLineVisible:false,lastValueVisible:true});
+  ls.setData(data); indicatorSeries.push(ls);
+}
+function addIndicator(){
+  const type=document.getElementById("indicatorType").value;
+  const p=Math.max(2,parseInt(document.getElementById("indicatorPeriod").value||"20"));
+  const mult=Math.max(0.5,parseFloat(document.getElementById("bbMult").value||"2"));
+  if(!type||!DATA[currentTF])return;
+  const bars=DATA[currentTF].bars;
+  if(type==="SMA") addLine(smaData(bars,p),"SMA "+p);
+  if(type==="EMA") addLine(emaData(bars,p),"EMA "+p);
+  if(type==="BB"){
+    const b=bbData(bars,p,mult);
+    addLine(b[0],"BB Mid "+p); addLine(b[1],"BB Upper"); addLine(b[2],"BB Lower");
+  }
+}
+function clearIndicators(){
+  if(chart) indicatorSeries.forEach(x=>{try{chart.removeSeries(x)}catch(e){}});
+  indicatorSeries=[];
+}
+function renderIndicators(){ indicatorSeries=[]; }
+
 function fitChart(){if(chart)chart.timeScale().fitContent();}
 function zoomBy(f){
   if(!chart)return;
@@ -140,7 +221,7 @@ function zoomBy(f){
   t.setVisibleLogicalRange({from:m-h,to:m+h});
 }
 function fitChart(){ if(chart) chart.timeScale().fitContent(); }
-function resetChart(){ fitChart(); clearDrawings(); }
+function resetChart(){ fitChart(); clearDrawings(); clearIndicators(); setScaleMode("price"); }
 
 function resizeDrawingCanvas(){
   const r=drawCanvas.getBoundingClientRect();

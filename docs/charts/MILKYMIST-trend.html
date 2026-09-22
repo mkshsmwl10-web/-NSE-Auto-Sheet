@@ -20,6 +20,8 @@ body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,
 .toolbar { padding:8px 20px 14px; }
 button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
 button.active { background:#2563eb; }
+select,input { border:1px solid #475569; background:#1e293b; color:white; padding:8px 9px; margin-right:7px; border-radius:6px; font-weight:700; }
+input { width:72px; }
 .info { padding:0 20px 10px; color:#cbd5e1; }
 .ohlc { padding:0 20px 10px; min-height:24px; color:#e2e8f0; font-weight:700; }
 .ohlc span { margin-right:14px; }
@@ -48,6 +50,18 @@ button.active { background:#2563eb; }
   <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
   <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
   <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
+  <button id="scalePrice" class="active" onclick="setScaleMode('price')">Price</button>
+  <button id="scalePct" onclick="setScaleMode('percent')">% Scale</button>
+  <select id="indicatorType">
+    <option value="">Indicator</option>
+    <option value="SMA">SMA</option>
+    <option value="EMA">EMA</option>
+    <option value="BB">Bollinger Bands</option>
+  </select>
+  <input id="indicatorPeriod" type="number" min="2" max="250" value="20" title="Period">
+  <input id="bbMult" type="number" min="0.5" max="5" step="0.1" value="2" title="BB multiplier">
+  <button onclick="addIndicator()">Add</button>
+  <button onclick="clearIndicators()">Clear Indicators</button>
   <button id="toolH" onclick="drawH()">H-Line</button> <button id="toolV" onclick="drawV()">V-Line</button>
   <button id="toolT" onclick="drawTrend()">Trend Line</button> <button id="toolR" onclick="drawRay()">Ray</button>
   <button id="toolClear" onclick="clearDrawings()">Clear Drawings</button>
@@ -57,7 +71,7 @@ button.active { background:#2563eb; }
 <script>
 const DATA = {"name": "MILKYMIST", "code": "MILKYMIST", "cmp": 302.15, "Daily": {"trend": "POSITIVE", "reference": 293.2, "bars": [{"time": "2026-08-18", "open": 165.0, "high": 181.5, "low": 165.0, "close": 181.5}, {"time": "2026-08-19", "open": 190.0, "high": 199.65, "low": 190.0, "close": 199.65}, {"time": "2026-08-20", "open": 207.8, "high": 211.8, "low": 181.5, "close": 184.89}, {"time": "2026-08-21", "open": 190.0, "high": 194.7, "low": 183.51, "close": 189.22}, {"time": "2026-08-24", "open": 191.0, "high": 199.1, "low": 186.23, "close": 196.66}, {"time": "2026-08-25", "open": 198.0, "high": 205.7, "low": 197.0, "close": 201.92}, {"time": "2026-08-26", "open": 201.9, "high": 222.11, "low": 198.06, "close": 222.11}, {"time": "2026-08-27", "open": 227.39, "high": 233.8, "low": 212.66, "close": 217.31}, {"time": "2026-08-28", "open": 215.0, "high": 217.26, "low": 210.1, "close": 214.31}, {"time": "2026-08-31", "open": 218.75, "high": 222.0, "low": 206.4, "close": 210.94}, {"time": "2026-09-01", "open": 230.79, "high": 232.03, "low": 221.92, "close": 232.03}, {"time": "2026-09-02", "open": 234.0, "high": 255.23, "low": 228.36, "close": 252.04}, {"time": "2026-09-03", "open": 250.62, "high": 268.69, "low": 246.35, "close": 252.89}, {"time": "2026-09-04", "open": 255.0, "high": 260.59, "low": 249.5, "close": 252.43}, {"time": "2026-09-07", "open": 255.06, "high": 277.67, "low": 248.56, "close": 276.01}, {"time": "2026-09-08", "open": 278.0, "high": 288.45, "low": 270.65, "close": 275.97}, {"time": "2026-09-09", "open": 274.94, "high": 274.94, "low": 262.18, "close": 265.56}, {"time": "2026-09-10", "open": 267.0, "high": 278.83, "low": 265.32, "close": 278.83}, {"time": "2026-09-11", "open": 279.0, "high": 292.77, "low": 276.83, "close": 292.77}, {"time": "2026-09-14", "open": 292.77, "high": 292.77, "low": 292.77, "close": 292.77}, {"time": "2026-09-15", "open": 290.0, "high": 304.7, "low": 278.14, "close": 278.14}, {"time": "2026-09-16", "open": 270.0, "high": 281.7, "low": 264.24, "close": 276.23}, {"time": "2026-09-17", "open": 276.01, "high": 282.7, "low": 270.06, "close": 274.76}, {"time": "2026-09-18", "open": 276.13, "high": 283.98, "low": 271.5, "close": 274.07}, {"time": "2026-09-21", "open": 276.0, "high": 287.77, "low": 274.22, "close": 287.77}, {"time": "2026-09-22", "open": 293.2, "high": 302.15, "low": 291.2, "close": 302.15}]}, "Weekly": {"trend": "POSITIVE", "reference": 255.06, "bars": [{"time": "2026-08-21", "open": 165.0, "high": 211.8, "low": 165.0, "close": 189.22}, {"time": "2026-08-28", "open": 191.0, "high": 233.8, "low": 186.23, "close": 214.31}, {"time": "2026-09-04", "open": 218.75, "high": 268.69, "low": 206.4, "close": 252.43}, {"time": "2026-09-11", "open": 255.06, "high": 292.77, "low": 248.56, "close": 292.77}, {"time": "2026-09-18", "open": 292.77, "high": 304.7, "low": 264.24, "close": 274.07}]}, "Monthly": {"trend": "POSITIVE", "reference": 165.0, "bars": [{"time": "2026-08-31", "open": 165.0, "high": 233.8, "low": 165.0, "close": 210.94}]}};
 let chart = null;
-let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
+let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null, indicatorSeries=[], scaleMode="price";
 const drawCanvas=document.getElementById("drawCanvas");
 const drawHit=document.getElementById("drawHit");
 const pen=drawCanvas.getContext("2d");
@@ -114,6 +128,8 @@ function renderTF(tf) {
   });
 
   candleSeries.setData(item.bars);
+  applyScaleMode();
+  renderIndicators();
   setupCrosshairOHLC();
 
   if (item.reference !== null) {
@@ -131,6 +147,71 @@ function renderTF(tf) {
   setTimeout(resizeDrawingCanvas,0);
 }
 
+
+function setScaleMode(mode){
+  scaleMode=mode;
+  document.getElementById("scalePrice").classList.toggle("active", mode==="price");
+  document.getElementById("scalePct").classList.toggle("active", mode==="percent");
+  applyScaleMode();
+}
+function applyScaleMode(){
+  if(!chart)return;
+  const m=(scaleMode==="percent" && LightweightCharts.PriceScaleMode)
+    ? LightweightCharts.PriceScaleMode.Percentage
+    : (LightweightCharts.PriceScaleMode ? LightweightCharts.PriceScaleMode.Normal : 0);
+  chart.priceScale("right").applyOptions({mode:m});
+}
+function smaData(bars,p){
+  const out=[], q=[];
+  for(const b of bars){
+    q.push(Number(b.close));
+    if(q.length>p)q.shift();
+    if(q.length===p) out.push({time:b.time,value:q.reduce((a,x)=>a+x,0)/p});
+  }
+  return out;
+}
+function emaData(bars,p){
+  const out=[]; if(!bars.length)return out;
+  const k=2/(p+1); let e=Number(bars[0].close);
+  bars.forEach((b,i)=>{e=i===0?Number(b.close):Number(b.close)*k+e*(1-k); if(i>=p-1)out.push({time:b.time,value:e});});
+  return out;
+}
+function bbData(bars,p,m){
+  const mid=[],up=[],lo=[],q=[];
+  for(const b of bars){
+    q.push(Number(b.close)); if(q.length>p)q.shift();
+    if(q.length===p){
+      const avg=q.reduce((a,x)=>a+x,0)/p;
+      const sd=Math.sqrt(q.reduce((a,x)=>a+(x-avg)*(x-avg),0)/p);
+      mid.push({time:b.time,value:avg}); up.push({time:b.time,value:avg+m*sd}); lo.push({time:b.time,value:avg-m*sd});
+    }
+  }
+  return [mid,up,lo];
+}
+function addLine(data,title){
+  if(!chart)return;
+  const ls=chart.addLineSeries({lineWidth:2,title:title,priceLineVisible:false,lastValueVisible:true});
+  ls.setData(data); indicatorSeries.push(ls);
+}
+function addIndicator(){
+  const type=document.getElementById("indicatorType").value;
+  const p=Math.max(2,parseInt(document.getElementById("indicatorPeriod").value||"20"));
+  const mult=Math.max(0.5,parseFloat(document.getElementById("bbMult").value||"2"));
+  if(!type||!DATA[currentTF])return;
+  const bars=DATA[currentTF].bars;
+  if(type==="SMA") addLine(smaData(bars,p),"SMA "+p);
+  if(type==="EMA") addLine(emaData(bars,p),"EMA "+p);
+  if(type==="BB"){
+    const b=bbData(bars,p,mult);
+    addLine(b[0],"BB Mid "+p); addLine(b[1],"BB Upper"); addLine(b[2],"BB Lower");
+  }
+}
+function clearIndicators(){
+  if(chart) indicatorSeries.forEach(x=>{try{chart.removeSeries(x)}catch(e){}});
+  indicatorSeries=[];
+}
+function renderIndicators(){ indicatorSeries=[]; }
+
 function fitChart(){if(chart)chart.timeScale().fitContent();}
 function zoomBy(f){
   if(!chart)return;
@@ -140,7 +221,7 @@ function zoomBy(f){
   t.setVisibleLogicalRange({from:m-h,to:m+h});
 }
 function fitChart(){ if(chart) chart.timeScale().fitContent(); }
-function resetChart(){ fitChart(); clearDrawings(); }
+function resetChart(){ fitChart(); clearDrawings(); clearIndicators(); setScaleMode("price"); }
 
 function resizeDrawingCanvas(){
   const r=drawCanvas.getBoundingClientRect();

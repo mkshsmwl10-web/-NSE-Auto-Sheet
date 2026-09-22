@@ -20,6 +20,8 @@ body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,
 .toolbar { padding:8px 20px 14px; }
 button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
 button.active { background:#2563eb; }
+select,input { border:1px solid #475569; background:#1e293b; color:white; padding:8px 9px; margin-right:7px; border-radius:6px; font-weight:700; }
+input { width:72px; }
 .info { padding:0 20px 10px; color:#cbd5e1; }
 .ohlc { padding:0 20px 10px; min-height:24px; color:#e2e8f0; font-weight:700; }
 .ohlc span { margin-right:14px; }
@@ -48,6 +50,18 @@ button.active { background:#2563eb; }
   <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
   <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
   <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
+  <button id="scalePrice" class="active" onclick="setScaleMode('price')">Price</button>
+  <button id="scalePct" onclick="setScaleMode('percent')">% Scale</button>
+  <select id="indicatorType">
+    <option value="">Indicator</option>
+    <option value="SMA">SMA</option>
+    <option value="EMA">EMA</option>
+    <option value="BB">Bollinger Bands</option>
+  </select>
+  <input id="indicatorPeriod" type="number" min="2" max="250" value="20" title="Period">
+  <input id="bbMult" type="number" min="0.5" max="5" step="0.1" value="2" title="BB multiplier">
+  <button onclick="addIndicator()">Add</button>
+  <button onclick="clearIndicators()">Clear Indicators</button>
   <button id="toolH" onclick="drawH()">H-Line</button> <button id="toolV" onclick="drawV()">V-Line</button>
   <button id="toolT" onclick="drawTrend()">Trend Line</button> <button id="toolR" onclick="drawRay()">Ray</button>
   <button id="toolClear" onclick="clearDrawings()">Clear Drawings</button>
@@ -57,7 +71,7 @@ button.active { background:#2563eb; }
 <script>
 const DATA = {"name": "LALITHAA", "code": "LALITHAA", "cmp": 336.1, "Daily": {"trend": "POSITIVE", "reference": 325.0, "bars": [{"time": "2026-08-24", "open": 265.0, "high": 274.4, "low": 244.4, "close": 248.44}, {"time": "2026-08-25", "open": 250.0, "high": 259.19, "low": 248.0, "close": 249.87}, {"time": "2026-08-26", "open": 252.75, "high": 253.75, "low": 242.25, "close": 244.0}, {"time": "2026-08-27", "open": 245.0, "high": 255.5, "low": 240.35, "close": 246.23}, {"time": "2026-08-28", "open": 247.35, "high": 267.9, "low": 245.52, "close": 265.24}, {"time": "2026-08-31", "open": 266.9, "high": 272.4, "low": 256.01, "close": 257.89}, {"time": "2026-09-01", "open": 259.35, "high": 283.65, "low": 257.0, "close": 267.6}, {"time": "2026-09-02", "open": 269.0, "high": 272.8, "low": 262.55, "close": 264.35}, {"time": "2026-09-03", "open": 267.05, "high": 283.0, "low": 262.2, "close": 280.3}, {"time": "2026-09-04", "open": 283.0, "high": 308.3, "low": 280.6, "close": 306.7}, {"time": "2026-09-07", "open": 314.0, "high": 326.8, "low": 309.5, "close": 317.75}, {"time": "2026-09-08", "open": 319.0, "high": 322.4, "low": 312.4, "close": 318.75}, {"time": "2026-09-09", "open": 320.0, "high": 339.95, "low": 319.95, "close": 334.45}, {"time": "2026-09-10", "open": 341.0, "high": 343.9, "low": 329.0, "close": 337.6}, {"time": "2026-09-11", "open": 337.9, "high": 343.6, "low": 330.3, "close": 338.6}, {"time": "2026-09-14", "open": 338.6, "high": 338.6, "low": 338.6, "close": 338.6}, {"time": "2026-09-15", "open": 321.7, "high": 321.7, "low": 321.7, "close": 321.7}, {"time": "2026-09-16", "open": 305.65, "high": 305.65, "low": 305.65, "close": 305.65}, {"time": "2026-09-17", "open": 295.0, "high": 299.7, "low": 290.4, "close": 290.4}, {"time": "2026-09-18", "open": 280.0, "high": 304.9, "low": 277.0, "close": 304.9}, {"time": "2026-09-21", "open": 304.0, "high": 320.1, "low": 301.7, "close": 320.1}, {"time": "2026-09-22", "open": 325.0, "high": 336.1, "low": 324.9, "close": 336.1}]}, "Weekly": {"trend": "NEGATIVE", "reference": 338.6, "bars": [{"time": "2026-08-28", "open": 265.0, "high": 274.4, "low": 240.35, "close": 265.24}, {"time": "2026-09-04", "open": 266.9, "high": 308.3, "low": 256.01, "close": 306.7}, {"time": "2026-09-11", "open": 314.0, "high": 343.9, "low": 309.5, "close": 338.6}, {"time": "2026-09-18", "open": 338.6, "high": 338.6, "low": 277.0, "close": 304.9}]}, "Monthly": {"trend": "NEGATIVE", "reference": 265.0, "bars": [{"time": "2026-08-31", "open": 265.0, "high": 274.4, "low": 240.35, "close": 257.89}]}};
 let chart = null;
-let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
+let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null, indicatorSeries=[], scaleMode="price";
 const drawCanvas=document.getElementById("drawCanvas");
 const drawHit=document.getElementById("drawHit");
 const pen=drawCanvas.getContext("2d");
@@ -114,6 +128,8 @@ function renderTF(tf) {
   });
 
   candleSeries.setData(item.bars);
+  applyScaleMode();
+  renderIndicators();
   setupCrosshairOHLC();
 
   if (item.reference !== null) {
@@ -131,6 +147,71 @@ function renderTF(tf) {
   setTimeout(resizeDrawingCanvas,0);
 }
 
+
+function setScaleMode(mode){
+  scaleMode=mode;
+  document.getElementById("scalePrice").classList.toggle("active", mode==="price");
+  document.getElementById("scalePct").classList.toggle("active", mode==="percent");
+  applyScaleMode();
+}
+function applyScaleMode(){
+  if(!chart)return;
+  const m=(scaleMode==="percent" && LightweightCharts.PriceScaleMode)
+    ? LightweightCharts.PriceScaleMode.Percentage
+    : (LightweightCharts.PriceScaleMode ? LightweightCharts.PriceScaleMode.Normal : 0);
+  chart.priceScale("right").applyOptions({mode:m});
+}
+function smaData(bars,p){
+  const out=[], q=[];
+  for(const b of bars){
+    q.push(Number(b.close));
+    if(q.length>p)q.shift();
+    if(q.length===p) out.push({time:b.time,value:q.reduce((a,x)=>a+x,0)/p});
+  }
+  return out;
+}
+function emaData(bars,p){
+  const out=[]; if(!bars.length)return out;
+  const k=2/(p+1); let e=Number(bars[0].close);
+  bars.forEach((b,i)=>{e=i===0?Number(b.close):Number(b.close)*k+e*(1-k); if(i>=p-1)out.push({time:b.time,value:e});});
+  return out;
+}
+function bbData(bars,p,m){
+  const mid=[],up=[],lo=[],q=[];
+  for(const b of bars){
+    q.push(Number(b.close)); if(q.length>p)q.shift();
+    if(q.length===p){
+      const avg=q.reduce((a,x)=>a+x,0)/p;
+      const sd=Math.sqrt(q.reduce((a,x)=>a+(x-avg)*(x-avg),0)/p);
+      mid.push({time:b.time,value:avg}); up.push({time:b.time,value:avg+m*sd}); lo.push({time:b.time,value:avg-m*sd});
+    }
+  }
+  return [mid,up,lo];
+}
+function addLine(data,title){
+  if(!chart)return;
+  const ls=chart.addLineSeries({lineWidth:2,title:title,priceLineVisible:false,lastValueVisible:true});
+  ls.setData(data); indicatorSeries.push(ls);
+}
+function addIndicator(){
+  const type=document.getElementById("indicatorType").value;
+  const p=Math.max(2,parseInt(document.getElementById("indicatorPeriod").value||"20"));
+  const mult=Math.max(0.5,parseFloat(document.getElementById("bbMult").value||"2"));
+  if(!type||!DATA[currentTF])return;
+  const bars=DATA[currentTF].bars;
+  if(type==="SMA") addLine(smaData(bars,p),"SMA "+p);
+  if(type==="EMA") addLine(emaData(bars,p),"EMA "+p);
+  if(type==="BB"){
+    const b=bbData(bars,p,mult);
+    addLine(b[0],"BB Mid "+p); addLine(b[1],"BB Upper"); addLine(b[2],"BB Lower");
+  }
+}
+function clearIndicators(){
+  if(chart) indicatorSeries.forEach(x=>{try{chart.removeSeries(x)}catch(e){}});
+  indicatorSeries=[];
+}
+function renderIndicators(){ indicatorSeries=[]; }
+
 function fitChart(){if(chart)chart.timeScale().fitContent();}
 function zoomBy(f){
   if(!chart)return;
@@ -140,7 +221,7 @@ function zoomBy(f){
   t.setVisibleLogicalRange({from:m-h,to:m+h});
 }
 function fitChart(){ if(chart) chart.timeScale().fitContent(); }
-function resetChart(){ fitChart(); clearDrawings(); }
+function resetChart(){ fitChart(); clearDrawings(); clearIndicators(); setScaleMode("price"); }
 
 function resizeDrawingCanvas(){
   const r=drawCanvas.getBoundingClientRect();

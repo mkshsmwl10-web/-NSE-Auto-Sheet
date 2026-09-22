@@ -20,6 +20,8 @@ body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,
 .toolbar { padding:8px 20px 14px; }
 button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
 button.active { background:#2563eb; }
+select,input { border:1px solid #475569; background:#1e293b; color:white; padding:8px 9px; margin-right:7px; border-radius:6px; font-weight:700; }
+input { width:72px; }
 .info { padding:0 20px 10px; color:#cbd5e1; }
 .ohlc { padding:0 20px 10px; min-height:24px; color:#e2e8f0; font-weight:700; }
 .ohlc span { margin-right:14px; }
@@ -48,6 +50,18 @@ button.active { background:#2563eb; }
   <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
   <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
   <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
+  <button id="scalePrice" class="active" onclick="setScaleMode('price')">Price</button>
+  <button id="scalePct" onclick="setScaleMode('percent')">% Scale</button>
+  <select id="indicatorType">
+    <option value="">Indicator</option>
+    <option value="SMA">SMA</option>
+    <option value="EMA">EMA</option>
+    <option value="BB">Bollinger Bands</option>
+  </select>
+  <input id="indicatorPeriod" type="number" min="2" max="250" value="20" title="Period">
+  <input id="bbMult" type="number" min="0.5" max="5" step="0.1" value="2" title="BB multiplier">
+  <button onclick="addIndicator()">Add</button>
+  <button onclick="clearIndicators()">Clear Indicators</button>
   <button id="toolH" onclick="drawH()">H-Line</button> <button id="toolV" onclick="drawV()">V-Line</button>
   <button id="toolT" onclick="drawTrend()">Trend Line</button> <button id="toolR" onclick="drawRay()">Ray</button>
   <button id="toolClear" onclick="clearDrawings()">Clear Drawings</button>
@@ -57,7 +71,7 @@ button.active { background:#2563eb; }
 <script>
 const DATA = {"name": "MOLBIO", "code": "MOLBIO", "cmp": 1263.8, "Daily": {"trend": "NEGATIVE", "reference": 1295.0, "bars": [{"time": "2026-08-17", "open": 980.0, "high": 1064.75, "low": 926.35, "close": 1041.7}, {"time": "2026-08-18", "open": 1037.0, "high": 1177.0, "low": 1022.65, "close": 1110.9}, {"time": "2026-08-19", "open": 1085.0, "high": 1132.85, "low": 1012.0, "close": 1036.65}, {"time": "2026-08-20", "open": 1046.9, "high": 1083.5, "low": 1020.05, "close": 1036.65}, {"time": "2026-08-21", "open": 1047.05, "high": 1118.4, "low": 1041.2, "close": 1098.45}, {"time": "2026-08-24", "open": 1125.0, "high": 1219.95, "low": 1125.0, "close": 1199.3}, {"time": "2026-08-25", "open": 1224.15, "high": 1247.0, "low": 1180.05, "close": 1227.35}, {"time": "2026-08-26", "open": 1242.0, "high": 1264.6, "low": 1215.0, "close": 1238.85}, {"time": "2026-08-27", "open": 1234.0, "high": 1243.7, "low": 1130.1, "close": 1144.15}, {"time": "2026-08-28", "open": 1153.95, "high": 1156.1, "low": 1077.5, "close": 1094.75}, {"time": "2026-08-31", "open": 1102.1, "high": 1161.1, "low": 1065.2, "close": 1086.3}, {"time": "2026-09-01", "open": 1072.3, "high": 1089.2, "low": 1035.2, "close": 1053.3}, {"time": "2026-09-02", "open": 1047.2, "high": 1132.1, "low": 1043.8, "close": 1107.8}, {"time": "2026-09-03", "open": 1120.0, "high": 1141.8, "low": 1103.0, "close": 1135.2}, {"time": "2026-09-04", "open": 1139.9, "high": 1177.0, "low": 1117.2, "close": 1160.5}, {"time": "2026-09-07", "open": 1170.0, "high": 1183.7, "low": 1098.2, "close": 1127.2}, {"time": "2026-09-08", "open": 1127.2, "high": 1155.0, "low": 1110.2, "close": 1117.5}, {"time": "2026-09-09", "open": 1119.0, "high": 1293.5, "low": 1111.5, "close": 1257.9}, {"time": "2026-09-10", "open": 1271.0, "high": 1509.4, "low": 1271.0, "close": 1509.4}, {"time": "2026-09-11", "open": 1545.0, "high": 1686.8, "low": 1391.7, "close": 1438.2}, {"time": "2026-09-14", "open": 1438.2, "high": 1438.2, "low": 1438.2, "close": 1438.2}, {"time": "2026-09-15", "open": 1419.7, "high": 1419.7, "low": 1273.0, "close": 1356.8}, {"time": "2026-09-16", "open": 1385.0, "high": 1437.6, "low": 1196.2, "close": 1307.0}, {"time": "2026-09-17", "open": 1313.5, "high": 1382.0, "low": 1272.1, "close": 1285.3}, {"time": "2026-09-18", "open": 1297.1, "high": 1314.8, "low": 1262.2, "close": 1288.3}, {"time": "2026-09-21", "open": 1295.0, "high": 1298.8, "low": 1205.4, "close": 1218.8}, {"time": "2026-09-22", "open": 1230.0, "high": 1283.5, "low": 1227.6, "close": 1263.8}]}, "Weekly": {"trend": "POSITIVE", "reference": 1170.0, "bars": [{"time": "2026-08-21", "open": 980.0, "high": 1177.0, "low": 926.35, "close": 1098.45}, {"time": "2026-08-28", "open": 1125.0, "high": 1264.6, "low": 1077.5, "close": 1094.75}, {"time": "2026-09-04", "open": 1102.1, "high": 1177.0, "low": 1035.2, "close": 1160.5}, {"time": "2026-09-11", "open": 1170.0, "high": 1686.8, "low": 1098.2, "close": 1438.2}, {"time": "2026-09-18", "open": 1438.2, "high": 1438.2, "low": 1196.2, "close": 1288.3}]}, "Monthly": {"trend": "POSITIVE", "reference": 980.0, "bars": [{"time": "2026-08-31", "open": 980.0, "high": 1264.6, "low": 926.35, "close": 1086.3}]}};
 let chart = null;
-let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
+let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null, indicatorSeries=[], scaleMode="price";
 const drawCanvas=document.getElementById("drawCanvas");
 const drawHit=document.getElementById("drawHit");
 const pen=drawCanvas.getContext("2d");
@@ -114,6 +128,8 @@ function renderTF(tf) {
   });
 
   candleSeries.setData(item.bars);
+  applyScaleMode();
+  renderIndicators();
   setupCrosshairOHLC();
 
   if (item.reference !== null) {
@@ -131,6 +147,71 @@ function renderTF(tf) {
   setTimeout(resizeDrawingCanvas,0);
 }
 
+
+function setScaleMode(mode){
+  scaleMode=mode;
+  document.getElementById("scalePrice").classList.toggle("active", mode==="price");
+  document.getElementById("scalePct").classList.toggle("active", mode==="percent");
+  applyScaleMode();
+}
+function applyScaleMode(){
+  if(!chart)return;
+  const m=(scaleMode==="percent" && LightweightCharts.PriceScaleMode)
+    ? LightweightCharts.PriceScaleMode.Percentage
+    : (LightweightCharts.PriceScaleMode ? LightweightCharts.PriceScaleMode.Normal : 0);
+  chart.priceScale("right").applyOptions({mode:m});
+}
+function smaData(bars,p){
+  const out=[], q=[];
+  for(const b of bars){
+    q.push(Number(b.close));
+    if(q.length>p)q.shift();
+    if(q.length===p) out.push({time:b.time,value:q.reduce((a,x)=>a+x,0)/p});
+  }
+  return out;
+}
+function emaData(bars,p){
+  const out=[]; if(!bars.length)return out;
+  const k=2/(p+1); let e=Number(bars[0].close);
+  bars.forEach((b,i)=>{e=i===0?Number(b.close):Number(b.close)*k+e*(1-k); if(i>=p-1)out.push({time:b.time,value:e});});
+  return out;
+}
+function bbData(bars,p,m){
+  const mid=[],up=[],lo=[],q=[];
+  for(const b of bars){
+    q.push(Number(b.close)); if(q.length>p)q.shift();
+    if(q.length===p){
+      const avg=q.reduce((a,x)=>a+x,0)/p;
+      const sd=Math.sqrt(q.reduce((a,x)=>a+(x-avg)*(x-avg),0)/p);
+      mid.push({time:b.time,value:avg}); up.push({time:b.time,value:avg+m*sd}); lo.push({time:b.time,value:avg-m*sd});
+    }
+  }
+  return [mid,up,lo];
+}
+function addLine(data,title){
+  if(!chart)return;
+  const ls=chart.addLineSeries({lineWidth:2,title:title,priceLineVisible:false,lastValueVisible:true});
+  ls.setData(data); indicatorSeries.push(ls);
+}
+function addIndicator(){
+  const type=document.getElementById("indicatorType").value;
+  const p=Math.max(2,parseInt(document.getElementById("indicatorPeriod").value||"20"));
+  const mult=Math.max(0.5,parseFloat(document.getElementById("bbMult").value||"2"));
+  if(!type||!DATA[currentTF])return;
+  const bars=DATA[currentTF].bars;
+  if(type==="SMA") addLine(smaData(bars,p),"SMA "+p);
+  if(type==="EMA") addLine(emaData(bars,p),"EMA "+p);
+  if(type==="BB"){
+    const b=bbData(bars,p,mult);
+    addLine(b[0],"BB Mid "+p); addLine(b[1],"BB Upper"); addLine(b[2],"BB Lower");
+  }
+}
+function clearIndicators(){
+  if(chart) indicatorSeries.forEach(x=>{try{chart.removeSeries(x)}catch(e){}});
+  indicatorSeries=[];
+}
+function renderIndicators(){ indicatorSeries=[]; }
+
 function fitChart(){if(chart)chart.timeScale().fitContent();}
 function zoomBy(f){
   if(!chart)return;
@@ -140,7 +221,7 @@ function zoomBy(f){
   t.setVisibleLogicalRange({from:m-h,to:m+h});
 }
 function fitChart(){ if(chart) chart.timeScale().fitContent(); }
-function resetChart(){ fitChart(); clearDrawings(); }
+function resetChart(){ fitChart(); clearDrawings(); clearIndicators(); setScaleMode("price"); }
 
 function resizeDrawingCanvas(){
   const r=drawCanvas.getBoundingClientRect();
