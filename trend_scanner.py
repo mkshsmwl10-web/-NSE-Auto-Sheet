@@ -606,7 +606,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=19"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=20"
 
     payload = {
         "name": stock_name,
@@ -722,15 +722,21 @@ def classify_signal(code, daily, weekly, monthly):
 
 def calculate_entry_plan(r):
     """
-    Mechanical positional entry plan. This does NOT alter the accepted V12 trend logic.
+    V20 mechanical positional entry plan.
 
     BUY READY:
-      ALL POSITIVE + OUTPERFORM + not overextended (>50% 1M is flagged)
-      Entry = latest completed Daily candle High
-      SL    = latest completed Daily candle Low
-      Risk% = (Entry-SL)/Entry * 100
+      ALL POSITIVE + OUTPERFORM + not extended + risk <= 7%,
+      but latest completed Daily close has NOT yet confirmed the breakout.
 
-    PULLBACK WATCH / REVERSAL WATCH remain WATCH until trend alignment improves.
+    BUY TRIGGERED:
+      Same filters, AND latest completed Daily candle CLOSE is above the
+      previous completed Daily candle High.
+
+    Entry Level = previous completed Daily candle High.
+    Stop Loss   = previous completed Daily candle Low.
+    Risk %      = (Entry-SL)/Entry * 100.
+
+    This does NOT alter the accepted V12 trend logic.
     """
     if r.get("code") == "^NSEI":
         return "", None, None, None
@@ -743,18 +749,27 @@ def calculate_entry_plan(r):
     if daily is None or daily.empty:
         return "", None, None, None
 
-    last = daily.dropna(subset=["High", "Low", "Close"]).iloc[-1]
-    entry = round(float(last["High"]), 2)
-    sl = round(float(last["Low"]), 2)
+    d = daily.dropna(subset=["High", "Low", "Close"]).copy()
+    if len(d) < 2:
+        return "", None, None, None
+
+    setup = d.iloc[-2]
+    latest = d.iloc[-1]
+
+    entry = round(float(setup["High"]), 2)
+    sl = round(float(setup["Low"]), 2)
+    latest_close = float(latest["Close"])
     risk_pct = round(((entry - sl) / entry) * 100.0, 2) if entry > 0 else None
 
     if signal == "ALL POSITIVE" and strength == "OUTPERFORM":
         if stock_1m is not None and float(stock_1m) > 50.0:
             status = "EXTENDED - WAIT"
-        elif risk_pct is not None and risk_pct <= 7.0:
-            status = "BUY READY"
-        else:
+        elif risk_pct is None or risk_pct > 7.0:
             status = "RISK HIGH - WAIT"
+        elif latest_close > entry:
+            status = "BUY TRIGGERED"
+        else:
+            status = "BUY READY"
     elif signal == "PULLBACK WATCH" and strength == "OUTPERFORM":
         status = "PULLBACK WATCH"
     elif signal == "REVERSAL WATCH" and strength == "OUTPERFORM":
@@ -943,6 +958,7 @@ def write_sheet(book, results):
 
     # Entry Status formatting (column M)
     for status, bg, fg in [
+        ("BUY TRIGGERED", {"red":0.55,"green":0.90,"blue":0.62}, {"red":0.00,"green":0.28,"blue":0.08}),
         ("BUY READY", {"red":0.78,"green":0.95,"blue":0.80}, {"red":0.02,"green":0.38,"blue":0.12}),
         ("EXTENDED - WAIT", {"red":1.0,"green":0.93,"blue":0.72}, {"red":0.55,"green":0.30,"blue":0.02}),
         ("RISK HIGH - WAIT", {"red":1.0,"green":0.85,"blue":0.85}, {"red":0.65,"green":0.05,"blue":0.05}),
