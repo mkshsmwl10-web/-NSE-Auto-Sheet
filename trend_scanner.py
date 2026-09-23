@@ -606,7 +606,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=17"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=18"
 
     payload = {
         "name": stock_name,
@@ -767,11 +767,11 @@ def write_sheet(book, results):
     try:
         ws = book.worksheet(OUTPUT_SHEET)
     except gspread.WorksheetNotFound:
-        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=12)
+        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=13)
 
     ws.clear()
 
-    headers = ["Stock Name", "NSE Code", "CMP", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "Stock 1M %", "NIFTY 1M %", "RS vs NIFTY %", "RS Strength", "Chart"]
+    headers = ["Stock Name", "NSE Code", "CMP", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "Rank", "Stock 1M %", "NIFTY 1M %", "RS vs NIFTY %", "RS Strength", "Chart"]
     values = [headers]
 
     for r in results:
@@ -783,6 +783,7 @@ def write_sheet(book, results):
             r["weekly"],
             r["monthly"],
             classify_signal(r["code"], r["daily"], r["weekly"], r["monthly"]),
+            r.get("rank", ""),
             "" if r.get("stock_1m") is None else r["stock_1m"],
             "" if r.get("nifty_1m") is None else r["nifty_1m"],
             "" if r.get("rs_vs_nifty") is None else r["rs_vs_nifty"],
@@ -791,13 +792,13 @@ def write_sheet(book, results):
         ])
 
     ws.update(
-        range_name=f"A1:L{len(values)}",
+        range_name=f"A1:M{len(values)}",
         values=values,
         value_input_option="USER_ENTERED",
     )
     ws.freeze(rows=1, cols=1)
 
-    ws.format("A1:L1", {
+    ws.format("A1:M1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{
             "foregroundColor":{"red":1,"green":1,"blue":1},
@@ -809,8 +810,8 @@ def write_sheet(book, results):
     })
 
     if len(values) > 1:
-        ws.format(f"A2:L{len(values)}", {"verticalAlignment":"MIDDLE"})
-        ws.format(f"B2:L{len(values)}", {"horizontalAlignment":"CENTER"})
+        ws.format(f"A2:M{len(values)}", {"verticalAlignment":"MIDDLE"})
+        ws.format(f"B2:M{len(values)}", {"horizontalAlignment":"CENTER"})
         ws.format("A2:G2", {
             "backgroundColor":{"red":0.88,"green":0.93,"blue":1.0},
             "textFormat":{"bold":True},
@@ -889,7 +890,7 @@ def write_sheet(book, results):
             }
         })
 
-    widths = {0:190, 1:110, 2:100, 3:120, 4:120, 5:130, 6:170, 7:115, 8:115, 9:130, 10:145, 11:130}
+    widths = {0:190, 1:110, 2:100, 3:120, 4:120, 5:130, 6:170, 7:75, 8:115, 9:115, 10:130, 11:145, 12:130}
     for col, pixels in widths.items():
         requests.append({
             "updateDimensionProperties":{
@@ -924,8 +925,8 @@ def write_sheet(book, results):
                         "sheetId": ws.id,
                         "startRowIndex": row_index - 1,
                         "endRowIndex": row_index,
-                        "startColumnIndex": 11,
-                        "endColumnIndex": 12,
+                        "startColumnIndex": 12,
+                        "endColumnIndex": 13,
                     },
                     "rows": [{
                         "values": [{
@@ -996,6 +997,13 @@ def main():
             )
 
     results = sort_results_for_positional(results)
+    rank_no = 1
+    for r in results:
+        if r.get("code") == "^NSEI":
+            r["rank"] = ""
+        else:
+            r["rank"] = rank_no
+            rank_no += 1
     write_sheet(book, results)
 
     print("=" * 72)
