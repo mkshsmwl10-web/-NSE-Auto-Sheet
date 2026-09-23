@@ -606,7 +606,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=18"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=19"
 
     payload = {
         "name": stock_name,
@@ -719,6 +719,52 @@ def classify_signal(code, daily, weekly, monthly):
     return ""
 
 
+
+def calculate_entry_plan(r):
+    """
+    Mechanical positional entry plan. This does NOT alter the accepted V12 trend logic.
+
+    BUY READY:
+      ALL POSITIVE + OUTPERFORM + not overextended (>50% 1M is flagged)
+      Entry = latest completed Daily candle High
+      SL    = latest completed Daily candle Low
+      Risk% = (Entry-SL)/Entry * 100
+
+    PULLBACK WATCH / REVERSAL WATCH remain WATCH until trend alignment improves.
+    """
+    if r.get("code") == "^NSEI":
+        return "", None, None, None
+
+    signal = classify_signal(r["code"], r["daily"], r["weekly"], r["monthly"])
+    strength = r.get("rs_strength", "")
+    stock_1m = r.get("stock_1m")
+    daily = r.get("_daily_df")
+
+    if daily is None or daily.empty:
+        return "", None, None, None
+
+    last = daily.dropna(subset=["High", "Low", "Close"]).iloc[-1]
+    entry = round(float(last["High"]), 2)
+    sl = round(float(last["Low"]), 2)
+    risk_pct = round(((entry - sl) / entry) * 100.0, 2) if entry > 0 else None
+
+    if signal == "ALL POSITIVE" and strength == "OUTPERFORM":
+        if stock_1m is not None and float(stock_1m) > 50.0:
+            status = "EXTENDED - WAIT"
+        elif risk_pct is not None and risk_pct <= 7.0:
+            status = "BUY READY"
+        else:
+            status = "RISK HIGH - WAIT"
+    elif signal == "PULLBACK WATCH" and strength == "OUTPERFORM":
+        status = "PULLBACK WATCH"
+    elif signal == "REVERSAL WATCH" and strength == "OUTPERFORM":
+        status = "REVERSAL WATCH"
+    else:
+        status = ""
+
+    return status, entry, sl, risk_pct
+
+
 def sort_results_for_positional(results):
     """
     Keep NIFTY first, then prioritize positional-long candidates:
@@ -767,11 +813,11 @@ def write_sheet(book, results):
     try:
         ws = book.worksheet(OUTPUT_SHEET)
     except gspread.WorksheetNotFound:
-        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=13)
+        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=17)
 
     ws.clear()
 
-    headers = ["Stock Name", "NSE Code", "CMP", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "Rank", "Stock 1M %", "NIFTY 1M %", "RS vs NIFTY %", "RS Strength", "Chart"]
+    headers = ["Stock Name", "NSE Code", "CMP", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "Rank", "Stock 1M %", "NIFTY 1M %", "RS vs NIFTY %", "RS Strength", "Entry Status", "Entry Level", "Stop Loss", "Risk %", "Chart"]
     values = [headers]
 
     for r in results:
@@ -788,17 +834,21 @@ def write_sheet(book, results):
             "" if r.get("nifty_1m") is None else r["nifty_1m"],
             "" if r.get("rs_vs_nifty") is None else r["rs_vs_nifty"],
             r.get("rs_strength", ""),
+            r.get("entry_status", ""),
+            "" if r.get("entry_level") is None else r["entry_level"],
+            "" if r.get("stop_loss") is None else r["stop_loss"],
+            "" if r.get("entry_risk_pct") is None else r["entry_risk_pct"],
             "OPEN CHART",
         ])
 
     ws.update(
-        range_name=f"A1:M{len(values)}",
+        range_name=f"A1:Q{len(values)}",
         values=values,
         value_input_option="USER_ENTERED",
     )
     ws.freeze(rows=1, cols=1)
 
-    ws.format("A1:M1", {
+    ws.format("A1:Q1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{
             "foregroundColor":{"red":1,"green":1,"blue":1},
@@ -810,8 +860,8 @@ def write_sheet(book, results):
     })
 
     if len(values) > 1:
-        ws.format(f"A2:M{len(values)}", {"verticalAlignment":"MIDDLE"})
-        ws.format(f"B2:M{len(values)}", {"horizontalAlignment":"CENTER"})
+        ws.format(f"A2:Q{len(values)}", {"verticalAlignment":"MIDDLE"})
+        ws.format(f"B2:Q{len(values)}", {"horizontalAlignment":"CENTER"})
         ws.format("A2:G2", {
             "backgroundColor":{"red":0.88,"green":0.93,"blue":1.0},
             "textFormat":{"bold":True},
@@ -890,7 +940,27 @@ def write_sheet(book, results):
             }
         })
 
-    widths = {0:190, 1:110, 2:100, 3:120, 4:120, 5:130, 6:170, 7:75, 8:115, 9:115, 10:130, 11:145, 12:130}
+
+    # Entry Status formatting (column M)
+    for status, bg, fg in [
+        ("BUY READY", {"red":0.78,"green":0.95,"blue":0.80}, {"red":0.02,"green":0.38,"blue":0.12}),
+        ("EXTENDED - WAIT", {"red":1.0,"green":0.93,"blue":0.72}, {"red":0.55,"green":0.30,"blue":0.02}),
+        ("RISK HIGH - WAIT", {"red":1.0,"green":0.85,"blue":0.85}, {"red":0.65,"green":0.05,"blue":0.05}),
+    ]:
+        requests.append({
+            "addConditionalFormatRule":{
+                "rule":{
+                    "ranges":[{"sheetId":sheet_id,"startRowIndex":1,"startColumnIndex":12,"endColumnIndex":13}],
+                    "booleanRule":{
+                        "condition":{"type":"TEXT_EQ","values":[{"userEnteredValue":status}]},
+                        "format":{"backgroundColor":bg,"textFormat":{"foregroundColor":fg,"bold":True}},
+                    },
+                },
+                "index":0,
+            }
+        })
+
+    widths = {0:190, 1:110, 2:100, 3:120, 4:120, 5:130, 6:170, 7:75, 8:115, 9:115, 10:130, 11:145, 12:160, 13:110, 14:110, 15:90, 16:130}
     for col, pixels in widths.items():
         requests.append({
             "updateDimensionProperties":{
@@ -925,8 +995,8 @@ def write_sheet(book, results):
                         "sheetId": ws.id,
                         "startRowIndex": row_index - 1,
                         "endRowIndex": row_index,
-                        "startColumnIndex": 12,
-                        "endColumnIndex": 13,
+                        "startColumnIndex": 16,
+                        "endColumnIndex": 17,
                     },
                     "rows": [{
                         "values": [{
@@ -995,6 +1065,9 @@ def main():
             r["stock_1m"], r["nifty_1m"], r["rs_vs_nifty"], r["rs_strength"] = calculate_rs_vs_nifty_1m(
                 r.get("_daily_df"), nifty_daily
             )
+
+    for r in results:
+        r["entry_status"], r["entry_level"], r["stop_loss"], r["entry_risk_pct"] = calculate_entry_plan(r)
 
     results = sort_results_for_positional(results)
     rank_no = 1
