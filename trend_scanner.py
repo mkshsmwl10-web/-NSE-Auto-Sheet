@@ -16,6 +16,9 @@ OUTPUT_SHEET = os.environ.get("TREND_SHEET", "Trend Scanner")
 TRANSACTION_SHEET = os.environ.get("TRANSACTION_SHEET", "Trade Transactions")
 TARGET_PER_STOCK = float(os.environ.get("TARGET_PER_STOCK", "10000"))
 MAX_OPEN_POSITIONS = int(os.environ.get("MAX_OPEN_POSITIONS", "10"))
+TRADE_HOUR_IST = 15
+TRADE_MINUTE_IST = 15
+TRADE_WINDOW_MINUTES = 20
 CHART_OUTPUT_DIR = Path(os.environ.get("TREND_CHART_OUTPUT_DIR", "docs/charts"))
 CHART_BASE_URL = os.environ.get(
     "TREND_CHART_BASE_URL",
@@ -528,7 +531,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=17.0"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=17.1"
 
     payload = {
         "name": stock_name,
@@ -777,6 +780,22 @@ def append_trade(tx_ws, stock, action, rank, price, units, realized_pl="", reali
     ], value_input_option="USER_ENTERED")
 
 
+
+def is_trade_execution_time():
+    """
+    Transactions are allowed only around the scheduled 3:15 PM IST run.
+    Manual runs outside this window can refresh scanner/ranks/charts but cannot
+    create BUY/EXIT transactions.
+    """
+    now = datetime.now(IST)
+    start_minutes = TRADE_HOUR_IST * 60 + TRADE_MINUTE_IST
+    now_minutes = now.hour * 60 + now.minute
+    return (
+        now.weekday() < 5
+        and start_minutes <= now_minutes < start_minutes + TRADE_WINDOW_MINUTES
+    )
+
+
 def update_portfolio(book, results):
     """
     Rules:
@@ -792,8 +811,16 @@ def update_portfolio(book, results):
     open_positions, booked_by_code = load_trade_state(tx_ws)
     by_code = {r.get("code"): r for r in results if r.get("code") != "^NSEI"}
 
+    execute_trades = is_trade_execution_time()
+    if execute_trades:
+        print("TRADE MODE: ON — BUY/EXIT transactions allowed.")
+    else:
+        print("VIEW MODE: scanner refresh only — no BUY/EXIT transactions outside 3:15 PM IST window.")
+
     # 1) EXIT first so vacancies become available immediately.
     for code, pos in list(open_positions.items()):
+        if not execute_trades:
+            continue
         r = by_code.get(code)
         rank = r.get("rank", "") if r else ""
         rank_num = int(rank) if rank not in ("", None) else None
@@ -827,7 +854,7 @@ def update_portfolio(book, results):
         key=lambda r: int(r["rank"])
     )
 
-    slots = max(0, MAX_OPEN_POSITIONS - len(open_positions))
+    slots = max(0, MAX_OPEN_POSITIONS - len(open_positions)) if execute_trades else 0
     for r in candidates[:slots]:
         buy_price = float(r["cmp"])
         units = int(TARGET_PER_STOCK // buy_price) if buy_price > 0 else 0
