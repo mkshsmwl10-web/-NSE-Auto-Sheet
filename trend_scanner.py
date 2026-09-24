@@ -13,6 +13,9 @@ from google.oauth2.service_account import Credentials
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E")
 INPUT_SHEET = os.environ.get("INPUT_SHEET", "NIFTY200")
 OUTPUT_SHEET = os.environ.get("TREND_SHEET", "Trend Scanner")
+TRANSACTION_SHEET = os.environ.get("TRANSACTION_SHEET", "Trade Transactions")
+TARGET_PER_STOCK = float(os.environ.get("TARGET_PER_STOCK", "10000"))
+MAX_OPEN_POSITIONS = int(os.environ.get("MAX_OPEN_POSITIONS", "10"))
 CHART_OUTPUT_DIR = Path(os.environ.get("TREND_CHART_OUTPUT_DIR", "docs/charts"))
 CHART_BASE_URL = os.environ.get(
     "TREND_CHART_BASE_URL",
@@ -525,7 +528,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.8"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=17.0"
 
     payload = {
         "name": stock_name,
@@ -682,279 +685,369 @@ def sort_results_for_positional(results):
     return sorted(results, key=key)
 
 
+
+def _num(v, default=0.0):
+    try:
+        if v in ("", None):
+            return default
+        return float(str(v).replace(",", "").strip())
+    except Exception:
+        return default
+
+
+def get_transaction_sheet(book):
+    headers = [
+        "Date", "Time", "Stock Name", "NSE Code", "Action", "Rank",
+        "Price", "Units", "Trade Value", "Realized P/L", "% P/L"
+    ]
+    try:
+        ws = book.worksheet(TRANSACTION_SHEET)
+    except gspread.WorksheetNotFound:
+        ws = book.add_worksheet(title=TRANSACTION_SHEET, rows=2000, cols=len(headers))
+        ws.append_row(headers, value_input_option="USER_ENTERED")
+        ws.freeze(rows=1)
+        ws.format("A1:K1", {
+            "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
+            "textFormat":{"foregroundColor":{"red":1,"green":1,"blue":1},"bold":True},
+            "horizontalAlignment":"CENTER",
+        })
+    values = ws.get_all_values()
+    if not values:
+        ws.append_row(headers, value_input_option="USER_ENTERED")
+    elif [x.strip() for x in values[0]] != headers:
+        # Keep existing history safe; only normalize header when sheet is empty apart from header.
+        if len(values) == 1:
+            ws.update(range_name="A1:K1", values=[headers], value_input_option="USER_ENTERED")
+    return ws
+
+
+def load_trade_state(tx_ws):
+    """Rebuild open positions and cumulative booked P/L from permanent transaction history."""
+    values = tx_ws.get_all_values()
+    open_positions = {}
+    booked_by_code = {}
+    if len(values) <= 1:
+        return open_positions, booked_by_code
+
+    header = [str(x).strip() for x in values[0]]
+    idx = {name: i for i, name in enumerate(header)}
+
+    for row in values[1:]:
+        def cell(name):
+            i = idx.get(name)
+            return row[i].strip() if i is not None and i < len(row) else ""
+
+        code = cell("NSE Code")
+        action = cell("Action").upper()
+        if not code:
+            continue
+
+        if action == "BUY":
+            open_positions[code] = {
+                "name": cell("Stock Name"),
+                "buy_price": _num(cell("Price")),
+                "units": int(_num(cell("Units"))),
+                "buy_date": cell("Date"),
+                "buy_time": cell("Time"),
+            }
+        elif action == "EXIT":
+            open_positions.pop(code, None)
+            booked_by_code[code] = round(
+                booked_by_code.get(code, 0.0) + _num(cell("Realized P/L")), 2
+            )
+
+    return open_positions, booked_by_code
+
+
+def append_trade(tx_ws, stock, action, rank, price, units, realized_pl="", realized_pct=""):
+    now = datetime.now(IST)
+    trade_value = round(float(price) * int(units), 2)
+    tx_ws.append_row([
+        now.strftime("%Y-%m-%d"),
+        now.strftime("%H:%M:%S"),
+        stock.get("name", ""),
+        stock.get("code", ""),
+        action,
+        rank if rank != "" else "",
+        round(float(price), 2),
+        int(units),
+        trade_value,
+        realized_pl,
+        realized_pct,
+    ], value_input_option="USER_ENTERED")
+
+
+def update_portfolio(book, results):
+    """
+    Rules:
+      - Maximum 10 open positions.
+      - New entry only from current Rank 1-10.
+      - Existing Rank 1-10 stays active.
+      - Existing Rank 11-20 = HOLD.
+      - Existing Rank 21+ OR blank rank = EXIT, profit or loss.
+      - Approx Rs 10,000 per new stock: floor(10000 / buy price) units.
+      - Every BUY/EXIT is permanently appended to Trade Transactions.
+    """
+    tx_ws = get_transaction_sheet(book)
+    open_positions, booked_by_code = load_trade_state(tx_ws)
+    by_code = {r.get("code"): r for r in results if r.get("code") != "^NSEI"}
+
+    # 1) EXIT first so vacancies become available immediately.
+    for code, pos in list(open_positions.items()):
+        r = by_code.get(code)
+        rank = r.get("rank", "") if r else ""
+        rank_num = int(rank) if rank not in ("", None) else None
+
+        if r is None or rank_num is None or rank_num >= 21:
+            exit_price = float(r.get("cmp")) if r and r.get("cmp") is not None else pos["buy_price"]
+            units = int(pos["units"])
+            realized = round((exit_price - float(pos["buy_price"])) * units, 2)
+            realized_pct = round(
+                ((exit_price - float(pos["buy_price"])) / float(pos["buy_price"])) * 100.0, 2
+            ) if pos["buy_price"] else 0.0
+
+            stock_for_log = r or {"name": pos.get("name", code), "code": code}
+            append_trade(
+                tx_ws, stock_for_log, "EXIT",
+                rank if rank not in (None, "") else "",
+                exit_price, units, realized, realized_pct
+            )
+            booked_by_code[code] = round(booked_by_code.get(code, 0.0) + realized, 2)
+            open_positions.pop(code, None)
+
+    # 2) Fill vacant slots only with Rank 1-10 stocks, best rank first.
+    candidates = sorted(
+        [
+            r for r in results
+            if r.get("code") != "^NSEI"
+            and r.get("rank", "") != ""
+            and 1 <= int(r["rank"]) <= 10
+            and r.get("code") not in open_positions
+        ],
+        key=lambda r: int(r["rank"])
+    )
+
+    slots = max(0, MAX_OPEN_POSITIONS - len(open_positions))
+    for r in candidates[:slots]:
+        buy_price = float(r["cmp"])
+        units = int(TARGET_PER_STOCK // buy_price) if buy_price > 0 else 0
+        if units < 1:
+            continue
+        append_trade(tx_ws, r, "BUY", r["rank"], buy_price, units)
+        open_positions[r["code"]] = {
+            "name": r["name"],
+            "buy_price": round(buy_price, 2),
+            "units": units,
+            "buy_date": datetime.now(IST).strftime("%Y-%m-%d"),
+            "buy_time": datetime.now(IST).strftime("%H:%M:%S"),
+        }
+
+    # 3) Attach portfolio fields to scanner rows.
+    for r in results:
+        code = r.get("code")
+        r["buy_price"] = ""
+        r["buy_unit"] = ""
+        r["total_value"] = ""
+        r["profit_loss"] = ""
+        r["profit_loss_pct"] = ""
+        r["book_profit_loss"] = "" if code == "^NSEI" else round(booked_by_code.get(code, 0.0), 2)
+
+        if code in open_positions:
+            pos = open_positions[code]
+            bp = float(pos["buy_price"])
+            units = int(pos["units"])
+            cmp_price = float(r["cmp"])
+            r["buy_price"] = round(bp, 2)
+            r["buy_unit"] = units
+            r["total_value"] = round(cmp_price * units, 2)
+            r["profit_loss"] = round((cmp_price - bp) * units, 2)
+            r["profit_loss_pct"] = round(((cmp_price - bp) / bp) * 100.0, 2) if bp else 0.0
+
+    print(f"Open portfolio positions: {len(open_positions)}/{MAX_OPEN_POSITIONS}")
+    return open_positions, booked_by_code
+
+
 def write_sheet(book, results):
     try:
         ws = book.worksheet(OUTPUT_SHEET)
     except gspread.WorksheetNotFound:
-        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=11)
+        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=17)
 
     ws.clear()
 
-    headers = ["Stock Name", "NSE Code", "CMP", "Last Month Close", "1 Month % Change", "Rank", "Signal", "Daily Trend", "Weekly Trend", "Monthly Trend", "Chart"]
+    headers = [
+        "Stock Name", "NSE Code", "CMP", "Last Month Close", "1 Month % Change",
+        "Rank", "Signal", "BUY PRICE", "BUY UNIT", "TOTAL VALUE",
+        "PROFIT/LOSS", "% PROFIT/LOSS", "BOOK PROFIT/LOSS",
+        "Daily Trend", "Weekly Trend", "Monthly Trend", "Chart"
+    ]
     values = [headers]
 
     for r in results:
+        code = r.get("code")
+        rank = r.get("rank", "")
+        # Ranking display rule remains unchanged.
+        signal = (
+            "" if code == "^NSEI" else
+            "BUY" if rank != "" and int(rank) <= 10 else
+            "HOLD" if rank != "" and int(rank) <= 20 else
+            "EXIT"
+        )
+
         values.append([
-            r["name"],
-            r["code"],
-            r["cmp"],
+            r["name"], code, r["cmp"],
             "" if r.get("last_month_close") is None else r["last_month_close"],
             "" if r.get("one_month_change_pct") is None else r["one_month_change_pct"],
-            r.get("rank", ""),
-            ("" if r.get("code") == "^NSEI" else
-             "BUY" if r.get("rank", "") != "" and int(r["rank"]) <= 10 else
-             "HOLD" if r.get("rank", "") != "" and int(r["rank"]) <= 20 else
-             "EXIT"),
-            r["daily"],
-            r["weekly"],
-            r["monthly"],
-            "OPEN CHART",
+            rank, signal,
+            r.get("buy_price", ""), r.get("buy_unit", ""), r.get("total_value", ""),
+            r.get("profit_loss", ""), r.get("profit_loss_pct", ""),
+            r.get("book_profit_loss", ""),
+            r["daily"], r["weekly"], r["monthly"], "OPEN CHART",
         ])
 
     ws.update(
-        range_name=f"A1:K{len(values)}",
+        range_name=f"A1:Q{len(values)}",
         values=values,
         value_input_option="USER_ENTERED",
     )
     ws.freeze(rows=1, cols=1)
 
-    ws.format("A1:K1", {
+    ws.format("A1:Q1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
-        "textFormat":{
-            "foregroundColor":{"red":1,"green":1,"blue":1},
-            "bold":True,
-            "fontSize":11,
-        },
-        "horizontalAlignment":"CENTER",
-        "verticalAlignment":"MIDDLE",
+        "textFormat":{"foregroundColor":{"red":1,"green":1,"blue":1},"bold":True,"fontSize":11},
+        "horizontalAlignment":"CENTER","verticalAlignment":"MIDDLE",
     })
 
     if len(values) > 1:
-        ws.format(f"A2:K{len(values)}", {"verticalAlignment":"MIDDLE"})
-        ws.format(f"B2:K{len(values)}", {"horizontalAlignment":"CENTER"})
-        ws.format("A2:G2", {
+        ws.format(f"A2:Q{len(values)}", {"verticalAlignment":"MIDDLE"})
+        ws.format(f"B2:Q{len(values)}", {"horizontalAlignment":"CENTER"})
+        ws.format("A2:M2", {
             "backgroundColor":{"red":0.88,"green":0.93,"blue":1.0},
             "textFormat":{"bold":True},
-        })
-        ws.format(f"G2:G{len(values)}", {
-            "textFormat":{
-                "bold":True,
-                "foregroundColor":{"red":0.05,"green":0.30,"blue":0.75},
-            },
-            "horizontalAlignment":"CENTER",
         })
 
     sheet_id = ws.id
     requests = []
 
-    # Clear existing conditional-format rules so repeated runs stay clean.
+    # Remove old conditional formatting every run to avoid duplicate rules.
     try:
         meta = book.fetch_sheet_metadata()
-        target = next(s for s in meta["sheets"] if s["properties"]["sheetId"] == sheet_id)
-        rule_count = len(target.get("conditionalFormats", []))
-        for index in reversed(range(rule_count)):
-            requests.append({
-                "deleteConditionalFormatRule":{
-                    "sheetId":sheet_id,
-                    "index":index,
-                }
-            })
+        target = next(x for x in meta["sheets"] if x["properties"]["sheetId"] == sheet_id)
+        for index in reversed(range(len(target.get("conditionalFormats", [])))):
+            requests.append({"deleteConditionalFormatRule":{"sheetId":sheet_id,"index":index}})
     except Exception as exc:
         print(f"Conditional-format cleanup skipped: {exc}")
 
-    for col_index in [3, 4, 5]:
+    def add_text_rule(col0, text, bg, fg):
         requests.append({
             "addConditionalFormatRule":{
                 "rule":{
                     "ranges":[{
-                        "sheetId":sheet_id,
-                        "startRowIndex":1,
-                        "startColumnIndex":col_index,
-                        "endColumnIndex":col_index+1,
+                        "sheetId":sheet_id,"startRowIndex":1,
+                        "startColumnIndex":col0,"endColumnIndex":col0+1
                     }],
                     "booleanRule":{
-                        "condition":{"type":"TEXT_EQ","values":[{"userEnteredValue":"POSITIVE"}]},
-                        "format":{
-                            "backgroundColor":{"red":0.82,"green":0.95,"blue":0.84},
-                            "textFormat":{
-                                "foregroundColor":{"red":0.05,"green":0.40,"blue":0.16},
-                                "bold":True,
-                            },
-                        },
-                    },
-                },
-                "index":0,
-            }
-        })
-        requests.append({
-            "addConditionalFormatRule":{
-                "rule":{
-                    "ranges":[{
-                        "sheetId":sheet_id,
-                        "startRowIndex":1,
-                        "startColumnIndex":col_index,
-                        "endColumnIndex":col_index+1,
-                    }],
-                    "booleanRule":{
-                        "condition":{"type":"TEXT_EQ","values":[{"userEnteredValue":"NEGATIVE"}]},
-                        "format":{
-                            "backgroundColor":{"red":1.0,"green":0.85,"blue":0.85},
-                            "textFormat":{
-                                "foregroundColor":{"red":0.65,"green":0.05,"blue":0.05},
-                                "bold":True,
-                            },
-                        },
+                        "condition":{"type":"TEXT_EQ","values":[{"userEnteredValue":text}]},
+                        "format":{"backgroundColor":bg,
+                                  "textFormat":{"foregroundColor":fg,"bold":True}},
                     },
                 },
                 "index":0,
             }
         })
 
-    widths = {0:190, 1:110, 2:100, 3:125, 4:125, 5:70, 6:90, 7:120, 8:120, 9:130, 10:130}
+    # Signal G: BUY green, HOLD yellow, EXIT red.
+    add_text_rule(6, "BUY",
+                  {"red":0.80,"green":0.94,"blue":0.81},
+                  {"red":0.05,"green":0.45,"blue":0.12})
+    add_text_rule(6, "HOLD",
+                  {"red":1.00,"green":0.94,"blue":0.70},
+                  {"red":0.55,"green":0.35,"blue":0.00})
+    add_text_rule(6, "EXIT",
+                  {"red":0.96,"green":0.80,"blue":0.80},
+                  {"red":0.70,"green":0.05,"blue":0.05})
+
+    # Daily/Weekly/Monthly N:P: POSITIVE green, NEGATIVE red.
+    for col0 in [13, 14, 15]:
+        add_text_rule(col0, "POSITIVE",
+                      {"red":0.78,"green":0.93,"blue":0.80},
+                      {"red":0.05,"green":0.45,"blue":0.12})
+        add_text_rule(col0, "NEGATIVE",
+                      {"red":0.96,"green":0.78,"blue":0.78},
+                      {"red":0.70,"green":0.05,"blue":0.05})
+
+    # Profit/Loss K, % P/L L, Book P/L M: positive green, negative red.
+    for col0 in [10, 11, 12]:
+        requests.append({
+            "addConditionalFormatRule":{
+                "rule":{
+                    "ranges":[{"sheetId":sheet_id,"startRowIndex":1,
+                               "startColumnIndex":col0,"endColumnIndex":col0+1}],
+                    "booleanRule":{
+                        "condition":{"type":"NUMBER_GREATER","values":[{"userEnteredValue":"0"}]},
+                        "format":{"backgroundColor":{"red":0.82,"green":0.95,"blue":0.84},
+                                  "textFormat":{"foregroundColor":{"red":0.05,"green":0.40,"blue":0.16},"bold":True}},
+                    },
+                },"index":0
+            }
+        })
+        requests.append({
+            "addConditionalFormatRule":{
+                "rule":{
+                    "ranges":[{"sheetId":sheet_id,"startRowIndex":1,
+                               "startColumnIndex":col0,"endColumnIndex":col0+1}],
+                    "booleanRule":{
+                        "condition":{"type":"NUMBER_LESS","values":[{"userEnteredValue":"0"}]},
+                        "format":{"backgroundColor":{"red":1.0,"green":0.85,"blue":0.85},
+                                  "textFormat":{"foregroundColor":{"red":0.65,"green":0.05,"blue":0.05},"bold":True}},
+                    },
+                },"index":0
+            }
+        })
+
+    widths = {
+        0:190,1:110,2:100,3:125,4:125,5:70,6:90,
+        7:100,8:85,9:110,10:110,11:110,12:125,
+        13:115,14:115,15:125,16:125
+    }
     for col, pixels in widths.items():
         requests.append({
             "updateDimensionProperties":{
-                "range":{
-                    "sheetId":sheet_id,
-                    "dimension":"COLUMNS",
-                    "startIndex":col,
-                    "endIndex":col+1,
-                },
-                "properties":{"pixelSize":pixels},
-                "fields":"pixelSize",
+                "range":{"sheetId":sheet_id,"dimension":"COLUMNS",
+                         "startIndex":col,"endIndex":col+1},
+                "properties":{"pixelSize":pixels},"fields":"pixelSize",
             }
         })
 
     if requests:
         book.batch_update({"requests":requests})
 
-    # TRUE CLICKABLE CHART LINKS
-    # Same Google Sheets rich-text method used by the working Final List.
+    # Clickable chart links in Q.
     try:
-        rich_link_requests = []
-
+        link_requests = []
         for row_index, row in enumerate(results, start=2):
             chart_url = str(row.get("chart", "") or "").strip()
-
             if not chart_url.startswith(("http://", "https://")):
                 continue
-
-            rich_link_requests.append({
-                "updateCells": {
-                    "range": {
-                        "sheetId": ws.id,
-                        "startRowIndex": row_index - 1,
-                        "endRowIndex": row_index,
-                        "startColumnIndex": 10,
-                        "endColumnIndex": 11,
-                    },
-                    "rows": [{
-                        "values": [{
-                            "userEnteredValue": {
-                                "stringValue": "OPEN CHART"
-                            },
-                            "textFormatRuns": [{
-                                "startIndex": 0,
-                                "format": {
-                                    "link": {"uri": chart_url},
-                                    "underline": True,
-                                },
-                            }],
-                        }]
-                    }],
-                    "fields": "userEnteredValue,textFormatRuns",
+            link_requests.append({
+                "updateCells":{
+                    "range":{"sheetId":ws.id,"startRowIndex":row_index-1,
+                             "endRowIndex":row_index,"startColumnIndex":16,"endColumnIndex":17},
+                    "rows":[{"values":[{
+                        "userEnteredValue":{"stringValue":"OPEN CHART"},
+                        "textFormatRuns":[{"startIndex":0,"format":{
+                            "link":{"uri":chart_url},"underline":True
+                        }}],
+                    }]}],
+                    "fields":"userEnteredValue,textFormatRuns",
                 }
             })
-
-        for batch_start in range(0, len(rich_link_requests), 100):
-            book.batch_update({
-                "requests": rich_link_requests[
-                    batch_start:batch_start + 100
-                ]
-            })
-
-        print("Clickable rich-text chart links applied:", len(rich_link_requests))
-
+        for i in range(0, len(link_requests), 100):
+            book.batch_update({"requests":link_requests[i:i+100]})
+        print("Clickable rich-text chart links applied:", len(link_requests))
     except Exception as exc:
         print("WARNING: Rich-text chart link formatting failed:", exc)
 
-
-    # BUY / EXIT colors in Signal column G
-    signal_reqs = []
-    for txt, bg, fg in [
-        ("BUY",  {"red": 0.80, "green": 0.94, "blue": 0.81}, {"red": 0.05, "green": 0.45, "blue": 0.12}),
-        ("HOLD", {"red": 1.00, "green": 0.94, "blue": 0.70}, {"red": 0.55, "green": 0.35, "blue": 0.00}),
-        ("EXIT", {"red": 0.96, "green": 0.80, "blue": 0.80}, {"red": 0.70, "green": 0.05, "blue": 0.05}),
-    ]:
-        signal_reqs.append({
-            "addConditionalFormatRule": {
-                "rule": {
-                    "ranges": [{
-                        "sheetId": ws.id,
-                        "startRowIndex": 1,
-                        "startColumnIndex": 6,
-                        "endColumnIndex": 7,
-                    }],
-                    "booleanRule": {
-                        "condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": txt}]},
-                        "format": {
-                            "backgroundColor": bg,
-                            "textFormat": {"foregroundColor": fg, "bold": True},
-                        },
-                    },
-                },
-                "index": 0,
-            }
-        })
-    ws.spreadsheet.batch_update({"requests": signal_reqs})
-
-    # Apply Daily / Weekly / Monthly trend colors while ws is in scope.
-    apply_trend_colors(ws)
-
-
-
-def apply_trend_colors(ws):
-    """Color Daily/Weekly/Monthly trend cells: POSITIVE green, NEGATIVE red."""
-    sid = ws.id
-    reqs = []
-
-    # H:J in V16.6 => zero-based columns 7:10
-    for txt, bg, fg in [
-        ("POSITIVE",
-         {"red": 0.78, "green": 0.93, "blue": 0.80},
-         {"red": 0.05, "green": 0.45, "blue": 0.12}),
-        ("NEGATIVE",
-         {"red": 0.96, "green": 0.78, "blue": 0.78},
-         {"red": 0.70, "green": 0.05, "blue": 0.05}),
-    ]:
-        reqs.append({
-            "addConditionalFormatRule": {
-                "rule": {
-                    "ranges": [{
-                        "sheetId": sid,
-                        "startRowIndex": 1,
-                        "startColumnIndex": 7,
-                        "endColumnIndex": 10,
-                    }],
-                    "booleanRule": {
-                        "condition": {
-                            "type": "TEXT_EQ",
-                            "values": [{"userEnteredValue": txt}],
-                        },
-                        "format": {
-                            "backgroundColor": bg,
-                            "textFormat": {
-                                "foregroundColor": fg,
-                                "bold": True,
-                            },
-                        },
-                    },
-                },
-                "index": 0,
-            }
-        })
-
-    ws.spreadsheet.batch_update({"requests": reqs})
 
 
 def main():
@@ -1023,6 +1116,10 @@ def main():
         r["rank"] = ""
     for i, r in enumerate(all_positive, 1):
         r["rank"] = i
+
+    # Persistent portfolio + permanent transaction history.
+    # EXITs are processed first, then vacant slots are filled from Rank 1-10.
+    update_portfolio(book, results)
 
     # Visible order: NIFTY first, then ALL POSITIVE stocks by Rank 1,2,3...
     # Remaining stocks follow afterwards.
