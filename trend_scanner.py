@@ -525,7 +525,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.6"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.7"
 
     payload = {
         "name": stock_name,
@@ -905,6 +905,9 @@ def write_sheet(book, results):
         })
     ws.spreadsheet.batch_update({"requests": signal_reqs})
 
+    # Apply Daily / Weekly / Monthly trend colors while ws is in scope.
+    apply_trend_colors(ws)
+
 
 
 def apply_trend_colors(ws):
@@ -1030,7 +1033,6 @@ def main():
         )
     )
     write_sheet(book, results)
-    apply_trend_colors(ws)
 
     print("=" * 72)
     print(f"Completed: {len(results)} instruments")
