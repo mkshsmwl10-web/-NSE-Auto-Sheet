@@ -525,7 +525,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=14"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=16"
 
     payload = {
         "name": stock_name,
@@ -575,9 +575,30 @@ def scan_stock(stock):
         "daily": daily_info[0],
         "weekly": weekly_info[0],
         "monthly": monthly_info[0],
+        "_daily_df": daily,
         "chart": chart_url,
     }
 
+
+
+
+def calculate_rs_vs_nifty_1m(stock_daily, nifty_daily):
+    """21-session relative return: Stock 1M % minus NIFTY 1M %."""
+    try:
+        if stock_daily is None or nifty_daily is None:
+            return None, ""
+        a = stock_daily.dropna(subset=["Close"]).copy()
+        b = nifty_daily.dropna(subset=["Close"]).copy()
+        common = a.index.intersection(b.index).sort_values()
+        if len(common) < 22:
+            return None, ""
+        start, end = common[-22], common[-1]
+        sr = (float(a.loc[end,"Close"]) / float(a.loc[start,"Close"]) - 1) * 100
+        nr = (float(b.loc[end,"Close"]) / float(b.loc[start,"Close"]) - 1) * 100
+        rs = round(sr - nr, 2)
+        return rs, ("OUTPERFORM" if rs > 0 else "UNDERPERFORM")
+    except Exception:
+        return None, ""
 
 
 def classify_signal(code, daily, weekly, monthly):
@@ -598,6 +619,51 @@ def classify_signal(code, daily, weekly, monthly):
 
     return ""
 
+
+def sort_results_for_positional(results):
+    """
+    Keep NIFTY first, then prioritize positional-long candidates:
+
+      1) ALL POSITIVE + OUTPERFORM
+      2) PULLBACK WATCH + OUTPERFORM
+      3) REVERSAL WATCH + OUTPERFORM
+      4) Other OUTPERFORM stocks
+      5) UNDERPERFORM / remaining stocks
+
+    Within the same bucket, higher RS vs NIFTY comes first.
+    Trend calculation and RS calculation are NOT changed here.
+    """
+    def key(r):
+        code = r.get("code", "")
+        if code == "^NSEI":
+            return (-1, 0.0, "")
+
+        signal = classify_signal(
+            code,
+            r.get("daily", ""),
+            r.get("weekly", ""),
+            r.get("monthly", ""),
+        )
+        strength = r.get("rs_strength", "")
+        rs = r.get("rs_vs_nifty")
+        rs_num = float(rs) if rs is not None else -999999.0
+
+        if strength == "OUTPERFORM" and signal == "ALL POSITIVE":
+            bucket = 0
+        elif strength == "OUTPERFORM" and signal == "PULLBACK WATCH":
+            bucket = 1
+        elif strength == "OUTPERFORM" and signal == "REVERSAL WATCH":
+            bucket = 2
+        elif strength == "OUTPERFORM":
+            bucket = 3
+        else:
+            bucket = 4
+
+        return (bucket, -rs_num, r.get("name", ""))
+
+    return sorted(results, key=key)
+
+
 def write_sheet(book, results):
     try:
         ws = book.worksheet(OUTPUT_SHEET)
@@ -606,7 +672,7 @@ def write_sheet(book, results):
 
     ws.clear()
 
-    headers = ["Stock Name", "NSE Code", "CMP", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "Chart"]
+    headers = ["Stock Name", "NSE Code", "CMP", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "RS vs NIFTY 1M %", "RS Strength", "Chart"]
     values = [headers]
 
     for r in results:
@@ -618,17 +684,19 @@ def write_sheet(book, results):
             r["weekly"],
             r["monthly"],
             classify_signal(r["code"], r["daily"], r["weekly"], r["monthly"]),
+            "" if r.get("rs_vs_nifty") is None else r["rs_vs_nifty"],
+            r.get("rs_strength", ""),
             "OPEN CHART",
         ])
 
     ws.update(
-        range_name=f"A1:H{len(values)}",
+        range_name=f"A1:J{len(values)}",
         values=values,
         value_input_option="USER_ENTERED",
     )
     ws.freeze(rows=1, cols=1)
 
-    ws.format("A1:H1", {
+    ws.format("A1:J1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{
             "foregroundColor":{"red":1,"green":1,"blue":1},
@@ -640,8 +708,8 @@ def write_sheet(book, results):
     })
 
     if len(values) > 1:
-        ws.format(f"A2:H{len(values)}", {"verticalAlignment":"MIDDLE"})
-        ws.format(f"B2:H{len(values)}", {"horizontalAlignment":"CENTER"})
+        ws.format(f"A2:J{len(values)}", {"verticalAlignment":"MIDDLE"})
+        ws.format(f"B2:J{len(values)}", {"horizontalAlignment":"CENTER"})
         ws.format("A2:G2", {
             "backgroundColor":{"red":0.88,"green":0.93,"blue":1.0},
             "textFormat":{"bold":True},
@@ -720,7 +788,7 @@ def write_sheet(book, results):
             }
         })
 
-    widths = {0:190, 1:110, 2:100, 3:120, 4:120, 5:130, 6:170, 7:130}
+    widths = {0:190, 1:110, 2:100, 3:120, 4:120, 5:130, 6:170, 7:145, 8:145, 9:130}
     for col, pixels in widths.items():
         requests.append({
             "updateDimensionProperties":{
@@ -755,8 +823,8 @@ def write_sheet(book, results):
                         "sheetId": ws.id,
                         "startRowIndex": row_index - 1,
                         "endRowIndex": row_index,
-                        "startColumnIndex": 7,
-                        "endColumnIndex": 8,
+                        "startColumnIndex": 9,
+                        "endColumnIndex": 10,
                     },
                     "rows": [{
                         "values": [{
@@ -817,6 +885,16 @@ def main():
             print(f"  ERROR: {exc}")
         time.sleep(0.10)
 
+    nifty_daily = next((r.get("_daily_df") for r in results if r["code"] == "^NSEI"), None)
+    for r in results:
+        if r["code"] == "^NSEI":
+            r["rs_vs_nifty"], r["rs_strength"] = None, ""
+        else:
+            r["rs_vs_nifty"], r["rs_strength"] = calculate_rs_vs_nifty_1m(
+                r.get("_daily_df"), nifty_daily
+            )
+
+    results = sort_results_for_positional(results)
     write_sheet(book, results)
 
     print("=" * 72)
