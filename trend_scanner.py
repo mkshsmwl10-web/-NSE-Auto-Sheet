@@ -525,7 +525,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.7"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.8"
 
     payload = {
         "name": stock_name,
@@ -702,7 +702,9 @@ def write_sheet(book, results):
             "" if r.get("one_month_change_pct") is None else r["one_month_change_pct"],
             r.get("rank", ""),
             ("" if r.get("code") == "^NSEI" else
-             "BUY" if r.get("rank", "") != "" and int(r["rank"]) <= 20 else "EXIT"),
+             "BUY" if r.get("rank", "") != "" and int(r["rank"]) <= 10 else
+             "HOLD" if r.get("rank", "") != "" and int(r["rank"]) <= 20 else
+             "EXIT"),
             r["daily"],
             r["weekly"],
             r["monthly"],
@@ -881,6 +883,7 @@ def write_sheet(book, results):
     signal_reqs = []
     for txt, bg, fg in [
         ("BUY",  {"red": 0.80, "green": 0.94, "blue": 0.81}, {"red": 0.05, "green": 0.45, "blue": 0.12}),
+        ("HOLD", {"red": 1.00, "green": 0.94, "blue": 0.70}, {"red": 0.55, "green": 0.35, "blue": 0.00}),
         ("EXIT", {"red": 0.96, "green": 0.80, "blue": 0.80}, {"red": 0.70, "green": 0.05, "blue": 0.05}),
     ]:
         signal_reqs.append({
