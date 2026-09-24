@@ -525,7 +525,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.2"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.3"
 
     payload = {
         "name": stock_name,
@@ -686,11 +686,11 @@ def write_sheet(book, results):
     try:
         ws = book.worksheet(OUTPUT_SHEET)
     except gspread.WorksheetNotFound:
-        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=12)
+        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=13)
 
     ws.clear()
 
-    headers = ["Stock Name", "NSE Code", "CMP", "Last Month Close", "1 Month % Change", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "RS vs NIFTY 1M %", "RS Strength", "Chart"]
+    headers = ["Stock Name", "NSE Code", "CMP", "Last Month Close", "1 Month % Change", "Rank", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "RS vs NIFTY 1M %", "RS Strength", "Chart"]
     values = [headers]
 
     for r in results:
@@ -700,6 +700,7 @@ def write_sheet(book, results):
             r["cmp"],
             "" if r.get("last_month_close") is None else r["last_month_close"],
             "" if r.get("one_month_change_pct") is None else r["one_month_change_pct"],
+            r.get("rank", ""),
             r["daily"],
             r["weekly"],
             r["monthly"],
@@ -710,13 +711,13 @@ def write_sheet(book, results):
         ])
 
     ws.update(
-        range_name=f"A1:L{len(values)}",
+        range_name=f"A1:M{len(values)}",
         values=values,
         value_input_option="USER_ENTERED",
     )
     ws.freeze(rows=1, cols=1)
 
-    ws.format("A1:L1", {
+    ws.format("A1:M1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{
             "foregroundColor":{"red":1,"green":1,"blue":1},
@@ -728,8 +729,8 @@ def write_sheet(book, results):
     })
 
     if len(values) > 1:
-        ws.format(f"A2:L{len(values)}", {"verticalAlignment":"MIDDLE"})
-        ws.format(f"B2:L{len(values)}", {"horizontalAlignment":"CENTER"})
+        ws.format(f"A2:M{len(values)}", {"verticalAlignment":"MIDDLE"})
+        ws.format(f"B2:M{len(values)}", {"horizontalAlignment":"CENTER"})
         ws.format("A2:G2", {
             "backgroundColor":{"red":0.88,"green":0.93,"blue":1.0},
             "textFormat":{"bold":True},
@@ -843,8 +844,8 @@ def write_sheet(book, results):
                         "sheetId": ws.id,
                         "startRowIndex": row_index - 1,
                         "endRowIndex": row_index,
-                        "startColumnIndex": 11,
-                        "endColumnIndex": 12,
+                        "startColumnIndex": 12,
+                        "endColumnIndex": 13,
                     },
                     "rows": [{
                         "values": [{
@@ -924,6 +925,25 @@ def main():
             )
         else:
             r["one_month_change_pct"] = None
+
+    # Rank ONLY ALL POSITIVE stocks by 1 Month % Change (highest = Rank 1).
+    all_positive = [
+        r for r in results
+        if r.get("code") != "^NSEI"
+        and classify_signal(
+            r.get("code", ""),
+            r.get("daily", ""),
+            r.get("weekly", ""),
+            r.get("monthly", ""),
+        ) == "ALL POSITIVE"
+        and r.get("one_month_change_pct") is not None
+    ]
+    all_positive.sort(key=lambda r: -float(r["one_month_change_pct"]))
+
+    for r in results:
+        r["rank"] = ""
+    for i, r in enumerate(all_positive, 1):
+        r["rank"] = i
 
     results = sort_results_for_positional(results)
     write_sheet(book, results)
