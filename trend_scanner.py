@@ -525,7 +525,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=16"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.1"
 
     payload = {
         "name": stock_name,
@@ -579,6 +579,24 @@ def scan_stock(stock):
         "chart": chart_url,
     }
 
+
+
+
+def get_last_month_close(daily_df):
+    """Last available completed Daily Close from the previous calendar month."""
+    try:
+        if daily_df is None or daily_df.empty:
+            return None
+        d = daily_df.dropna(subset=["Close"]).copy()
+        if d.empty:
+            return None
+        prev_month = d.index[-1].to_period("M") - 1
+        prev = d[d.index.to_period("M") == prev_month]
+        if prev.empty:
+            return None
+        return round(float(prev.iloc[-1]["Close"]), 2)
+    except Exception:
+        return None
 
 
 
@@ -668,11 +686,11 @@ def write_sheet(book, results):
     try:
         ws = book.worksheet(OUTPUT_SHEET)
     except gspread.WorksheetNotFound:
-        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=10)
+        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=11)
 
     ws.clear()
 
-    headers = ["Stock Name", "NSE Code", "CMP", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "RS vs NIFTY 1M %", "RS Strength", "Chart"]
+    headers = ["Stock Name", "NSE Code", "CMP", "Last Month Close", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "RS vs NIFTY 1M %", "RS Strength", "Chart"]
     values = [headers]
 
     for r in results:
@@ -680,6 +698,7 @@ def write_sheet(book, results):
             r["name"],
             r["code"],
             r["cmp"],
+            "" if r.get("last_month_close") is None else r["last_month_close"],
             r["daily"],
             r["weekly"],
             r["monthly"],
@@ -690,13 +709,13 @@ def write_sheet(book, results):
         ])
 
     ws.update(
-        range_name=f"A1:J{len(values)}",
+        range_name=f"A1:K{len(values)}",
         values=values,
         value_input_option="USER_ENTERED",
     )
     ws.freeze(rows=1, cols=1)
 
-    ws.format("A1:J1", {
+    ws.format("A1:K1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{
             "foregroundColor":{"red":1,"green":1,"blue":1},
@@ -708,8 +727,8 @@ def write_sheet(book, results):
     })
 
     if len(values) > 1:
-        ws.format(f"A2:J{len(values)}", {"verticalAlignment":"MIDDLE"})
-        ws.format(f"B2:J{len(values)}", {"horizontalAlignment":"CENTER"})
+        ws.format(f"A2:K{len(values)}", {"verticalAlignment":"MIDDLE"})
+        ws.format(f"B2:K{len(values)}", {"horizontalAlignment":"CENTER"})
         ws.format("A2:G2", {
             "backgroundColor":{"red":0.88,"green":0.93,"blue":1.0},
             "textFormat":{"bold":True},
@@ -823,8 +842,8 @@ def write_sheet(book, results):
                         "sheetId": ws.id,
                         "startRowIndex": row_index - 1,
                         "endRowIndex": row_index,
-                        "startColumnIndex": 9,
-                        "endColumnIndex": 10,
+                        "startColumnIndex": 10,
+                        "endColumnIndex": 11,
                     },
                     "rows": [{
                         "values": [{
@@ -893,6 +912,9 @@ def main():
             r["rs_vs_nifty"], r["rs_strength"] = calculate_rs_vs_nifty_1m(
                 r.get("_daily_df"), nifty_daily
             )
+
+    for r in results:
+        r["last_month_close"] = get_last_month_close(r.get("_daily_df"))
 
     results = sort_results_for_positional(results)
     write_sheet(book, results)
