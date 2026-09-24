@@ -525,7 +525,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.3"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.4"
 
     payload = {
         "name": stock_name,
@@ -686,11 +686,11 @@ def write_sheet(book, results):
     try:
         ws = book.worksheet(OUTPUT_SHEET)
     except gspread.WorksheetNotFound:
-        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=13)
+        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=10)
 
     ws.clear()
 
-    headers = ["Stock Name", "NSE Code", "CMP", "Last Month Close", "1 Month % Change", "Rank", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "RS vs NIFTY 1M %", "RS Strength", "Chart"]
+    headers = ["Stock Name", "NSE Code", "CMP", "Last Month Close", "1 Month % Change", "Rank", "Daily Trend", "Weekly Trend", "Monthly Trend", "Chart"]
     values = [headers]
 
     for r in results:
@@ -704,20 +704,17 @@ def write_sheet(book, results):
             r["daily"],
             r["weekly"],
             r["monthly"],
-            classify_signal(r["code"], r["daily"], r["weekly"], r["monthly"]),
-            "" if r.get("rs_vs_nifty") is None else r["rs_vs_nifty"],
-            r.get("rs_strength", ""),
             "OPEN CHART",
         ])
 
     ws.update(
-        range_name=f"A1:M{len(values)}",
+        range_name=f"A1:J{len(values)}",
         values=values,
         value_input_option="USER_ENTERED",
     )
     ws.freeze(rows=1, cols=1)
 
-    ws.format("A1:M1", {
+    ws.format("A1:J1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{
             "foregroundColor":{"red":1,"green":1,"blue":1},
@@ -729,8 +726,8 @@ def write_sheet(book, results):
     })
 
     if len(values) > 1:
-        ws.format(f"A2:M{len(values)}", {"verticalAlignment":"MIDDLE"})
-        ws.format(f"B2:M{len(values)}", {"horizontalAlignment":"CENTER"})
+        ws.format(f"A2:J{len(values)}", {"verticalAlignment":"MIDDLE"})
+        ws.format(f"B2:J{len(values)}", {"horizontalAlignment":"CENTER"})
         ws.format("A2:G2", {
             "backgroundColor":{"red":0.88,"green":0.93,"blue":1.0},
             "textFormat":{"bold":True},
@@ -809,7 +806,7 @@ def write_sheet(book, results):
             }
         })
 
-    widths = {0:190, 1:110, 2:100, 3:120, 4:120, 5:130, 6:170, 7:145, 8:145, 9:130}
+    widths = {0:190, 1:110, 2:100, 3:125, 4:125, 5:70, 6:120, 7:120, 8:130, 9:130}
     for col, pixels in widths.items():
         requests.append({
             "updateDimensionProperties":{
@@ -844,8 +841,8 @@ def write_sheet(book, results):
                         "sheetId": ws.id,
                         "startRowIndex": row_index - 1,
                         "endRowIndex": row_index,
-                        "startColumnIndex": 12,
-                        "endColumnIndex": 13,
+                        "startColumnIndex": 9,
+                        "endColumnIndex": 10,
                     },
                     "rows": [{
                         "values": [{
@@ -945,7 +942,17 @@ def main():
     for i, r in enumerate(all_positive, 1):
         r["rank"] = i
 
-    results = sort_results_for_positional(results)
+    # Visible order: NIFTY first, then ALL POSITIVE stocks by Rank 1,2,3...
+    # Remaining stocks follow afterwards.
+    results = sorted(
+        results,
+        key=lambda r: (
+            0 if r.get("code") == "^NSEI" else
+            1 if r.get("rank", "") != "" else 2,
+            int(r.get("rank")) if r.get("rank", "") != "" else 999999,
+            r.get("name", "")
+        )
+    )
     write_sheet(book, results)
 
     print("=" * 72)
