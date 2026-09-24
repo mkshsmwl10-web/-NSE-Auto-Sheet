@@ -20,8 +20,6 @@ body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,
 .toolbar { padding:8px 20px 14px; }
 button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
 button.active { background:#2563eb; }
-select,input { border:1px solid #475569; background:#1e293b; color:white; padding:8px 9px; margin-right:7px; border-radius:6px; font-weight:700; }
-input { width:72px; }
 .info { padding:0 20px 10px; color:#cbd5e1; }
 .ohlc { padding:0 20px 10px; min-height:24px; color:#e2e8f0; font-weight:700; }
 .ohlc span { margin-right:14px; }
@@ -50,18 +48,6 @@ input { width:72px; }
   <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
   <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
   <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
-  <button id="scalePrice" class="active" onclick="setScaleMode('price')">Price</button>
-  <button id="scalePct" onclick="setScaleMode('percent')">% Scale</button>
-  <select id="indicatorType">
-    <option value="">Indicator</option>
-    <option value="SMA">SMA</option>
-    <option value="EMA">EMA</option>
-    <option value="BB">Bollinger Bands</option>
-  </select>
-  <input id="indicatorPeriod" type="number" min="2" max="250" value="20" title="Period">
-  <input id="bbMult" type="number" min="0.5" max="5" step="0.1" value="2" title="BB multiplier">
-  <button onclick="addIndicator()">Add</button>
-  <button onclick="clearIndicators()">Clear Indicators</button>
   <button id="toolH" onclick="drawH()">H-Line</button> <button id="toolV" onclick="drawV()">V-Line</button>
   <button id="toolT" onclick="drawTrend()">Trend Line</button> <button id="toolR" onclick="drawRay()">Ray</button>
   <button id="toolClear" onclick="clearDrawings()">Clear Drawings</button>
@@ -71,7 +57,7 @@ input { width:72px; }
 <script>
 const DATA = {"name": "DEEPA", "code": "DEEPA", "cmp": 196.4, "Daily": {"trend": "POSITIVE", "reference": 189.49, "bars": [{"time": "2026-09-08", "open": 221.0, "high": 222.0, "low": 193.0, "close": 194.37}, {"time": "2026-09-09", "open": 196.01, "high": 203.8, "low": 194.37, "close": 201.23}, {"time": "2026-09-10", "open": 203.1, "high": 203.8, "low": 193.6, "close": 196.04}, {"time": "2026-09-11", "open": 194.0, "high": 194.25, "low": 185.0, "close": 185.86}, {"time": "2026-09-14", "open": 185.86, "high": 185.86, "low": 185.86, "close": 185.86}, {"time": "2026-09-15", "open": 185.87, "high": 187.62, "low": 165.0, "close": 169.14}, {"time": "2026-09-16", "open": 173.99, "high": 174.49, "low": 164.79, "close": 171.82}, {"time": "2026-09-17", "open": 173.5, "high": 175.39, "low": 170.1, "close": 173.34}, {"time": "2026-09-18", "open": 175.3, "high": 191.49, "low": 171.38, "close": 188.31}, {"time": "2026-09-21", "open": 189.0, "high": 189.7, "low": 182.15, "close": 183.06}, {"time": "2026-09-22", "open": 184.0, "high": 192.0, "low": 181.94, "close": 188.43}, {"time": "2026-09-23", "open": 189.49, "high": 197.99, "low": 189.0, "close": 196.4}]}, "Weekly": {"trend": "NEGATIVE", "reference": 221.0, "bars": [{"time": "2026-09-11", "open": 221.0, "high": 222.0, "low": 185.0, "close": 185.86}, {"time": "2026-09-18", "open": 185.86, "high": 191.49, "low": 164.79, "close": 188.31}]}, "Monthly": {"trend": "NO DATA", "reference": null, "bars": []}};
 let chart = null;
-let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null, indicatorSeries=[], scaleMode="price";
+let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
 const drawCanvas=document.getElementById("drawCanvas");
 const drawHit=document.getElementById("drawHit");
 const pen=drawCanvas.getContext("2d");
@@ -128,8 +114,6 @@ function renderTF(tf) {
   });
 
   candleSeries.setData(item.bars);
-  applyScaleMode();
-  renderIndicators();
   setupCrosshairOHLC();
 
   if (item.reference !== null) {
@@ -147,71 +131,6 @@ function renderTF(tf) {
   setTimeout(resizeDrawingCanvas,0);
 }
 
-
-function setScaleMode(mode){
-  scaleMode=mode;
-  document.getElementById("scalePrice").classList.toggle("active", mode==="price");
-  document.getElementById("scalePct").classList.toggle("active", mode==="percent");
-  applyScaleMode();
-}
-function applyScaleMode(){
-  if(!chart)return;
-  const m=(scaleMode==="percent" && LightweightCharts.PriceScaleMode)
-    ? LightweightCharts.PriceScaleMode.Percentage
-    : (LightweightCharts.PriceScaleMode ? LightweightCharts.PriceScaleMode.Normal : 0);
-  chart.priceScale("right").applyOptions({mode:m});
-}
-function smaData(bars,p){
-  const out=[], q=[];
-  for(const b of bars){
-    q.push(Number(b.close));
-    if(q.length>p)q.shift();
-    if(q.length===p) out.push({time:b.time,value:q.reduce((a,x)=>a+x,0)/p});
-  }
-  return out;
-}
-function emaData(bars,p){
-  const out=[]; if(!bars.length)return out;
-  const k=2/(p+1); let e=Number(bars[0].close);
-  bars.forEach((b,i)=>{e=i===0?Number(b.close):Number(b.close)*k+e*(1-k); if(i>=p-1)out.push({time:b.time,value:e});});
-  return out;
-}
-function bbData(bars,p,m){
-  const mid=[],up=[],lo=[],q=[];
-  for(const b of bars){
-    q.push(Number(b.close)); if(q.length>p)q.shift();
-    if(q.length===p){
-      const avg=q.reduce((a,x)=>a+x,0)/p;
-      const sd=Math.sqrt(q.reduce((a,x)=>a+(x-avg)*(x-avg),0)/p);
-      mid.push({time:b.time,value:avg}); up.push({time:b.time,value:avg+m*sd}); lo.push({time:b.time,value:avg-m*sd});
-    }
-  }
-  return [mid,up,lo];
-}
-function addLine(data,title){
-  if(!chart)return;
-  const ls=chart.addLineSeries({lineWidth:2,title:title,priceLineVisible:false,lastValueVisible:true});
-  ls.setData(data); indicatorSeries.push(ls);
-}
-function addIndicator(){
-  const type=document.getElementById("indicatorType").value;
-  const p=Math.max(2,parseInt(document.getElementById("indicatorPeriod").value||"20"));
-  const mult=Math.max(0.5,parseFloat(document.getElementById("bbMult").value||"2"));
-  if(!type||!DATA[currentTF])return;
-  const bars=DATA[currentTF].bars;
-  if(type==="SMA") addLine(smaData(bars,p),"SMA "+p);
-  if(type==="EMA") addLine(emaData(bars,p),"EMA "+p);
-  if(type==="BB"){
-    const b=bbData(bars,p,mult);
-    addLine(b[0],"BB Mid "+p); addLine(b[1],"BB Upper"); addLine(b[2],"BB Lower");
-  }
-}
-function clearIndicators(){
-  if(chart) indicatorSeries.forEach(x=>{try{chart.removeSeries(x)}catch(e){}});
-  indicatorSeries=[];
-}
-function renderIndicators(){ indicatorSeries=[]; }
-
 function fitChart(){if(chart)chart.timeScale().fitContent();}
 function zoomBy(f){
   if(!chart)return;
@@ -221,7 +140,7 @@ function zoomBy(f){
   t.setVisibleLogicalRange({from:m-h,to:m+h});
 }
 function fitChart(){ if(chart) chart.timeScale().fitContent(); }
-function resetChart(){ fitChart(); clearDrawings(); clearIndicators(); setScaleMode("price"); }
+function resetChart(){ fitChart(); clearDrawings(); }
 
 function resizeDrawingCanvas(){
   const r=drawCanvas.getBoundingClientRect();
