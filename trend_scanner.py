@@ -285,8 +285,6 @@ body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,
 .toolbar { padding:8px 20px 14px; }
 button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
 button.active { background:#2563eb; }
-select,input { border:1px solid #475569; background:#1e293b; color:white; padding:8px 9px; margin-right:7px; border-radius:6px; font-weight:700; }
-input { width:72px; }
 .info { padding:0 20px 10px; color:#cbd5e1; }
 .ohlc { padding:0 20px 10px; min-height:24px; color:#e2e8f0; font-weight:700; }
 .ohlc span { margin-right:14px; }
@@ -315,18 +313,6 @@ input { width:72px; }
   <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
   <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
   <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
-  <button id="scalePrice" class="active" onclick="setScaleMode('price')">Price</button>
-  <button id="scalePct" onclick="setScaleMode('percent')">% Scale</button>
-  <select id="indicatorType">
-    <option value="">Indicator</option>
-    <option value="SMA">SMA</option>
-    <option value="EMA">EMA</option>
-    <option value="BB">Bollinger Bands</option>
-  </select>
-  <input id="indicatorPeriod" type="number" min="2" max="250" value="20" title="Period">
-  <input id="bbMult" type="number" min="0.5" max="5" step="0.1" value="2" title="BB multiplier">
-  <button onclick="addIndicator()">Add</button>
-  <button onclick="clearIndicators()">Clear Indicators</button>
   <button id="toolH" onclick="drawH()">H-Line</button> <button id="toolV" onclick="drawV()">V-Line</button>
   <button id="toolT" onclick="drawTrend()">Trend Line</button> <button id="toolR" onclick="drawRay()">Ray</button>
   <button id="toolClear" onclick="clearDrawings()">Clear Drawings</button>
@@ -336,7 +322,7 @@ input { width:72px; }
 <script>
 const DATA = __DATA_JSON__;
 let chart = null;
-let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null, indicatorSeries=[], scaleMode="price";
+let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
 const drawCanvas=document.getElementById("drawCanvas");
 const drawHit=document.getElementById("drawHit");
 const pen=drawCanvas.getContext("2d");
@@ -393,8 +379,6 @@ function renderTF(tf) {
   });
 
   candleSeries.setData(item.bars);
-  applyScaleMode();
-  renderIndicators();
   setupCrosshairOHLC();
 
   if (item.reference !== null) {
@@ -412,71 +396,6 @@ function renderTF(tf) {
   setTimeout(resizeDrawingCanvas,0);
 }
 
-
-function setScaleMode(mode){
-  scaleMode=mode;
-  document.getElementById("scalePrice").classList.toggle("active", mode==="price");
-  document.getElementById("scalePct").classList.toggle("active", mode==="percent");
-  applyScaleMode();
-}
-function applyScaleMode(){
-  if(!chart)return;
-  const m=(scaleMode==="percent" && LightweightCharts.PriceScaleMode)
-    ? LightweightCharts.PriceScaleMode.Percentage
-    : (LightweightCharts.PriceScaleMode ? LightweightCharts.PriceScaleMode.Normal : 0);
-  chart.priceScale("right").applyOptions({mode:m});
-}
-function smaData(bars,p){
-  const out=[], q=[];
-  for(const b of bars){
-    q.push(Number(b.close));
-    if(q.length>p)q.shift();
-    if(q.length===p) out.push({time:b.time,value:q.reduce((a,x)=>a+x,0)/p});
-  }
-  return out;
-}
-function emaData(bars,p){
-  const out=[]; if(!bars.length)return out;
-  const k=2/(p+1); let e=Number(bars[0].close);
-  bars.forEach((b,i)=>{e=i===0?Number(b.close):Number(b.close)*k+e*(1-k); if(i>=p-1)out.push({time:b.time,value:e});});
-  return out;
-}
-function bbData(bars,p,m){
-  const mid=[],up=[],lo=[],q=[];
-  for(const b of bars){
-    q.push(Number(b.close)); if(q.length>p)q.shift();
-    if(q.length===p){
-      const avg=q.reduce((a,x)=>a+x,0)/p;
-      const sd=Math.sqrt(q.reduce((a,x)=>a+(x-avg)*(x-avg),0)/p);
-      mid.push({time:b.time,value:avg}); up.push({time:b.time,value:avg+m*sd}); lo.push({time:b.time,value:avg-m*sd});
-    }
-  }
-  return [mid,up,lo];
-}
-function addLine(data,title){
-  if(!chart)return;
-  const ls=chart.addLineSeries({lineWidth:2,title:title,priceLineVisible:false,lastValueVisible:true});
-  ls.setData(data); indicatorSeries.push(ls);
-}
-function addIndicator(){
-  const type=document.getElementById("indicatorType").value;
-  const p=Math.max(2,parseInt(document.getElementById("indicatorPeriod").value||"20"));
-  const mult=Math.max(0.5,parseFloat(document.getElementById("bbMult").value||"2"));
-  if(!type||!DATA[currentTF])return;
-  const bars=DATA[currentTF].bars;
-  if(type==="SMA") addLine(smaData(bars,p),"SMA "+p);
-  if(type==="EMA") addLine(emaData(bars,p),"EMA "+p);
-  if(type==="BB"){
-    const b=bbData(bars,p,mult);
-    addLine(b[0],"BB Mid "+p); addLine(b[1],"BB Upper"); addLine(b[2],"BB Lower");
-  }
-}
-function clearIndicators(){
-  if(chart) indicatorSeries.forEach(x=>{try{chart.removeSeries(x)}catch(e){}});
-  indicatorSeries=[];
-}
-function renderIndicators(){ indicatorSeries=[]; }
-
 function fitChart(){if(chart)chart.timeScale().fitContent();}
 function zoomBy(f){
   if(!chart)return;
@@ -486,7 +405,7 @@ function zoomBy(f){
   t.setVisibleLogicalRange({from:m-h,to:m+h});
 }
 function fitChart(){ if(chart) chart.timeScale().fitContent(); }
-function resetChart(){ fitChart(); clearDrawings(); clearIndicators(); setScaleMode("price"); }
+function resetChart(){ fitChart(); clearDrawings(); }
 
 function resizeDrawingCanvas(){
   const r=drawCanvas.getBoundingClientRect();
@@ -606,7 +525,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=17"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=14"
 
     payload = {
         "name": stock_name,
@@ -656,48 +575,9 @@ def scan_stock(stock):
         "daily": daily_info[0],
         "weekly": weekly_info[0],
         "monthly": monthly_info[0],
-        "_daily_df": daily,
         "chart": chart_url,
     }
 
-
-
-
-def calculate_rs_vs_nifty_1m(stock_daily, nifty_daily):
-    """
-    21-session performance comparison.
-    Returns: Stock 1M %, NIFTY 1M %, RS vs NIFTY %, Strength.
-    RS = Stock return - NIFTY return.
-    """
-    try:
-        if stock_daily is None or nifty_daily is None:
-            return None, None, None, ""
-
-        a = stock_daily.dropna(subset=["Close"]).copy()
-        b = nifty_daily.dropna(subset=["Close"]).copy()
-        common = a.index.intersection(b.index).sort_values()
-
-        if len(common) < 22:
-            return None, None, None, ""
-
-        start_date, end_date = common[-22], common[-1]
-
-        stock_start = float(a.loc[start_date, "Close"])
-        stock_end = float(a.loc[end_date, "Close"])
-        nifty_start = float(b.loc[start_date, "Close"])
-        nifty_end = float(b.loc[end_date, "Close"])
-
-        if stock_start <= 0 or nifty_start <= 0:
-            return None, None, None, ""
-
-        stock_ret = round((stock_end / stock_start - 1.0) * 100.0, 2)
-        nifty_ret = round((nifty_end / nifty_start - 1.0) * 100.0, 2)
-        rs = round(stock_ret - nifty_ret, 2)
-
-        strength = "OUTPERFORM" if rs > 0 else "UNDERPERFORM"
-        return stock_ret, nifty_ret, rs, strength
-    except Exception:
-        return None, None, None, ""
 
 
 def classify_signal(code, daily, weekly, monthly):
@@ -718,60 +598,15 @@ def classify_signal(code, daily, weekly, monthly):
 
     return ""
 
-
-def sort_results_for_positional(results):
-    """
-    Keep NIFTY first, then prioritize positional-long candidates:
-
-      1) ALL POSITIVE + OUTPERFORM
-      2) PULLBACK WATCH + OUTPERFORM
-      3) REVERSAL WATCH + OUTPERFORM
-      4) Other OUTPERFORM stocks
-      5) UNDERPERFORM / remaining stocks
-
-    Within the same bucket, higher RS vs NIFTY comes first.
-    Trend calculation and RS calculation are NOT changed here.
-    """
-    def key(r):
-        code = r.get("code", "")
-        if code == "^NSEI":
-            return (-1, 0.0, "")
-
-        signal = classify_signal(
-            code,
-            r.get("daily", ""),
-            r.get("weekly", ""),
-            r.get("monthly", ""),
-        )
-        strength = r.get("rs_strength", "")
-        rs = r.get("rs_vs_nifty")
-        rs_num = float(rs) if rs is not None else -999999.0
-
-        if strength == "OUTPERFORM" and signal == "ALL POSITIVE":
-            bucket = 0
-        elif strength == "OUTPERFORM" and signal == "PULLBACK WATCH":
-            bucket = 1
-        elif strength == "OUTPERFORM" and signal == "REVERSAL WATCH":
-            bucket = 2
-        elif strength == "OUTPERFORM":
-            bucket = 3
-        else:
-            bucket = 4
-
-        return (bucket, -rs_num, r.get("name", ""))
-
-    return sorted(results, key=key)
-
-
 def write_sheet(book, results):
     try:
         ws = book.worksheet(OUTPUT_SHEET)
     except gspread.WorksheetNotFound:
-        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=12)
+        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=10)
 
     ws.clear()
 
-    headers = ["Stock Name", "NSE Code", "CMP", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "Stock 1M %", "NIFTY 1M %", "RS vs NIFTY %", "RS Strength", "Chart"]
+    headers = ["Stock Name", "NSE Code", "CMP", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "Chart"]
     values = [headers]
 
     for r in results:
@@ -783,21 +618,17 @@ def write_sheet(book, results):
             r["weekly"],
             r["monthly"],
             classify_signal(r["code"], r["daily"], r["weekly"], r["monthly"]),
-            "" if r.get("stock_1m") is None else r["stock_1m"],
-            "" if r.get("nifty_1m") is None else r["nifty_1m"],
-            "" if r.get("rs_vs_nifty") is None else r["rs_vs_nifty"],
-            r.get("rs_strength", ""),
             "OPEN CHART",
         ])
 
     ws.update(
-        range_name=f"A1:L{len(values)}",
+        range_name=f"A1:H{len(values)}",
         values=values,
         value_input_option="USER_ENTERED",
     )
     ws.freeze(rows=1, cols=1)
 
-    ws.format("A1:L1", {
+    ws.format("A1:H1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{
             "foregroundColor":{"red":1,"green":1,"blue":1},
@@ -809,8 +640,8 @@ def write_sheet(book, results):
     })
 
     if len(values) > 1:
-        ws.format(f"A2:L{len(values)}", {"verticalAlignment":"MIDDLE"})
-        ws.format(f"B2:L{len(values)}", {"horizontalAlignment":"CENTER"})
+        ws.format(f"A2:H{len(values)}", {"verticalAlignment":"MIDDLE"})
+        ws.format(f"B2:H{len(values)}", {"horizontalAlignment":"CENTER"})
         ws.format("A2:G2", {
             "backgroundColor":{"red":0.88,"green":0.93,"blue":1.0},
             "textFormat":{"bold":True},
@@ -889,7 +720,7 @@ def write_sheet(book, results):
             }
         })
 
-    widths = {0:190, 1:110, 2:100, 3:120, 4:120, 5:130, 6:170, 7:115, 8:115, 9:130, 10:145, 11:130}
+    widths = {0:190, 1:110, 2:100, 3:120, 4:120, 5:130, 6:170, 7:130}
     for col, pixels in widths.items():
         requests.append({
             "updateDimensionProperties":{
@@ -924,8 +755,8 @@ def write_sheet(book, results):
                         "sheetId": ws.id,
                         "startRowIndex": row_index - 1,
                         "endRowIndex": row_index,
-                        "startColumnIndex": 11,
-                        "endColumnIndex": 12,
+                        "startColumnIndex": 7,
+                        "endColumnIndex": 8,
                     },
                     "rows": [{
                         "values": [{
@@ -986,16 +817,6 @@ def main():
             print(f"  ERROR: {exc}")
         time.sleep(0.10)
 
-    nifty_daily = next((r.get("_daily_df") for r in results if r["code"] == "^NSEI"), None)
-    for r in results:
-        if r["code"] == "^NSEI":
-            r["stock_1m"], r["nifty_1m"], r["rs_vs_nifty"], r["rs_strength"] = None, None, None, ""
-        else:
-            r["stock_1m"], r["nifty_1m"], r["rs_vs_nifty"], r["rs_strength"] = calculate_rs_vs_nifty_1m(
-                r.get("_daily_df"), nifty_daily
-            )
-
-    results = sort_results_for_positional(results)
     write_sheet(book, results)
 
     print("=" * 72)
