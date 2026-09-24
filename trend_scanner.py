@@ -15,7 +15,7 @@ INPUT_SHEET = os.environ.get("INPUT_SHEET", "NIFTY200")
 OUTPUT_SHEET = os.environ.get("TREND_SHEET", "Trend Scanner")
 TRANSACTION_SHEET = os.environ.get("TRANSACTION_SHEET", "Trade Transactions")
 TARGET_PER_STOCK = float(os.environ.get("TARGET_PER_STOCK", "10000"))
-MAX_OPEN_POSITIONS = int(os.environ.get("MAX_OPEN_POSITIONS", "10"))
+PORTFOLIO_CAPITAL = float(os.environ.get("PORTFOLIO_CAPITAL", "200000"))
 TRADE_HOUR_IST = 15
 TRADE_MINUTE_IST = 15
 TRADE_WINDOW_MINUTES = 20
@@ -531,7 +531,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=17.1"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=17.2"
 
     payload = {
         "name": stock_name,
@@ -799,8 +799,9 @@ def is_trade_execution_time():
 def update_portfolio(book, results):
     """
     Rules:
-      - Maximum 10 open positions.
       - New entry only from current Rank 1-10.
+      - Previously bought Rank 11-20 positions remain HOLD, so active positions
+        can exceed 10 (normally up to the rank-1-to-20 universe).
       - Existing Rank 1-10 stays active.
       - Existing Rank 11-20 = HOLD.
       - Existing Rank 21+ OR blank rank = EXIT, profit or loss.
@@ -854,8 +855,8 @@ def update_portfolio(book, results):
         key=lambda r: int(r["rank"])
     )
 
-    slots = max(0, MAX_OPEN_POSITIONS - len(open_positions)) if execute_trades else 0
-    for r in candidates[:slots]:
+    buy_candidates = candidates if execute_trades else []
+    for r in buy_candidates:
         buy_price = float(r["cmp"])
         units = int(TARGET_PER_STOCK // buy_price) if buy_price > 0 else 0
         if units < 1:
@@ -890,11 +891,33 @@ def update_portfolio(book, results):
             r["profit_loss"] = round((cmp_price - bp) * units, 2)
             r["profit_loss_pct"] = round(((cmp_price - bp) / bp) * 100.0, 2) if bp else 0.0
 
-    print(f"Open portfolio positions: {len(open_positions)}/{MAX_OPEN_POSITIONS}")
-    return open_positions, booked_by_code
+    live_pl = round(sum(_num(r.get("profit_loss")) for r in results), 2)
+    booked_pl = round(sum(booked_by_code.values()), 2)
+    invested_capital = round(sum(
+        float(pos["buy_price"]) * int(pos["units"])
+        for pos in open_positions.values()
+    ), 2)
+    available_capital = round(PORTFOLIO_CAPITAL - invested_capital, 2)
+    total_pl = round(live_pl + booked_pl, 2)
+
+    summary = {
+        "capital": round(PORTFOLIO_CAPITAL, 2),
+        "per_position": round(TARGET_PER_STOCK, 2),
+        "active_positions": len(open_positions),
+        "invested_capital": invested_capital,
+        "available_capital": available_capital,
+        "live_pl": live_pl,
+        "booked_pl": booked_pl,
+        "total_pl": total_pl,
+    }
+
+    print(f"Open portfolio positions: {len(open_positions)}")
+    print(f"Invested capital: {invested_capital} | Available: {available_capital}")
+    print(f"Live P/L: {live_pl} | Booked P/L: {booked_pl} | Total P/L: {total_pl}")
+    return open_positions, booked_by_code, summary
 
 
-def write_sheet(book, results):
+def write_sheet(book, results, summary):
     try:
         ws = book.worksheet(OUTPUT_SHEET)
     except gspread.WorksheetNotFound:
@@ -938,6 +961,27 @@ def write_sheet(book, results):
         value_input_option="USER_ENTERED",
     )
     ws.freeze(rows=1, cols=1)
+
+    # Portfolio Summary box in S:T
+    summary_values = [
+        ["PORTFOLIO SUMMARY", "VALUE"],
+        ["CAPITAL", summary["capital"]],
+        ["PER NEW POSITION", summary["per_position"]],
+        ["ACTIVE POSITIONS", summary["active_positions"]],
+        ["INVESTED CAPITAL", summary["invested_capital"]],
+        ["AVAILABLE CAPITAL", summary["available_capital"]],
+        ["LIVE PROFIT/LOSS", summary["live_pl"]],
+        ["BOOK PROFIT/LOSS", summary["booked_pl"]],
+        ["TOTAL PROFIT/LOSS", summary["total_pl"]],
+    ]
+    ws.update(range_name="S1:T9", values=summary_values, value_input_option="USER_ENTERED")
+    ws.format("S1:T1", {
+        "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
+        "textFormat":{"foregroundColor":{"red":1,"green":1,"blue":1},"bold":True},
+        "horizontalAlignment":"CENTER",
+    })
+    ws.format("S2:S9", {"textFormat":{"bold":True}})
+    ws.format("T2:T9", {"horizontalAlignment":"RIGHT"})
 
     ws.format("A1:Q1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
@@ -1032,10 +1076,34 @@ def write_sheet(book, results):
             }
         })
 
+    # Summary P/L cells T7:T9: positive green, negative red.
+    for row0 in [6, 7, 8]:
+        for cond_type, bg, fg in [
+            ("NUMBER_GREATER",
+             {"red":0.82,"green":0.95,"blue":0.84},
+             {"red":0.05,"green":0.40,"blue":0.16}),
+            ("NUMBER_LESS",
+             {"red":1.0,"green":0.85,"blue":0.85},
+             {"red":0.65,"green":0.05,"blue":0.05}),
+        ]:
+            requests.append({
+                "addConditionalFormatRule":{
+                    "rule":{
+                        "ranges":[{"sheetId":sheet_id,"startRowIndex":row0,
+                                   "endRowIndex":row0+1,"startColumnIndex":19,"endColumnIndex":20}],
+                        "booleanRule":{
+                            "condition":{"type":cond_type,"values":[{"userEnteredValue":"0"}]},
+                            "format":{"backgroundColor":bg,
+                                      "textFormat":{"foregroundColor":fg,"bold":True}},
+                        },
+                    },"index":0
+                }
+            })
+
     widths = {
         0:190,1:110,2:100,3:125,4:125,5:70,6:90,
         7:100,8:85,9:110,10:110,11:110,12:125,
-        13:115,14:115,15:125,16:125
+        13:115,14:115,15:125,16:125,18:165,19:120
     }
     for col, pixels in widths.items():
         requests.append({
@@ -1146,7 +1214,7 @@ def main():
 
     # Persistent portfolio + permanent transaction history.
     # EXITs are processed first, then vacant slots are filled from Rank 1-10.
-    update_portfolio(book, results)
+    open_positions, booked_by_code, summary = update_portfolio(book, results)
 
     # Visible order: NIFTY first, then ALL POSITIVE stocks by Rank 1,2,3...
     # Remaining stocks follow afterwards.
@@ -1159,7 +1227,7 @@ def main():
             r.get("name", "")
         )
     )
-    write_sheet(book, results)
+    write_sheet(book, results, summary)
 
     print("=" * 72)
     print(f"Completed: {len(results)} instruments")
