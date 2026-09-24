@@ -525,7 +525,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.4"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.5"
 
     payload = {
         "name": stock_name,
@@ -686,11 +686,11 @@ def write_sheet(book, results):
     try:
         ws = book.worksheet(OUTPUT_SHEET)
     except gspread.WorksheetNotFound:
-        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=10)
+        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=11)
 
     ws.clear()
 
-    headers = ["Stock Name", "NSE Code", "CMP", "Last Month Close", "1 Month % Change", "Rank", "Daily Trend", "Weekly Trend", "Monthly Trend", "Chart"]
+    headers = ["Stock Name", "NSE Code", "CMP", "Last Month Close", "1 Month % Change", "Rank", "Signal", "Daily Trend", "Weekly Trend", "Monthly Trend", "Chart"]
     values = [headers]
 
     for r in results:
@@ -701,6 +701,8 @@ def write_sheet(book, results):
             "" if r.get("last_month_close") is None else r["last_month_close"],
             "" if r.get("one_month_change_pct") is None else r["one_month_change_pct"],
             r.get("rank", ""),
+            ("" if r.get("code") == "^NSEI" else
+             "BUY" if r.get("rank", "") != "" and int(r["rank"]) <= 20 else "EXIT"),
             r["daily"],
             r["weekly"],
             r["monthly"],
@@ -708,13 +710,13 @@ def write_sheet(book, results):
         ])
 
     ws.update(
-        range_name=f"A1:J{len(values)}",
+        range_name=f"A1:K{len(values)}",
         values=values,
         value_input_option="USER_ENTERED",
     )
     ws.freeze(rows=1, cols=1)
 
-    ws.format("A1:J1", {
+    ws.format("A1:K1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{
             "foregroundColor":{"red":1,"green":1,"blue":1},
@@ -726,8 +728,8 @@ def write_sheet(book, results):
     })
 
     if len(values) > 1:
-        ws.format(f"A2:J{len(values)}", {"verticalAlignment":"MIDDLE"})
-        ws.format(f"B2:J{len(values)}", {"horizontalAlignment":"CENTER"})
+        ws.format(f"A2:K{len(values)}", {"verticalAlignment":"MIDDLE"})
+        ws.format(f"B2:K{len(values)}", {"horizontalAlignment":"CENTER"})
         ws.format("A2:G2", {
             "backgroundColor":{"red":0.88,"green":0.93,"blue":1.0},
             "textFormat":{"bold":True},
@@ -806,7 +808,7 @@ def write_sheet(book, results):
             }
         })
 
-    widths = {0:190, 1:110, 2:100, 3:125, 4:125, 5:70, 6:120, 7:120, 8:130, 9:130}
+    widths = {0:190, 1:110, 2:100, 3:125, 4:125, 5:70, 6:90, 7:120, 8:120, 9:130, 10:130}
     for col, pixels in widths.items():
         requests.append({
             "updateDimensionProperties":{
@@ -841,8 +843,8 @@ def write_sheet(book, results):
                         "sheetId": ws.id,
                         "startRowIndex": row_index - 1,
                         "endRowIndex": row_index,
-                        "startColumnIndex": 9,
-                        "endColumnIndex": 10,
+                        "startColumnIndex": 10,
+                        "endColumnIndex": 11,
                     },
                     "rows": [{
                         "values": [{
@@ -873,6 +875,35 @@ def write_sheet(book, results):
 
     except Exception as exc:
         print("WARNING: Rich-text chart link formatting failed:", exc)
+
+
+    # BUY / EXIT colors in Signal column G
+    signal_reqs = []
+    for txt, bg, fg in [
+        ("BUY",  {"red": 0.80, "green": 0.94, "blue": 0.81}, {"red": 0.05, "green": 0.45, "blue": 0.12}),
+        ("EXIT", {"red": 0.96, "green": 0.80, "blue": 0.80}, {"red": 0.70, "green": 0.05, "blue": 0.05}),
+    ]:
+        signal_reqs.append({
+            "addConditionalFormatRule": {
+                "rule": {
+                    "ranges": [{
+                        "sheetId": ws.id,
+                        "startRowIndex": 1,
+                        "startColumnIndex": 6,
+                        "endColumnIndex": 7,
+                    }],
+                    "booleanRule": {
+                        "condition": {"type": "TEXT_EQ", "values": [{"userEnteredValue": txt}]},
+                        "format": {
+                            "backgroundColor": bg,
+                            "textFormat": {"foregroundColor": fg, "bold": True},
+                        },
+                    },
+                },
+                "index": 0,
+            }
+        })
+    ws.spreadsheet.batch_update({"requests": signal_reqs})
 
 
 def main():
