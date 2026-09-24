@@ -525,7 +525,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.1"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.2"
 
     payload = {
         "name": stock_name,
@@ -686,11 +686,11 @@ def write_sheet(book, results):
     try:
         ws = book.worksheet(OUTPUT_SHEET)
     except gspread.WorksheetNotFound:
-        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=11)
+        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=12)
 
     ws.clear()
 
-    headers = ["Stock Name", "NSE Code", "CMP", "Last Month Close", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "RS vs NIFTY 1M %", "RS Strength", "Chart"]
+    headers = ["Stock Name", "NSE Code", "CMP", "Last Month Close", "1 Month % Change", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "RS vs NIFTY 1M %", "RS Strength", "Chart"]
     values = [headers]
 
     for r in results:
@@ -699,6 +699,7 @@ def write_sheet(book, results):
             r["code"],
             r["cmp"],
             "" if r.get("last_month_close") is None else r["last_month_close"],
+            "" if r.get("one_month_change_pct") is None else r["one_month_change_pct"],
             r["daily"],
             r["weekly"],
             r["monthly"],
@@ -709,13 +710,13 @@ def write_sheet(book, results):
         ])
 
     ws.update(
-        range_name=f"A1:K{len(values)}",
+        range_name=f"A1:L{len(values)}",
         values=values,
         value_input_option="USER_ENTERED",
     )
     ws.freeze(rows=1, cols=1)
 
-    ws.format("A1:K1", {
+    ws.format("A1:L1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{
             "foregroundColor":{"red":1,"green":1,"blue":1},
@@ -727,8 +728,8 @@ def write_sheet(book, results):
     })
 
     if len(values) > 1:
-        ws.format(f"A2:K{len(values)}", {"verticalAlignment":"MIDDLE"})
-        ws.format(f"B2:K{len(values)}", {"horizontalAlignment":"CENTER"})
+        ws.format(f"A2:L{len(values)}", {"verticalAlignment":"MIDDLE"})
+        ws.format(f"B2:L{len(values)}", {"horizontalAlignment":"CENTER"})
         ws.format("A2:G2", {
             "backgroundColor":{"red":0.88,"green":0.93,"blue":1.0},
             "textFormat":{"bold":True},
@@ -842,8 +843,8 @@ def write_sheet(book, results):
                         "sheetId": ws.id,
                         "startRowIndex": row_index - 1,
                         "endRowIndex": row_index,
-                        "startColumnIndex": 10,
-                        "endColumnIndex": 11,
+                        "startColumnIndex": 11,
+                        "endColumnIndex": 12,
                     },
                     "rows": [{
                         "values": [{
@@ -915,6 +916,14 @@ def main():
 
     for r in results:
         r["last_month_close"] = get_last_month_close(r.get("_daily_df"))
+        last_close = r.get("last_month_close")
+        cmp_price = r.get("cmp")
+        if last_close not in (None, 0) and cmp_price is not None:
+            r["one_month_change_pct"] = round(
+                ((float(cmp_price) - float(last_close)) / float(last_close)) * 100.0, 2
+            )
+        else:
+            r["one_month_change_pct"] = None
 
     results = sort_results_for_positional(results)
     write_sheet(book, results)
