@@ -606,7 +606,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=22"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=17"
 
     payload = {
         "name": stock_name,
@@ -719,113 +719,45 @@ def classify_signal(code, daily, weekly, monthly):
     return ""
 
 
-
-def calculate_entry_plan(r):
-    """
-    V21 mechanical positional entry plan.
-
-    BUY READY:
-      ALL POSITIVE + OUTPERFORM + not extended + risk <= 7%,
-      waiting for a completed Daily close above previous Daily High.
-
-    BUY TRIGGERED:
-      Latest completed Daily CLOSE > previous completed Daily High.
-
-    Entry Distance % = (CMP - Entry Level) / Entry Level * 100.
-    If a triggered stock is already > 2% above Entry Level, it becomes
-    TRIGGERED - DON'T CHASE.
-
-    Entry Level = previous completed Daily High.
-    Stop Loss   = previous completed Daily Low.
-    """
-    if r.get("code") == "^NSEI":
-        return "", None, None, None, None
-
-    signal = classify_signal(r["code"], r["daily"], r["weekly"], r["monthly"])
-    strength = r.get("rs_strength", "")
-    stock_1m = r.get("stock_1m")
-    daily = r.get("_daily_df")
-
-    if daily is None or daily.empty:
-        return "", None, None, None, None
-
-    d = daily.dropna(subset=["High", "Low", "Close"]).copy()
-    if len(d) < 2:
-        return "", None, None, None, None
-
-    setup = d.iloc[-2]
-    latest = d.iloc[-1]
-
-    entry = round(float(setup["High"]), 2)
-    sl = round(float(setup["Low"]), 2)
-    latest_close = float(latest["Close"])
-    cmp_price = float(r.get("cmp") or latest_close)
-
-    risk_pct = round(((entry - sl) / entry) * 100.0, 2) if entry > 0 else None
-    entry_distance = round(((cmp_price - entry) / entry) * 100.0, 2) if entry > 0 else None
-
-    if signal == "ALL POSITIVE" and strength == "OUTPERFORM":
-        if stock_1m is not None and float(stock_1m) > 50.0:
-            status = "EXTENDED - WAIT"
-        elif risk_pct is None or risk_pct > 7.0:
-            status = "RISK HIGH - WAIT"
-        elif latest_close > entry:
-            if entry_distance is not None and entry_distance > 2.0:
-                status = "TRIGGERED - DON'T CHASE"
-            else:
-                status = "BUY TRIGGERED"
-        else:
-            status = "BUY READY"
-    elif signal == "PULLBACK WATCH" and strength == "OUTPERFORM":
-        status = "PULLBACK WATCH"
-    elif signal == "REVERSAL WATCH" and strength == "OUTPERFORM":
-        status = "REVERSAL WATCH"
-    else:
-        status = ""
-
-    return status, entry, sl, risk_pct, entry_distance
-
-
 def sort_results_for_positional(results):
     """
-    V21 display priority:
-      1) BUY TRIGGERED
-      2) BUY READY
-      3) PULLBACK WATCH
-      4) REVERSAL WATCH
-      5) TRIGGERED - DON'T CHASE
-      6) EXTENDED - WAIT
-      7) RISK HIGH - WAIT
-      8) other OUTPERFORM
-      9) remaining / UNDERPERFORM
+    Keep NIFTY first, then prioritize positional-long candidates:
 
-    Higher RS vs NIFTY comes first within the same bucket.
-    NIFTY stays first as benchmark.
+      1) ALL POSITIVE + OUTPERFORM
+      2) PULLBACK WATCH + OUTPERFORM
+      3) REVERSAL WATCH + OUTPERFORM
+      4) Other OUTPERFORM stocks
+      5) UNDERPERFORM / remaining stocks
+
+    Within the same bucket, higher RS vs NIFTY comes first.
+    Trend calculation and RS calculation are NOT changed here.
     """
-    priority = {
-        "BUY TRIGGERED": 0,
-        "BUY READY": 1,
-        "PULLBACK WATCH": 2,
-        "REVERSAL WATCH": 3,
-        "TRIGGERED - DON'T CHASE": 4,
-        "EXTENDED - WAIT": 5,
-        "RISK HIGH - WAIT": 6,
-    }
-
     def key(r):
-        if r.get("code") == "^NSEI":
+        code = r.get("code", "")
+        if code == "^NSEI":
             return (-1, 0.0, "")
 
-        status = r.get("entry_status", "")
-        if status in priority:
-            bucket = priority[status]
-        elif r.get("rs_strength") == "OUTPERFORM":
-            bucket = 7
-        else:
-            bucket = 8
-
+        signal = classify_signal(
+            code,
+            r.get("daily", ""),
+            r.get("weekly", ""),
+            r.get("monthly", ""),
+        )
+        strength = r.get("rs_strength", "")
         rs = r.get("rs_vs_nifty")
         rs_num = float(rs) if rs is not None else -999999.0
+
+        if strength == "OUTPERFORM" and signal == "ALL POSITIVE":
+            bucket = 0
+        elif strength == "OUTPERFORM" and signal == "PULLBACK WATCH":
+            bucket = 1
+        elif strength == "OUTPERFORM" and signal == "REVERSAL WATCH":
+            bucket = 2
+        elif strength == "OUTPERFORM":
+            bucket = 3
+        else:
+            bucket = 4
+
         return (bucket, -rs_num, r.get("name", ""))
 
     return sorted(results, key=key)
@@ -835,11 +767,11 @@ def write_sheet(book, results):
     try:
         ws = book.worksheet(OUTPUT_SHEET)
     except gspread.WorksheetNotFound:
-        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=15)
+        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=12)
 
     ws.clear()
 
-    headers = ["Stock Name", "NSE Code", "CMP", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "Priority Rank", "RS Rank", "Stock 1M %", "NIFTY 1M %", "RS vs NIFTY %", "RS Strength", "Entry Status", "Chart"]
+    headers = ["Stock Name", "NSE Code", "CMP", "Daily Trend", "Weekly Trend", "Monthly Trend", "Signal", "Stock 1M %", "NIFTY 1M %", "RS vs NIFTY %", "RS Strength", "Chart"]
     values = [headers]
 
     for r in results:
@@ -851,24 +783,21 @@ def write_sheet(book, results):
             r["weekly"],
             r["monthly"],
             classify_signal(r["code"], r["daily"], r["weekly"], r["monthly"]),
-            r.get("rank", ""),
-            r.get("rs_rank", ""),
             "" if r.get("stock_1m") is None else r["stock_1m"],
             "" if r.get("nifty_1m") is None else r["nifty_1m"],
             "" if r.get("rs_vs_nifty") is None else r["rs_vs_nifty"],
             r.get("rs_strength", ""),
-            r.get("entry_status", ""),
             "OPEN CHART",
         ])
 
     ws.update(
-        range_name=f"A1:O{len(values)}",
+        range_name=f"A1:L{len(values)}",
         values=values,
         value_input_option="USER_ENTERED",
     )
     ws.freeze(rows=1, cols=1)
 
-    ws.format("A1:O1", {
+    ws.format("A1:L1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{
             "foregroundColor":{"red":1,"green":1,"blue":1},
@@ -880,8 +809,8 @@ def write_sheet(book, results):
     })
 
     if len(values) > 1:
-        ws.format(f"A2:O{len(values)}", {"verticalAlignment":"MIDDLE"})
-        ws.format(f"B2:O{len(values)}", {"horizontalAlignment":"CENTER"})
+        ws.format(f"A2:L{len(values)}", {"verticalAlignment":"MIDDLE"})
+        ws.format(f"B2:L{len(values)}", {"horizontalAlignment":"CENTER"})
         ws.format("A2:G2", {
             "backgroundColor":{"red":0.88,"green":0.93,"blue":1.0},
             "textFormat":{"bold":True},
@@ -960,29 +889,7 @@ def write_sheet(book, results):
             }
         })
 
-
-    # Entry Status formatting (column M)
-    for status, bg, fg in [
-        ("BUY TRIGGERED", {"red":0.55,"green":0.90,"blue":0.62}, {"red":0.00,"green":0.28,"blue":0.08}),
-        ("BUY READY", {"red":0.78,"green":0.95,"blue":0.80}, {"red":0.02,"green":0.38,"blue":0.12}),
-        ("TRIGGERED - DON'T CHASE", {"red":1.0,"green":0.90,"blue":0.70}, {"red":0.55,"green":0.25,"blue":0.00}),
-        ("EXTENDED - WAIT", {"red":1.0,"green":0.93,"blue":0.72}, {"red":0.55,"green":0.30,"blue":0.02}),
-        ("RISK HIGH - WAIT", {"red":1.0,"green":0.85,"blue":0.85}, {"red":0.65,"green":0.05,"blue":0.05}),
-    ]:
-        requests.append({
-            "addConditionalFormatRule":{
-                "rule":{
-                    "ranges":[{"sheetId":sheet_id,"startRowIndex":1,"startColumnIndex":13,"endColumnIndex":14}],
-                    "booleanRule":{
-                        "condition":{"type":"TEXT_EQ","values":[{"userEnteredValue":status}]},
-                        "format":{"backgroundColor":bg,"textFormat":{"foregroundColor":fg,"bold":True}},
-                    },
-                },
-                "index":0,
-            }
-        })
-
-    widths = {0:190,1:110,2:100,3:120,4:120,5:130,6:170,7:95,8:80,9:115,10:115,11:130,12:145,13:190,14:130}
+    widths = {0:190, 1:110, 2:100, 3:120, 4:120, 5:130, 6:170, 7:115, 8:115, 9:130, 10:145, 11:130}
     for col, pixels in widths.items():
         requests.append({
             "updateDimensionProperties":{
@@ -1017,8 +924,8 @@ def write_sheet(book, results):
                         "sheetId": ws.id,
                         "startRowIndex": row_index - 1,
                         "endRowIndex": row_index,
-                        "startColumnIndex": 14,
-                        "endColumnIndex": 15,
+                        "startColumnIndex": 11,
+                        "endColumnIndex": 12,
                     },
                     "rows": [{
                         "values": [{
@@ -1088,28 +995,7 @@ def main():
                 r.get("_daily_df"), nifty_daily
             )
 
-    for r in results:
-        r["entry_status"], r["entry_level"], r["stop_loss"], r["entry_risk_pct"], r["entry_distance_pct"] = calculate_entry_plan(r)
-
-    # Preserve pure RS rank separately (benchmark excluded).
-    rs_ranked = sorted(
-        [r for r in results if r.get("code") != "^NSEI"],
-        key=lambda x: -(float(x["rs_vs_nifty"]) if x.get("rs_vs_nifty") is not None else -999999.0)
-    )
-    for i, r in enumerate(rs_ranked, 1):
-        r["rs_rank"] = i
-    for r in results:
-        if r.get("code") == "^NSEI":
-            r["rs_rank"] = ""
-
     results = sort_results_for_positional(results)
-    rank_no = 1
-    for r in results:
-        if r.get("code") == "^NSEI":
-            r["rank"] = ""
-        else:
-            r["rank"] = rank_no
-            rank_no += 1
     write_sheet(book, results)
 
     print("=" * 72)
