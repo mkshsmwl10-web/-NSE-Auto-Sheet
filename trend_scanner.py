@@ -16,8 +16,8 @@ OUTPUT_SHEET = os.environ.get("TREND_SHEET", "Trend Scanner")
 TRANSACTION_SHEET = os.environ.get("TRANSACTION_SHEET", "Trade Transactions")
 TARGET_PER_STOCK = float(os.environ.get("TARGET_PER_STOCK", "10000"))
 PORTFOLIO_CAPITAL = float(os.environ.get("PORTFOLIO_CAPITAL", "200000"))
-TRADE_HOUR_IST = 15
-TRADE_MINUTE_IST = 15
+TRADE_HOUR_IST = 10
+TRADE_MINUTE_IST = 0
 TRADE_WINDOW_MINUTES = 20
 CHART_OUTPUT_DIR = Path(os.environ.get("TREND_CHART_OUTPUT_DIR", "docs/charts"))
 CHART_BASE_URL = os.environ.get(
@@ -531,7 +531,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=17.2"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=17.3"
 
     payload = {
         "name": stock_name,
@@ -783,7 +783,7 @@ def append_trade(tx_ws, stock, action, rank, price, units, realized_pl="", reali
 
 def is_trade_execution_time():
     """
-    Transactions are allowed only around the scheduled 3:15 PM IST run.
+    Transactions are allowed only around the scheduled 10:00 AM IST run.
     Manual runs outside this window can refresh scanner/ranks/charts but cannot
     create BUY/EXIT transactions.
     """
@@ -799,9 +799,11 @@ def is_trade_execution_time():
 def update_portfolio(book, results):
     """
     Rules:
-      - New entry only from current Rank 1-10.
-      - Previously bought Rank 11-20 positions remain HOLD, so active positions
-        can exceed 10 (normally up to the rank-1-to-20 universe).
+      - Maximum 2 NEW buys per trading day/run.
+      - New entry only from current Rank 1-10, best rank first.
+      - Already-owned stocks are skipped; scanner keeps moving down the ranks
+        until it finds up to 2 new eligible stocks.
+      - Previously bought Rank 11-20 positions remain HOLD.
       - Existing Rank 1-10 stays active.
       - Existing Rank 11-20 = HOLD.
       - Existing Rank 21+ OR blank rank = EXIT, profit or loss.
@@ -816,7 +818,7 @@ def update_portfolio(book, results):
     if execute_trades:
         print("TRADE MODE: ON — BUY/EXIT transactions allowed.")
     else:
-        print("VIEW MODE: scanner refresh only — no BUY/EXIT transactions outside 3:15 PM IST window.")
+        print("VIEW MODE: scanner refresh only — no BUY/EXIT transactions outside 10:00 AM IST window.")
 
     # 1) EXIT first so vacancies become available immediately.
     for code, pos in list(open_positions.items()):
@@ -855,7 +857,10 @@ def update_portfolio(book, results):
         key=lambda r: int(r["rank"])
     )
 
-    buy_candidates = candidates if execute_trades else []
+    # Maximum 2 NEW stocks per trading day/run.
+    # Already-owned stocks were excluded above, so this naturally picks the
+    # next best available ranks (e.g. if Rank 1 & 2 are owned, buy Rank 3 & 4).
+    buy_candidates = candidates[:2] if execute_trades else []
     for r in buy_candidates:
         buy_price = float(r["cmp"])
         units = int(TARGET_PER_STOCK // buy_price) if buy_price > 0 else 0
