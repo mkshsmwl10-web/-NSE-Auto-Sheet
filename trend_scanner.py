@@ -525,7 +525,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.5"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=16.6"
 
     payload = {
         "name": stock_name,
@@ -906,6 +906,51 @@ def write_sheet(book, results):
     ws.spreadsheet.batch_update({"requests": signal_reqs})
 
 
+
+def apply_trend_colors(ws):
+    """Color Daily/Weekly/Monthly trend cells: POSITIVE green, NEGATIVE red."""
+    sid = ws.id
+    reqs = []
+
+    # H:J in V16.6 => zero-based columns 7:10
+    for txt, bg, fg in [
+        ("POSITIVE",
+         {"red": 0.78, "green": 0.93, "blue": 0.80},
+         {"red": 0.05, "green": 0.45, "blue": 0.12}),
+        ("NEGATIVE",
+         {"red": 0.96, "green": 0.78, "blue": 0.78},
+         {"red": 0.70, "green": 0.05, "blue": 0.05}),
+    ]:
+        reqs.append({
+            "addConditionalFormatRule": {
+                "rule": {
+                    "ranges": [{
+                        "sheetId": sid,
+                        "startRowIndex": 1,
+                        "startColumnIndex": 7,
+                        "endColumnIndex": 10,
+                    }],
+                    "booleanRule": {
+                        "condition": {
+                            "type": "TEXT_EQ",
+                            "values": [{"userEnteredValue": txt}],
+                        },
+                        "format": {
+                            "backgroundColor": bg,
+                            "textFormat": {
+                                "foregroundColor": fg,
+                                "bold": True,
+                            },
+                        },
+                    },
+                },
+                "index": 0,
+            }
+        })
+
+    ws.spreadsheet.batch_update({"requests": reqs})
+
+
 def main():
     print("=" * 72)
     print("NIFTY SPOT + NIFTY200 DYNAMIC TREND SCANNER")
@@ -985,6 +1030,7 @@ def main():
         )
     )
     write_sheet(book, results)
+    apply_trend_colors(ws)
 
     print("=" * 72)
     print(f"Completed: {len(results)} instruments")
