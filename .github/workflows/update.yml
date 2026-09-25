@@ -39,6 +39,7 @@ jobs:
       - name: Run Trend Scanner and Portfolio
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          EXECUTE_TRADES: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
         run: python trend_scanner.py
 
       - name: Save Pattern Charts to GitHub
