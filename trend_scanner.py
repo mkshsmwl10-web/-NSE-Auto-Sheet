@@ -19,6 +19,7 @@ PORTFOLIO_CAPITAL = float(os.environ.get("PORTFOLIO_CAPITAL", "200000"))
 TRADE_HOUR_IST = 10
 TRADE_MINUTE_IST = 0
 TRADE_WINDOW_MINUTES = 20
+EXECUTE_TRADES = os.environ.get("EXECUTE_TRADES", "false").strip().lower() == "true"
 CHART_OUTPUT_DIR = Path(os.environ.get("TREND_CHART_OUTPUT_DIR", "docs/charts"))
 CHART_BASE_URL = os.environ.get(
     "TREND_CHART_BASE_URL",
@@ -783,17 +784,12 @@ def append_trade(tx_ws, stock, action, rank, price, units, realized_pl="", reali
 
 def is_trade_execution_time():
     """
-    Transactions are allowed only around the scheduled 10:00 AM IST run.
-    Manual runs outside this window can refresh scanner/ranks/charts but cannot
-    create BUY/EXIT transactions.
+    Trade permission is controlled by the GitHub workflow, not clock time.
+
+    Scheduled workflow: EXECUTE_TRADES=true -> BUY/EXIT allowed.
+    Manual/default run: false/absent -> scanner refresh only.
     """
-    now = datetime.now(IST)
-    start_minutes = TRADE_HOUR_IST * 60 + TRADE_MINUTE_IST
-    now_minutes = now.hour * 60 + now.minute
-    return (
-        now.weekday() < 5
-        and start_minutes <= now_minutes < start_minutes + TRADE_WINDOW_MINUTES
-    )
+    return EXECUTE_TRADES
 
 
 def update_portfolio(book, results):
@@ -816,9 +812,9 @@ def update_portfolio(book, results):
 
     execute_trades = is_trade_execution_time()
     if execute_trades:
-        print("TRADE MODE: ON — BUY/EXIT transactions allowed.")
+        print("TRADE MODE: ON — scheduled run; BUY/EXIT transactions allowed.")
     else:
-        print("VIEW MODE: scanner refresh only — no BUY/EXIT transactions outside 10:00 AM IST window.")
+        print("VIEW MODE: scanner refresh only — EXECUTE_TRADES is not enabled.")
 
     # 1) EXIT first so vacancies become available immediately.
     for code, pos in list(open_positions.items()):
