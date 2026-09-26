@@ -946,13 +946,13 @@ def write_sheet(book, results, summary):
     try:
         ws = book.worksheet(OUTPUT_SHEET)
     except gspread.WorksheetNotFound:
-        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=17)
+        ws = book.add_worksheet(title=OUTPUT_SHEET, rows=500, cols=20)
 
     ws.clear()
 
     headers = [
         "Stock Name", "NSE Code", "CMP", "Last Month Close", "1 Month % Change",
-        "Rank", "Signal", "BUY PRICE", "BUY UNIT", "TOTAL VALUE",
+        "Rank", "SMA20 SLOPE", "Signal", "BUY PRICE", "BUY UNIT", "TOTAL VALUE",
         "PROFIT/LOSS", "% PROFIT/LOSS", "BOOK PROFIT/LOSS",
         "Daily Trend", "Weekly Trend", "Monthly Trend", "Chart"
     ]
@@ -973,7 +973,9 @@ def write_sheet(book, results, summary):
             r["name"], code, r["cmp"],
             "" if r.get("last_month_close") is None else r["last_month_close"],
             "" if r.get("one_month_change_pct") is None else r["one_month_change_pct"],
-            rank, signal,
+            rank,
+            "" if code == "^NSEI" else ("UP" if r.get("sma20_slope_up") is True else "DOWN"),
+            signal,
             r.get("buy_price", ""), r.get("buy_unit", ""), r.get("total_value", ""),
             r.get("profit_loss", ""), r.get("profit_loss_pct", ""),
             r.get("book_profit_loss", ""),
@@ -981,7 +983,7 @@ def write_sheet(book, results, summary):
         ])
 
     ws.update(
-        range_name=f"A1:Q{len(values)}",
+        range_name=f"A1:R{len(values)}",
         values=values,
         value_input_option="USER_ENTERED",
     )
@@ -1009,16 +1011,16 @@ def write_sheet(book, results, summary):
     ws.format("S2:S9", {"textFormat":{"bold":True}})
     ws.format("T2:T9", {"horizontalAlignment":"RIGHT"})
 
-    ws.format("A1:Q1", {
+    ws.format("A1:R1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{"foregroundColor":{"red":1,"green":1,"blue":1},"bold":True,"fontSize":11},
         "horizontalAlignment":"CENTER","verticalAlignment":"MIDDLE",
     })
 
     if len(values) > 1:
-        ws.format(f"A2:Q{len(values)}", {"verticalAlignment":"MIDDLE"})
-        ws.format(f"B2:Q{len(values)}", {"horizontalAlignment":"CENTER"})
-        ws.format("A2:M2", {
+        ws.format(f"A2:R{len(values)}", {"verticalAlignment":"MIDDLE"})
+        ws.format(f"B2:R{len(values)}", {"horizontalAlignment":"CENTER"})
+        ws.format("A2:N2", {
             "backgroundColor":{"red":0.88,"green":0.93,"blue":1.0},
             "textFormat":{"bold":True},
         })
@@ -1053,19 +1055,27 @@ def write_sheet(book, results, summary):
             }
         })
 
-    # Signal G: BUY green, HOLD yellow, EXIT red.
-    add_text_rule(6, "BUY",
+    # SMA20 Slope G: UP green, DOWN red.
+    add_text_rule(6, "UP",
+                  {"red":0.78,"green":0.93,"blue":0.80},
+                  {"red":0.05,"green":0.45,"blue":0.12})
+    add_text_rule(6, "DOWN",
+                  {"red":0.96,"green":0.78,"blue":0.78},
+                  {"red":0.70,"green":0.05,"blue":0.05})
+
+    # Signal H: BUY green, HOLD yellow, EXIT red.
+    add_text_rule(7, "BUY",
                   {"red":0.80,"green":0.94,"blue":0.81},
                   {"red":0.05,"green":0.45,"blue":0.12})
-    add_text_rule(6, "HOLD",
+    add_text_rule(7, "HOLD",
                   {"red":1.00,"green":0.94,"blue":0.70},
                   {"red":0.55,"green":0.35,"blue":0.00})
-    add_text_rule(6, "EXIT",
+    add_text_rule(7, "EXIT",
                   {"red":0.96,"green":0.80,"blue":0.80},
                   {"red":0.70,"green":0.05,"blue":0.05})
 
-    # Daily/Weekly/Monthly N:P: POSITIVE green, NEGATIVE red.
-    for col0 in [13, 14, 15]:
+    # Daily/Weekly/Monthly O:Q: POSITIVE green, NEGATIVE red.
+    for col0 in [14, 15, 16]:
         add_text_rule(col0, "POSITIVE",
                       {"red":0.78,"green":0.93,"blue":0.80},
                       {"red":0.05,"green":0.45,"blue":0.12})
@@ -1073,8 +1083,8 @@ def write_sheet(book, results, summary):
                       {"red":0.96,"green":0.78,"blue":0.78},
                       {"red":0.70,"green":0.05,"blue":0.05})
 
-    # Profit/Loss K, % P/L L, Book P/L M: positive green, negative red.
-    for col0 in [10, 11, 12]:
+    # Profit/Loss L, % P/L M, Book P/L N: positive green, negative red.
+    for col0 in [11, 12, 13]:
         requests.append({
             "addConditionalFormatRule":{
                 "rule":{
@@ -1127,9 +1137,9 @@ def write_sheet(book, results, summary):
             })
 
     widths = {
-        0:190,1:110,2:100,3:125,4:125,5:70,6:90,
-        7:100,8:85,9:110,10:110,11:110,12:125,
-        13:115,14:115,15:125,16:125,18:165,19:120
+        0:190,1:110,2:100,3:125,4:125,5:70,6:105,7:90,
+        8:100,9:85,10:110,11:110,12:110,13:125,
+        14:115,15:115,16:125,17:125,18:165,19:120
     }
     for col, pixels in widths.items():
         requests.append({
@@ -1143,7 +1153,7 @@ def write_sheet(book, results, summary):
     if requests:
         book.batch_update({"requests":requests})
 
-    # Clickable chart links in Q.
+    # Clickable chart links in R.
     try:
         link_requests = []
         for row_index, row in enumerate(results, start=2):
@@ -1153,7 +1163,7 @@ def write_sheet(book, results, summary):
             link_requests.append({
                 "updateCells":{
                     "range":{"sheetId":ws.id,"startRowIndex":row_index-1,
-                             "endRowIndex":row_index,"startColumnIndex":16,"endColumnIndex":17},
+                             "endRowIndex":row_index,"startColumnIndex":17,"endColumnIndex":18},
                     "rows":[{"values":[{
                         "userEnteredValue":{"stringValue":"OPEN CHART"},
                         "textFormatRuns":[{"startIndex":0,"format":{
