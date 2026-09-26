@@ -1194,30 +1194,25 @@ def main():
         else:
             r["one_month_change_pct"] = None
 
-    # Rank ONLY ALL POSITIVE stocks by 1 Month % Change (highest = Rank 1).
-    all_positive = [
+    # V17.5: Rank ONLY by 1 Month % Change (highest = Rank 1).
+    # Trend status / ALL POSITIVE does not affect ranking.
+    ranked_stocks = [
         r for r in results
         if r.get("code") != "^NSEI"
-        and classify_signal(
-            r.get("code", ""),
-            r.get("daily", ""),
-            r.get("weekly", ""),
-            r.get("monthly", ""),
-        ) == "ALL POSITIVE"
         and r.get("one_month_change_pct") is not None
     ]
-    all_positive.sort(key=lambda r: -float(r["one_month_change_pct"]))
+    ranked_stocks.sort(key=lambda r: -float(r["one_month_change_pct"]))
 
     for r in results:
         r["rank"] = ""
-    for i, r in enumerate(all_positive, 1):
+    for i, r in enumerate(ranked_stocks, 1):
         r["rank"] = i
 
     # Persistent portfolio + permanent transaction history.
     # EXITs are processed first, then vacant slots are filled from Rank 1-10.
     open_positions, booked_by_code, summary = update_portfolio(book, results)
 
-    # Visible order: NIFTY first, then ALL POSITIVE stocks by Rank 1,2,3...
+    # Visible order: NIFTY first, then stocks by Rank 1,2,3...
     # Remaining stocks follow afterwards.
     results = sorted(
         results,
