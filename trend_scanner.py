@@ -108,7 +108,13 @@ def make_weekly(daily):
     return weekly[weekly.index <= daily.index[-1].normalize()]
 
 
-def make_monthly(daily):
+def make_monthly(daily, completed_only=True):
+    """
+    Build monthly OHLC.
+
+    completed_only=True  -> used for MONTHLY TREND calculation (current month excluded)
+    completed_only=False -> used for MONTHLY CHART display (current month included)
+    """
     if daily is None or daily.empty:
         return pd.DataFrame()
     work = daily.copy()
@@ -116,8 +122,12 @@ def make_monthly(daily):
         {"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}
     )
     monthly.index = monthly.index.to_timestamp(how="end").normalize()
-    current_month = pd.Timestamp(datetime.now(IST).replace(tzinfo=None)).to_period("M")
-    return monthly[monthly.index.to_period("M") < current_month]
+
+    if completed_only:
+        current_month = pd.Timestamp(datetime.now(IST).replace(tzinfo=None)).to_period("M")
+        monthly = monthly[monthly.index.to_period("M") < current_month]
+
+    return monthly
 
 
 def calculate_dynamic_trend(df):
@@ -528,11 +538,11 @@ window.addEventListener("resize", () => {
 """
 
 
-def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_info, weekly_info, monthly_info):
+def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly_chart, daily_info, weekly_info, monthly_info):
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=17.3"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=17.7"
 
     payload = {
         "name": stock_name,
@@ -540,7 +550,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly, daily_in
         "cmp": cmp_price,
         "Daily": {"trend": daily_info[0], "reference": daily_info[1], "bars": chart_bars(daily, 180)},
         "Weekly": {"trend": weekly_info[0], "reference": weekly_info[1], "bars": chart_bars(weekly, 120)},
-        "Monthly": {"trend": monthly_info[0], "reference": monthly_info[1], "bars": chart_bars(monthly, 60)},
+        "Monthly": {"trend": monthly_info[0], "reference": monthly_info[1], "bars": chart_bars(monthly_chart, 60)},
     }
 
     page = HTML_TEMPLATE.replace("__PAGE_TITLE__", f"{stock_name} Trend Chart")
@@ -559,7 +569,8 @@ def scan_stock(stock):
         return None
 
     weekly = make_weekly(daily)
-    monthly = make_monthly(daily)
+    monthly = make_monthly(daily, completed_only=True)
+    monthly_chart = make_monthly(daily, completed_only=False)
 
     # CMP can use latest Yahoo daily value; trend itself uses completed candles only.
     cmp_price = round(float(df.iloc[-1]["Close"]), 2)
@@ -571,7 +582,7 @@ def scan_stock(stock):
     # Generate dedicated trend chart for every instrument, including NIFTY 50 SPOT.
     chart_url = generate_chart(
         stock["code"], stock["name"], cmp_price,
-        daily, weekly, monthly,
+        daily, weekly, monthly_chart,
         daily_info, weekly_info, monthly_info,
     )
 
@@ -608,90 +619,17 @@ def get_last_month_close(daily_df):
 
 
 
-def get_winning_horse_metrics(daily_df, cmp_price):
-    """
-    Supporting momentum metrics for the separate Winning Horse Rank.
-    Uses completed daily candles only for 1-week momentum and 20-day high.
-    """
+def is_sma20_slope_up(daily_df):
+    """True only when completed-daily SMA20 is higher than its previous value."""
     try:
-        d = daily_df.dropna(subset=["Close", "High"]).copy()
-        if len(d) < 6 or cmp_price is None:
-            return None, None
-
-        week_base = float(d["Close"].iloc[-6])
-        one_week_pct = (
-            ((float(cmp_price) - week_base) / week_base) * 100.0
-            if week_base else None
-        )
-
-        recent = d.tail(20)
-        high_20d = float(recent["High"].max()) if not recent.empty else None
-        distance_from_high_pct = (
-            ((float(cmp_price) - high_20d) / high_20d) * 100.0
-            if high_20d else None
-        )
-
-        return (
-            None if one_week_pct is None else round(one_week_pct, 2),
-            None if distance_from_high_pct is None else round(distance_from_high_pct, 2),
-        )
+        d = daily_df.dropna(subset=["Close"]).copy()
+        if len(d) < 21:
+            return False
+        sma20 = d["Close"].rolling(20).mean()
+        return bool(sma20.iloc[-1] > sma20.iloc[-2])
     except Exception:
-        return None, None
+        return False
 
-
-def assign_winning_horse_rank(results):
-    """
-    Experimental comparison rank. It does NOT replace the main Rank and does
-    NOT control BUY/HOLD/EXIT.
-
-    Score (0-100):
-      50% cross-sectional 1-Month momentum percentile
-      25% cross-sectional 1-Week momentum percentile
-      10% Daily trend positive
-      10% Weekly trend positive
-       5% closeness to 20-day high (cross-sectional percentile)
-
-    Higher score = higher Winning Horse Rank.
-    """
-    stocks = [
-        r for r in results
-        if r.get("code") != "^NSEI"
-        and r.get("one_month_change_pct") is not None
-    ]
-
-    def percentile_map(rows, key):
-        valid = [(r["code"], float(r[key])) for r in rows if r.get(key) is not None]
-        valid.sort(key=lambda x: x[1])
-        n = len(valid)
-        if n == 0:
-            return {}
-        if n == 1:
-            return {valid[0][0]: 1.0}
-        return {code: i / (n - 1) for i, (code, _) in enumerate(valid)}
-
-    p1m = percentile_map(stocks, "one_month_change_pct")
-    p1w = percentile_map(stocks, "one_week_change_pct")
-    phigh = percentile_map(stocks, "distance_from_20d_high_pct")
-
-    for r in results:
-        r["winning_horse_score"] = None
-        r["winning_horse_rank"] = ""
-
-        if r.get("code") == "^NSEI" or r.get("code") not in p1m:
-            continue
-
-        code = r["code"]
-        score = 50.0 * p1m.get(code, 0.0)
-        score += 25.0 * p1w.get(code, 0.0)
-        score += 10.0 if r.get("daily") == "POSITIVE" else 0.0
-        score += 10.0 if r.get("weekly") == "POSITIVE" else 0.0
-        score += 5.0 * phigh.get(code, 0.0)
-        r["winning_horse_score"] = round(score, 2)
-
-    ranked = [r for r in stocks if r.get("winning_horse_score") is not None]
-    ranked.sort(key=lambda r: (-float(r["winning_horse_score"]), r.get("name", "")))
-    for i, r in enumerate(ranked, 1):
-        r["winning_horse_rank"] = i
 
 def calculate_rs_vs_nifty_1m(stock_daily, nifty_daily):
     """21-session relative return: Stock 1M % minus NIFTY 1M %."""
@@ -1063,25 +1001,6 @@ def write_sheet(book, results, summary):
     ]
     ws.update(range_name="S1:T9", values=summary_values, value_input_option="USER_ENTERED")
 
-    # V17.6 comparison columns. These are informational only.
-    horse_values = [["WINNING HORSE SCORE", "WINNING HORSE RANK"]]
-    for r in results:
-        horse_values.append([
-            "" if r.get("winning_horse_score") is None else r["winning_horse_score"],
-            r.get("winning_horse_rank", ""),
-        ])
-    ws.update(
-        range_name=f"U1:V{len(horse_values)}",
-        values=horse_values,
-        value_input_option="USER_ENTERED",
-    )
-    ws.format("U1:V1", {
-        "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
-        "textFormat":{"foregroundColor":{"red":1,"green":1,"blue":1},"bold":True},
-        "horizontalAlignment":"CENTER",
-    })
-    if len(horse_values) > 1:
-        ws.format(f"U2:V{len(horse_values)}", {"horizontalAlignment":"CENTER"})
     ws.format("S1:T1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{"foregroundColor":{"red":1,"green":1,"blue":1},"bold":True},
@@ -1300,16 +1219,21 @@ def main():
         else:
             r["one_month_change_pct"] = None
 
-        r["one_week_change_pct"], r["distance_from_20d_high_pct"] = get_winning_horse_metrics(
-            r.get("_daily_df"), r.get("cmp")
-        )
+        r["sma20_slope_up"] = is_sma20_slope_up(r.get("_daily_df"))
 
-    # V17.5: Rank ONLY by 1 Month % Change (highest = Rank 1).
-    # Trend status / ALL POSITIVE does not affect ranking.
+    # V17.7 RANK RULE:
+    # 1) Monthly trend must be POSITIVE
+    # 2) Weekly trend must be POSITIVE
+    # 3) Daily trend is NOT used
+    # 4) Completed-daily SMA20 slope must be UP
+    # 5) Eligible stocks are ranked ONLY by 1 Month % Change, highest first
     ranked_stocks = [
         r for r in results
         if r.get("code") != "^NSEI"
         and r.get("one_month_change_pct") is not None
+        and r.get("monthly") == "POSITIVE"
+        and r.get("weekly") == "POSITIVE"
+        and r.get("sma20_slope_up") is True
     ]
     ranked_stocks.sort(key=lambda r: -float(r["one_month_change_pct"]))
 
@@ -1318,15 +1242,11 @@ def main():
     for i, r in enumerate(ranked_stocks, 1):
         r["rank"] = i
 
-    # V17.6: Separate experimental Winning Horse Rank.
-    # IMPORTANT: portfolio trading rules continue to use the original Rank only.
-    assign_winning_horse_rank(results)
-
     # Persistent portfolio + permanent transaction history.
     # EXITs are processed first, then vacant slots are filled from Rank 1-10.
     open_positions, booked_by_code, summary = update_portfolio(book, results)
 
-    # Visible order: NIFTY first, then stocks by Rank 1,2,3...
+    # Visible order: NIFTY first, then eligible stocks by Rank 1,2,3...
     # Remaining stocks follow afterwards.
     results = sorted(
         results,
