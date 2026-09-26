@@ -607,6 +607,92 @@ def get_last_month_close(daily_df):
 
 
 
+
+def get_winning_horse_metrics(daily_df, cmp_price):
+    """
+    Supporting momentum metrics for the separate Winning Horse Rank.
+    Uses completed daily candles only for 1-week momentum and 20-day high.
+    """
+    try:
+        d = daily_df.dropna(subset=["Close", "High"]).copy()
+        if len(d) < 6 or cmp_price is None:
+            return None, None
+
+        week_base = float(d["Close"].iloc[-6])
+        one_week_pct = (
+            ((float(cmp_price) - week_base) / week_base) * 100.0
+            if week_base else None
+        )
+
+        recent = d.tail(20)
+        high_20d = float(recent["High"].max()) if not recent.empty else None
+        distance_from_high_pct = (
+            ((float(cmp_price) - high_20d) / high_20d) * 100.0
+            if high_20d else None
+        )
+
+        return (
+            None if one_week_pct is None else round(one_week_pct, 2),
+            None if distance_from_high_pct is None else round(distance_from_high_pct, 2),
+        )
+    except Exception:
+        return None, None
+
+
+def assign_winning_horse_rank(results):
+    """
+    Experimental comparison rank. It does NOT replace the main Rank and does
+    NOT control BUY/HOLD/EXIT.
+
+    Score (0-100):
+      50% cross-sectional 1-Month momentum percentile
+      25% cross-sectional 1-Week momentum percentile
+      10% Daily trend positive
+      10% Weekly trend positive
+       5% closeness to 20-day high (cross-sectional percentile)
+
+    Higher score = higher Winning Horse Rank.
+    """
+    stocks = [
+        r for r in results
+        if r.get("code") != "^NSEI"
+        and r.get("one_month_change_pct") is not None
+    ]
+
+    def percentile_map(rows, key):
+        valid = [(r["code"], float(r[key])) for r in rows if r.get(key) is not None]
+        valid.sort(key=lambda x: x[1])
+        n = len(valid)
+        if n == 0:
+            return {}
+        if n == 1:
+            return {valid[0][0]: 1.0}
+        return {code: i / (n - 1) for i, (code, _) in enumerate(valid)}
+
+    p1m = percentile_map(stocks, "one_month_change_pct")
+    p1w = percentile_map(stocks, "one_week_change_pct")
+    phigh = percentile_map(stocks, "distance_from_20d_high_pct")
+
+    for r in results:
+        r["winning_horse_score"] = None
+        r["winning_horse_rank"] = ""
+
+        if r.get("code") == "^NSEI" or r.get("code") not in p1m:
+            continue
+
+        code = r["code"]
+        score = 50.0 * p1m.get(code, 0.0)
+        score += 25.0 * p1w.get(code, 0.0)
+        score += 10.0 if r.get("daily") == "POSITIVE" else 0.0
+        score += 10.0 if r.get("weekly") == "POSITIVE" else 0.0
+        score += 5.0 * phigh.get(code, 0.0)
+        r["winning_horse_score"] = round(score, 2)
+
+    ranked = [r for r in stocks if r.get("winning_horse_score") is not None]
+    ranked.sort(key=lambda r: (-float(r["winning_horse_score"]), r.get("name", "")))
+    for i, r in enumerate(ranked, 1):
+        r["winning_horse_rank"] = i
+
 def calculate_rs_vs_nifty_1m(stock_daily, nifty_daily):
     """21-session relative return: Stock 1M % minus NIFTY 1M %."""
     try:
@@ -976,6 +1062,26 @@ def write_sheet(book, results, summary):
         ["TOTAL PROFIT/LOSS", summary["total_pl"]],
     ]
     ws.update(range_name="S1:T9", values=summary_values, value_input_option="USER_ENTERED")
+
+    # V17.6 comparison columns. These are informational only.
+    horse_values = [["WINNING HORSE SCORE", "WINNING HORSE RANK"]]
+    for r in results:
+        horse_values.append([
+            "" if r.get("winning_horse_score") is None else r["winning_horse_score"],
+            r.get("winning_horse_rank", ""),
+        ])
+    ws.update(
+        range_name=f"U1:V{len(horse_values)}",
+        values=horse_values,
+        value_input_option="USER_ENTERED",
+    )
+    ws.format("U1:V1", {
+        "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
+        "textFormat":{"foregroundColor":{"red":1,"green":1,"blue":1},"bold":True},
+        "horizontalAlignment":"CENTER",
+    })
+    if len(horse_values) > 1:
+        ws.format(f"U2:V{len(horse_values)}", {"horizontalAlignment":"CENTER"})
     ws.format("S1:T1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{"foregroundColor":{"red":1,"green":1,"blue":1},"bold":True},
@@ -1194,6 +1300,10 @@ def main():
         else:
             r["one_month_change_pct"] = None
 
+        r["one_week_change_pct"], r["distance_from_20d_high_pct"] = get_winning_horse_metrics(
+            r.get("_daily_df"), r.get("cmp")
+        )
+
     # V17.5: Rank ONLY by 1 Month % Change (highest = Rank 1).
     # Trend status / ALL POSITIVE does not affect ranking.
     ranked_stocks = [
@@ -1207,6 +1317,10 @@ def main():
         r["rank"] = ""
     for i, r in enumerate(ranked_stocks, 1):
         r["rank"] = i
+
+    # V17.6: Separate experimental Winning Horse Rank.
+    # IMPORTANT: portfolio trading rules continue to use the original Rank only.
+    assign_winning_horse_rank(results)
 
     # Persistent portfolio + permanent transaction history.
     # EXITs are processed first, then vacant slots are filled from Rank 1-10.
