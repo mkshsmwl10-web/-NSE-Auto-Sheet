@@ -3,9 +3,9 @@ name: Trend Scanner Auto Trade
 
 on:
   schedule:
-    # Test schedule: 1:37 PM IST, Monday-Friday
-    # 1:37 PM IST = 08:07 UTC
-    - cron: '7 8 * * 1-5'
+    # Final schedule: 3:00 PM IST, Monday-Friday
+    # 3:00 PM IST = 09:30 UTC
+    - cron: '30 9 * * 1-5'
 
   workflow_dispatch:
 
