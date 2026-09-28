@@ -2,9 +2,9 @@ name: Trend Scanner Auto Trade
 
 on:
   schedule:
-    # 12:40, 12:50, 1:00, 1:10 PM IST — Monday to Friday
-    # GitHub cron uses UTC
-    - cron: '10,20,30,40 7 * * 1-5'
+    # 1:07 PM IST, Monday-Friday
+    # 1:07 PM IST = 07:37 UTC
+    - cron: '37 7 * * 1-5'
 
   workflow_dispatch:
 
@@ -33,13 +33,15 @@ jobs:
       - name: Run Main Scanner
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-        run: python update_sheet.py
+        run: |
+          python update_sheet.py
 
       - name: Run Trend Scanner and Portfolio
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
           EXECUTE_TRADES: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
-        run: python trend_scanner.py
+        run: |
+          python trend_scanner.py
 
       - name: Save Pattern Charts to GitHub
         run: |
