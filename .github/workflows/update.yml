@@ -1,5 +1,4 @@
-name: Update NSE Sheet
-
+name: Trend Scanner Auto Trade
 on:
   schedule:
     # 11:50, 12:00, 12:10, 12:20 PM IST — Monday to Friday
