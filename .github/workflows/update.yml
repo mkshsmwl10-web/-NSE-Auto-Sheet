@@ -2,10 +2,9 @@ name: Update NSE Sheet
 
 on:
   schedule:
-    # 11:00, 11:10, 11:20 and 11:30 AM IST, Monday-Friday
+    # 11:50, 12:00, 12:10, 12:20 PM IST — Monday to Friday
     # GitHub cron uses UTC
-    - cron: '30,40,50 5 * * 1-5'
-    - cron: '0 6 * * 1-5'
+    - cron: '20,30,40,50 6 * * 1-5'
 
   workflow_dispatch:
 
