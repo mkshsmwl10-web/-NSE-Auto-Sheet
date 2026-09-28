@@ -88,6 +88,50 @@ def download_data(yahoo_symbol):
         return pd.DataFrame()
 
 
+
+def fetch_current_prices(results, chunk_size=40):
+    """
+    Refresh CMP from Yahoo intraday data in batches.
+    Falls back to the existing daily CMP if an intraday quote is unavailable.
+    """
+    symbol_to_result = {
+        r.get("yahoo"): r for r in results if r.get("yahoo")
+    }
+    symbols = list(symbol_to_result.keys())
+
+    for start in range(0, len(symbols), chunk_size):
+        chunk = symbols[start:start + chunk_size]
+        try:
+            data = yf.download(
+                tickers=chunk,
+                period="1d",
+                interval="1m",
+                auto_adjust=False,
+                progress=False,
+                threads=True,
+                group_by="ticker",
+                prepost=False,
+            )
+
+            for symbol in chunk:
+                try:
+                    if len(chunk) == 1:
+                        part = data
+                    else:
+                        part = data[symbol]
+
+                    close = part["Close"].dropna()
+                    if not close.empty:
+                        live_price = round(float(close.iloc[-1]), 2)
+                        symbol_to_result[symbol]["cmp"] = live_price
+                except Exception:
+                    pass
+        except Exception as exc:
+            print(f"Intraday CMP batch error: {exc}")
+
+    return results
+
+
 def get_completed_daily(df):
     if df is None or df.empty:
         return pd.DataFrame()
@@ -542,7 +586,7 @@ def generate_chart(code, stock_name, cmp_price, daily, weekly, monthly_chart, da
     safe_code = code.replace("^", "").replace("/", "-").replace(":", "-")
     filename = f"{safe_code}-trend.html"
     filepath = CHART_OUTPUT_DIR / filename
-    chart_url = f"{CHART_BASE_URL}/{filename}?v=17.7"
+    chart_url = f"{CHART_BASE_URL}/{filename}?v=17.9"
 
     payload = {
         "name": stock_name,
@@ -589,6 +633,7 @@ def scan_stock(stock):
     return {
         "name": stock["name"],
         "code": stock["code"],
+        "yahoo": stock["yahoo"],
         "cmp": cmp_price,
         "daily": daily_info[0],
         "weekly": weekly_info[0],
@@ -865,6 +910,26 @@ def update_portfolio(book, results):
             booked_by_code[code] = round(booked_by_code.get(code, 0.0) + realized, 2)
             open_positions.pop(code, None)
 
+    # V17.9: hard daily BUY guard. Backup/retry scheduled runs must never
+    # create more than 2 NEW BUY transactions on the same IST trading date.
+    today_ist = datetime.now(IST).strftime("%Y-%m-%d")
+    tx_values = tx_ws.get_all_values()
+    buys_today = 0
+    if len(tx_values) > 1:
+        tx_header = [str(x).strip() for x in tx_values[0]]
+        tx_idx = {name: i for i, name in enumerate(tx_header)}
+        date_i = tx_idx.get("Date")
+        action_i = tx_idx.get("Action")
+        if date_i is not None and action_i is not None:
+            for row in tx_values[1:]:
+                row_date = row[date_i].strip() if date_i < len(row) else ""
+                row_action = row[action_i].strip().upper() if action_i < len(row) else ""
+                if row_date == today_ist and row_action == "BUY":
+                    buys_today += 1
+
+    remaining_buys_today = max(0, 2 - buys_today)
+    print(f"BUY GUARD: today={buys_today}, remaining={remaining_buys_today}")
+
     # 2) Fill vacant slots only with Rank 1-10 stocks, best rank first.
     candidates = sorted(
         [
@@ -880,7 +945,7 @@ def update_portfolio(book, results):
     # Maximum 2 NEW stocks per trading day/run.
     # Already-owned stocks were excluded above, so this naturally picks the
     # next best available ranks (e.g. if Rank 1 & 2 are owned, buy Rank 3 & 4).
-    buy_candidates = candidates[:2] if execute_trades else []
+    buy_candidates = candidates[:remaining_buys_today] if execute_trades else []
     for r in buy_candidates:
         buy_price = float(r["cmp"])
         units = int(TARGET_PER_STOCK // buy_price) if buy_price > 0 else 0
@@ -1208,6 +1273,10 @@ def main():
         except Exception as exc:
             print(f"  ERROR: {exc}")
         time.sleep(0.10)
+
+    # V17.9: refresh current market CMP before rank and paper-trade calculations.
+    print("Refreshing intraday/current CMP...")
+    results = fetch_current_prices(results)
 
     nifty_daily = next((r.get("_daily_df") for r in results if r["code"] == "^NSEI"), None)
     for r in results:
