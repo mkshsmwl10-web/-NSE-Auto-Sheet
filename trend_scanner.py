@@ -16,9 +16,8 @@ OUTPUT_SHEET = os.environ.get("TREND_SHEET", "Trend Scanner")
 TRANSACTION_SHEET = os.environ.get("TRANSACTION_SHEET", "Trade Transactions")
 TARGET_PER_STOCK = float(os.environ.get("TARGET_PER_STOCK", "10000"))
 PORTFOLIO_CAPITAL = float(os.environ.get("PORTFOLIO_CAPITAL", "200000"))
-TRADE_HOUR_IST = 10
-TRADE_MINUTE_IST = 0
-TRADE_WINDOW_MINUTES = 20
+TRADE_START_IST = dt_time(10, 30)
+TRADE_END_IST = dt_time(15, 25)
 EXECUTE_TRADES = os.environ.get("EXECUTE_TRADES", "false").strip().lower() == "true"
 CHART_OUTPUT_DIR = Path(os.environ.get("TREND_CHART_OUTPUT_DIR", "docs/charts"))
 CHART_BASE_URL = os.environ.get(
@@ -853,12 +852,25 @@ def append_trade(tx_ws, stock, action, rank, price, units, realized_pl="", reali
 
 def is_trade_execution_time():
     """
-    Trade permission is controlled by the GitHub workflow, not clock time.
+    BUY/EXIT safety lock.
 
-    Scheduled workflow: EXECUTE_TRADES=true -> BUY/EXIT allowed.
-    Manual/default run: false/absent -> scanner refresh only.
+    Requirements:
+      1) GitHub scheduled workflow must set EXECUTE_TRADES=true.
+      2) It must be Monday-Friday in India.
+      3) Actual run time must be between 10:30 AM and 3:25 PM IST.
+
+    If GitHub delays the cron until evening/night, scanner/chart refresh may still
+    run, but no paper BUY/EXIT transaction is allowed.
     """
-    return EXECUTE_TRADES
+    if not EXECUTE_TRADES:
+        return False
+
+    now = datetime.now(IST)
+    if now.weekday() >= 5:
+        return False
+
+    current_time = now.time().replace(tzinfo=None)
+    return TRADE_START_IST <= current_time <= TRADE_END_IST
 
 
 def update_portfolio(book, results):
