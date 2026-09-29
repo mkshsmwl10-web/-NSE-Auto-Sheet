@@ -1,9 +1,15 @@
 name: Trend Scanner Auto Trade
 
 on:
+  # GitHub ka backup schedule
   schedule:
-    # 10:30 AM IST = 05:00 UTC, Monday-Friday
-    - cron: '0 5 * * 1-5'
+    - cron: '0 5 * * 1-5'   # 10:30 AM IST
+
+  # External cron-job.org trigger
+  repository_dispatch:
+    types: [nse_1030_trade]
+
+  # Manual run = scanner only, NO TRADE
   workflow_dispatch:
 
 permissions:
@@ -15,10 +21,10 @@ jobs:
 
     steps:
       - name: Checkout Repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
@@ -31,13 +37,15 @@ jobs:
       - name: Run Main Scanner
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-        run: python update_sheet.py
+        run: |
+          python update_sheet.py
 
       - name: Run Trend Scanner and Portfolio
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-          EXECUTE_TRADES: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
-        run: python trend_scanner.py
+          EXECUTE_TRADES: ${{ (github.event_name == 'schedule' || github.event_name == 'repository_dispatch') && 'true' || 'false' }}
+        run: |
+          python trend_scanner.py
 
       - name: Save Pattern Charts to GitHub
         run: |
