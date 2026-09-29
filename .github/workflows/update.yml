@@ -1,12 +1,9 @@
 name: Trend Scanner Auto Trade
-# Schedule registration refresh - 28 Sep 2026
 
 on:
   schedule:
-    # Final schedule: 3:00 PM IST, Monday-Friday
-    # 3:00 PM IST = 09:30 UTC
-    - cron: '30 9 * * 1-5'
-
+    # 10:30 AM IST = 05:00 UTC, Monday-Friday
+    - cron: '0 5 * * 1-5'
   workflow_dispatch:
 
 permissions:
@@ -34,15 +31,13 @@ jobs:
       - name: Run Main Scanner
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
-        run: |
-          python update_sheet.py
+        run: python update_sheet.py
 
       - name: Run Trend Scanner and Portfolio
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
           EXECUTE_TRADES: ${{ github.event_name == 'schedule' && 'true' || 'false' }}
-        run: |
-          python trend_scanner.py
+        run: python trend_scanner.py
 
       - name: Save Pattern Charts to GitHub
         run: |
