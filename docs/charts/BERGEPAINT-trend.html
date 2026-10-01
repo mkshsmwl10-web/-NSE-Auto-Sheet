@@ -1,0 +1,255 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Berger Paints Trend Chart</title>
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+* { box-sizing:border-box; }
+body { margin:0; background:#0f172a; color:#e5e7eb; font-family:Arial,Helvetica,sans-serif; }
+.header { padding:18px 22px; background:#111827; border-bottom:1px solid #334155; }
+.title { font-size:24px; font-weight:700; }
+.subtitle { margin-top:6px; color:#94a3b8; }
+.status-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; padding:14px 20px; }
+.status { padding:12px; border-radius:8px; text-align:center; font-weight:700; }
+.positive { background:#14532d; color:#dcfce7; }
+.negative { background:#7f1d1d; color:#fee2e2; }
+.nodata { background:#374151; color:#f8fafc; }
+.toolbar { padding:8px 20px 14px; }
+button { border:1px solid #475569; background:#1e293b; color:white; padding:9px 17px; margin-right:7px; border-radius:6px; cursor:pointer; font-weight:700; }
+button.active { background:#2563eb; }
+.info { padding:0 20px 10px; color:#cbd5e1; }
+.ohlc { padding:0 20px 10px; min-height:24px; color:#e2e8f0; font-weight:700; }
+.ohlc span { margin-right:14px; }
+.toolbar button.tool-active { background:#7c3aed; border-color:#a78bfa; }
+#chartWrap{position:relative;width:100%;height:650px} #chart{position:absolute;inset:0}
+#drawCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none} #drawHit{position:absolute;inset:0;z-index:6;pointer-events:none;cursor:crosshair}
+@media(max-width:700px) {
+  .status-grid { grid-template-columns:1fr; }
+  #chartWrap { height:520px; }
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="title" id="title"></div>
+  <div class="subtitle" id="subtitle"></div>
+</div>
+<div class="status-grid">
+  <div id="dailyStatus" class="status">Daily</div>
+  <div id="weeklyStatus" class="status">Weekly</div>
+  <div id="monthlyStatus" class="status">Monthly</div>
+</div>
+<div class="toolbar">
+  <button id="Daily" onclick="renderTF('Daily')">1D</button>
+  <button id="Weekly" onclick="renderTF('Weekly')">1W</button>
+  <button id="Monthly" onclick="renderTF('Monthly')">1M</button>
+  <button onclick="zoomBy(0.75)">+</button><button onclick="zoomBy(1.35)">−</button>
+  <button onclick="fitChart()">Fit</button><button onclick="resetChart()">Reset</button>
+  <button id="toolH" onclick="drawH()">H-Line</button> <button id="toolV" onclick="drawV()">V-Line</button>
+  <button id="toolT" onclick="drawTrend()">Trend Line</button> <button id="toolR" onclick="drawRay()">Ray</button>
+  <button id="toolClear" onclick="clearDrawings()">Clear Drawings</button>
+</div>
+<div class="info" id="info"></div><div class="ohlc" id="ohlc">Move mouse over a candle to see OHLC</div>
+<div id="chartWrap"><div id="chart"></div><canvas id="drawCanvas"></canvas><div id="drawHit"></div></div>
+<script>
+const DATA = {"name": "Berger Paints", "code": "BERGEPAINT", "cmp": 455.45, "Daily": {"trend": "POSITIVE", "reference": 451.15, "bars": [{"time": "2026-01-14", "open": 519.45, "high": 526.25, "low": 512.75, "close": 525.15}, {"time": "2026-01-15", "open": 525.15, "high": 525.15, "low": 525.15, "close": 525.15}, {"time": "2026-01-16", "open": 525.15, "high": 526.0, "low": 516.05, "close": 519.75}, {"time": "2026-01-19", "open": 515.55, "high": 521.35, "low": 512.0, "close": 519.7}, {"time": "2026-01-20", "open": 515.5, "high": 521.0, "low": 507.25, "close": 514.35}, {"time": "2026-01-21", "open": 507.05, "high": 518.0, "low": 506.0, "close": 515.8}, {"time": "2026-01-22", "open": 512.1, "high": 520.1, "low": 506.75, "close": 507.8}, {"time": "2026-01-23", "open": 508.65, "high": 510.5, "low": 502.6, "close": 504.5}, {"time": "2026-01-27", "open": 505.0, "high": 506.0, "low": 489.1, "close": 495.3}, {"time": "2026-01-28", "open": 494.85, "high": 494.85, "low": 477.45, "close": 478.85}, {"time": "2026-01-29", "open": 478.85, "high": 480.0, "low": 461.75, "close": 463.5}, {"time": "2026-01-30", "open": 461.9, "high": 466.4, "low": 459.25, "close": 462.9}, {"time": "2026-02-02", "open": 467.05, "high": 470.5, "low": 452.85, "close": 466.15}, {"time": "2026-02-03", "open": 476.15, "high": 481.0, "low": 468.65, "close": 480.05}, {"time": "2026-02-04", "open": 480.05, "high": 484.35, "low": 470.0, "close": 480.1}, {"time": "2026-02-05", "open": 484.95, "high": 484.95, "low": 470.0, "close": 472.3}, {"time": "2026-02-06", "open": 465.0, "high": 473.95, "low": 458.45, "close": 472.4}, {"time": "2026-02-09", "open": 471.1, "high": 472.4, "low": 463.8, "close": 467.15}, {"time": "2026-02-10", "open": 469.8, "high": 470.0, "low": 457.45, "close": 458.65}, {"time": "2026-02-11", "open": 459.95, "high": 461.65, "low": 448.75, "close": 458.5}, {"time": "2026-02-12", "open": 460.45, "high": 465.4, "low": 457.25, "close": 460.75}, {"time": "2026-02-13", "open": 460.0, "high": 464.2, "low": 452.5, "close": 462.0}, {"time": "2026-02-16", "open": 462.0, "high": 465.35, "low": 458.0, "close": 462.4}, {"time": "2026-02-17", "open": 463.45, "high": 465.5, "low": 461.1, "close": 463.4}, {"time": "2026-02-18", "open": 463.1, "high": 465.0, "low": 458.1, "close": 460.4}, {"time": "2026-02-19", "open": 461.75, "high": 462.6, "low": 455.6, "close": 457.45}, {"time": "2026-02-20", "open": 456.35, "high": 461.9, "low": 451.95, "close": 455.45}, {"time": "2026-02-23", "open": 457.0, "high": 465.5, "low": 455.9, "close": 464.8}, {"time": "2026-02-24", "open": 464.8, "high": 465.15, "low": 459.3, "close": 462.7}, {"time": "2026-02-25", "open": 462.7, "high": 464.55, "low": 454.05, "close": 456.05}, {"time": "2026-02-26", "open": 458.25, "high": 462.45, "low": 456.15, "close": 459.25}, {"time": "2026-02-27", "open": 459.25, "high": 460.95, "low": 454.6, "close": 456.1}, {"time": "2026-03-02", "open": 431.15, "high": 454.9, "low": 431.15, "close": 447.4}, {"time": "2026-03-04", "open": 436.55, "high": 445.6, "low": 433.55, "close": 438.75}, {"time": "2026-03-05", "open": 438.0, "high": 443.95, "low": 430.55, "close": 434.8}, {"time": "2026-03-06", "open": 434.0, "high": 444.0, "low": 429.05, "close": 440.3}, {"time": "2026-03-09", "open": 428.65, "high": 442.0, "low": 421.15, "close": 434.2}, {"time": "2026-03-10", "open": 441.15, "high": 444.75, "low": 435.0, "close": 436.7}, {"time": "2026-03-11", "open": 441.8, "high": 444.1, "low": 429.5, "close": 430.65}, {"time": "2026-03-12", "open": 428.7, "high": 428.7, "low": 419.2, "close": 422.7}, {"time": "2026-03-13", "open": 417.85, "high": 418.85, "low": 404.6, "close": 407.8}, {"time": "2026-03-16", "open": 405.0, "high": 407.7, "low": 391.1, "close": 404.5}, {"time": "2026-03-17", "open": 404.8, "high": 420.4, "low": 404.3, "close": 416.15}, {"time": "2026-03-18", "open": 416.3, "high": 419.0, "low": 411.1, "close": 414.95}, {"time": "2026-03-19", "open": 408.8, "high": 415.9, "low": 407.15, "close": 409.45}, {"time": "2026-03-20", "open": 417.0, "high": 420.0, "low": 412.5, "close": 416.7}, {"time": "2026-03-23", "open": 410.9, "high": 414.75, "low": 403.65, "close": 405.45}, {"time": "2026-03-24", "open": 420.0, "high": 420.25, "low": 407.35, "close": 413.8}, {"time": "2026-03-25", "open": 418.95, "high": 427.7, "low": 416.15, "close": 425.45}, {"time": "2026-03-27", "open": 420.0, "high": 425.0, "low": 410.45, "close": 414.65}, {"time": "2026-03-30", "open": 412.75, "high": 415.0, "low": 404.45, "close": 410.0}, {"time": "2026-04-01", "open": 419.15, "high": 419.2, "low": 413.2, "close": 417.8}, {"time": "2026-04-02", "open": 413.75, "high": 424.9, "low": 405.75, "close": 422.25}, {"time": "2026-04-06", "open": 422.6, "high": 435.0, "low": 416.85, "close": 431.0}, {"time": "2026-04-07", "open": 431.0, "high": 434.55, "low": 424.05, "close": 429.85}, {"time": "2026-04-08", "open": 450.4, "high": 450.4, "low": 433.55, "close": 435.7}, {"time": "2026-04-09", "open": 437.75, "high": 440.95, "low": 431.7, "close": 435.0}, {"time": "2026-04-10", "open": 430.0, "high": 457.9, "low": 428.95, "close": 454.0}, {"time": "2026-04-13", "open": 446.5, "high": 465.0, "low": 439.7, "close": 460.7}, {"time": "2026-04-15", "open": 468.2, "high": 476.7, "low": 463.1, "close": 474.6}, {"time": "2026-04-16", "open": 477.0, "high": 481.95, "low": 468.0, "close": 472.1}, {"time": "2026-04-17", "open": 472.4, "high": 477.0, "low": 460.0, "close": 468.6}, {"time": "2026-04-20", "open": 469.95, "high": 490.0, "low": 463.3, "close": 483.95}, {"time": "2026-04-21", "open": 484.45, "high": 485.0, "low": 478.35, "close": 480.6}, {"time": "2026-04-22", "open": 478.0, "high": 479.6, "low": 470.7, "close": 478.25}, {"time": "2026-04-23", "open": 470.5, "high": 476.4, "low": 467.0, "close": 468.65}, {"time": "2026-04-24", "open": 468.65, "high": 474.6, "low": 458.2, "close": 460.4}, {"time": "2026-04-27", "open": 460.4, "high": 466.75, "low": 459.0, "close": 463.6}, {"time": "2026-04-28", "open": 463.6, "high": 469.0, "low": 459.0, "close": 459.85}, {"time": "2026-04-29", "open": 459.95, "high": 469.05, "low": 456.85, "close": 463.8}, {"time": "2026-04-30", "open": 458.0, "high": 474.9, "low": 455.75, "close": 473.1}, {"time": "2026-05-01", "open": 473.1, "high": 473.1, "low": 473.1, "close": 473.1}, {"time": "2026-05-04", "open": 473.1, "high": 480.2, "low": 468.1, "close": 470.3}, {"time": "2026-05-05", "open": 469.1, "high": 476.0, "low": 465.9, "close": 470.6}, {"time": "2026-05-06", "open": 474.65, "high": 480.0, "low": 470.3, "close": 478.45}, {"time": "2026-05-07", "open": 488.0, "high": 498.95, "low": 484.6, "close": 488.25}, {"time": "2026-05-08", "open": 490.0, "high": 521.95, "low": 488.05, "close": 515.75}, {"time": "2026-05-11", "open": 511.95, "high": 511.95, "low": 491.05, "close": 493.85}, {"time": "2026-05-12", "open": 490.0, "high": 498.55, "low": 479.0, "close": 488.1}, {"time": "2026-05-13", "open": 505.0, "high": 533.35, "low": 500.0, "close": 507.7}, {"time": "2026-05-14", "open": 514.95, "high": 540.35, "low": 512.0, "close": 533.9}, {"time": "2026-05-15", "open": 534.0, "high": 536.2, "low": 528.1, "close": 533.45}, {"time": "2026-05-18", "open": 525.5, "high": 529.0, "low": 510.6, "close": 524.6}, {"time": "2026-05-19", "open": 525.0, "high": 528.1, "low": 505.0, "close": 507.7}, {"time": "2026-05-20", "open": 502.0, "high": 511.9, "low": 496.65, "close": 508.45}, {"time": "2026-05-21", "open": 513.95, "high": 529.0, "low": 496.25, "close": 499.35}, {"time": "2026-05-22", "open": 503.0, "high": 505.95, "low": 496.35, "close": 501.15}, {"time": "2026-05-25", "open": 507.0, "high": 511.75, "low": 501.8, "close": 504.85}, {"time": "2026-05-26", "open": 508.4, "high": 519.0, "low": 505.0, "close": 515.55}, {"time": "2026-05-27", "open": 514.4, "high": 527.9, "low": 511.05, "close": 526.95}, {"time": "2026-05-28", "open": 526.95, "high": 526.95, "low": 526.95, "close": 526.95}, {"time": "2026-05-29", "open": 528.0, "high": 530.0, "low": 495.0, "close": 500.6}, {"time": "2026-06-01", "open": 502.0, "high": 518.85, "low": 501.95, "close": 512.9}, {"time": "2026-06-02", "open": 509.85, "high": 514.75, "low": 505.0, "close": 508.25}, {"time": "2026-06-03", "open": 507.0, "high": 512.85, "low": 494.0, "close": 496.05}, {"time": "2026-06-04", "open": 495.0, "high": 512.45, "low": 492.3, "close": 494.25}, {"time": "2026-06-05", "open": 496.7, "high": 500.65, "low": 487.15, "close": 490.25}, {"time": "2026-06-08", "open": 485.0, "high": 495.05, "low": 481.05, "close": 491.9}, {"time": "2026-06-09", "open": 495.8, "high": 504.7, "low": 493.0, "close": 501.9}, {"time": "2026-06-10", "open": 504.15, "high": 522.9, "low": 502.0, "close": 516.7}, {"time": "2026-06-11", "open": 514.95, "high": 522.2, "low": 504.5, "close": 513.95}, {"time": "2026-06-12", "open": 521.0, "high": 523.35, "low": 510.0, "close": 515.15}, {"time": "2026-06-15", "open": 528.7, "high": 538.15, "low": 516.15, "close": 519.4}, {"time": "2026-06-16", "open": 521.0, "high": 524.95, "low": 508.0, "close": 510.5}, {"time": "2026-06-17", "open": 516.0, "high": 518.9, "low": 510.05, "close": 511.7}, {"time": "2026-06-18", "open": 513.6, "high": 515.1, "low": 504.1, "close": 505.05}, {"time": "2026-06-19", "open": 506.0, "high": 559.7, "low": 504.8, "close": 550.7}, {"time": "2026-06-22", "open": 550.7, "high": 559.7, "low": 540.45, "close": 550.05}, {"time": "2026-06-23", "open": 550.0, "high": 555.0, "low": 542.05, "close": 546.25}, {"time": "2026-06-24", "open": 540.25, "high": 546.8, "low": 525.75, "close": 530.55}, {"time": "2026-06-25", "open": 534.3, "high": 551.65, "low": 533.25, "close": 538.65}, {"time": "2026-06-26", "open": 538.65, "high": 538.65, "low": 538.65, "close": 538.65}, {"time": "2026-06-29", "open": 536.0, "high": 539.9, "low": 513.0, "close": 518.3}, {"time": "2026-06-30", "open": 522.0, "high": 526.35, "low": 508.75, "close": 510.1}, {"time": "2026-07-01", "open": 510.1, "high": 518.6, "low": 507.15, "close": 515.35}, {"time": "2026-07-02", "open": 520.0, "high": 525.0, "low": 514.9, "close": 520.75}, {"time": "2026-07-03", "open": 520.9, "high": 529.0, "low": 517.0, "close": 519.45}, {"time": "2026-07-06", "open": 518.05, "high": 525.5, "low": 514.4, "close": 521.85}, {"time": "2026-07-07", "open": 525.5, "high": 526.0, "low": 508.0, "close": 508.7}, {"time": "2026-07-08", "open": 503.0, "high": 510.0, "low": 495.25, "close": 498.1}, {"time": "2026-07-09", "open": 498.0, "high": 502.7, "low": 486.0, "close": 497.0}, {"time": "2026-07-10", "open": 503.75, "high": 504.5, "low": 495.5, "close": 497.25}, {"time": "2026-07-13", "open": 491.15, "high": 494.8, "low": 486.5, "close": 492.95}, {"time": "2026-07-14", "open": 486.3, "high": 495.0, "low": 484.35, "close": 489.1}, {"time": "2026-07-15", "open": 489.85, "high": 496.35, "low": 489.4, "close": 491.7}, {"time": "2026-07-16", "open": 490.25, "high": 510.0, "low": 490.25, "close": 498.3}, {"time": "2026-07-17", "open": 498.35, "high": 501.0, "low": 491.55, "close": 493.7}, {"time": "2026-07-20", "open": 494.7, "high": 498.7, "low": 489.1, "close": 490.7}, {"time": "2026-07-21", "open": 492.45, "high": 513.35, "low": 491.0, "close": 506.4}, {"time": "2026-07-22", "open": 507.0, "high": 507.0, "low": 495.0, "close": 496.45}, {"time": "2026-07-23", "open": 499.8, "high": 503.9, "low": 492.2, "close": 493.6}, {"time": "2026-07-24", "open": 489.7, "high": 499.9, "low": 488.9, "close": 497.95}, {"time": "2026-07-27", "open": 502.1, "high": 506.9, "low": 499.55, "close": 504.0}, {"time": "2026-07-28", "open": 507.0, "high": 507.0, "low": 498.1, "close": 499.35}, {"time": "2026-07-29", "open": 499.35, "high": 528.1, "low": 497.25, "close": 520.05}, {"time": "2026-07-30", "open": 516.9, "high": 526.0, "low": 512.2, "close": 521.35}, {"time": "2026-07-31", "open": 524.95, "high": 524.95, "low": 515.4, "close": 520.45}, {"time": "2026-08-03", "open": 522.3, "high": 536.55, "low": 522.0, "close": 526.55}, {"time": "2026-08-04", "open": 527.0, "high": 544.0, "low": 526.6, "close": 533.8}, {"time": "2026-08-05", "open": 534.0, "high": 555.0, "low": 525.1, "close": 545.2}, {"time": "2026-08-06", "open": 546.0, "high": 557.3, "low": 535.6, "close": 537.6}, {"time": "2026-08-07", "open": 538.0, "high": 544.85, "low": 529.05, "close": 530.55}, {"time": "2026-08-10", "open": 536.0, "high": 543.5, "low": 530.8, "close": 542.1}, {"time": "2026-08-11", "open": 541.8, "high": 545.0, "low": 533.65, "close": 534.95}, {"time": "2026-08-12", "open": 539.8, "high": 564.9, "low": 535.9, "close": 559.8}, {"time": "2026-08-13", "open": 564.5, "high": 565.9, "low": 542.4, "close": 546.35}, {"time": "2026-08-14", "open": 547.0, "high": 561.0, "low": 543.0, "close": 545.1}, {"time": "2026-08-17", "open": 549.0, "high": 553.55, "low": 543.7, "close": 549.35}, {"time": "2026-08-18", "open": 549.0, "high": 549.6, "low": 537.3, "close": 541.2}, {"time": "2026-08-19", "open": 538.0, "high": 544.5, "low": 531.0, "close": 535.9}, {"time": "2026-08-20", "open": 536.9, "high": 539.55, "low": 525.0, "close": 528.55}, {"time": "2026-08-21", "open": 530.2, "high": 530.2, "low": 522.0, "close": 524.4}, {"time": "2026-08-24", "open": 524.4, "high": 525.45, "low": 514.1, "close": 515.5}, {"time": "2026-08-25", "open": 515.5, "high": 517.4, "low": 508.0, "close": 509.85}, {"time": "2026-08-26", "open": 511.3, "high": 514.0, "low": 501.9, "close": 503.7}, {"time": "2026-08-27", "open": 507.0, "high": 511.35, "low": 499.6, "close": 501.0}, {"time": "2026-08-28", "open": 501.85, "high": 501.85, "low": 493.0, "close": 494.35}, {"time": "2026-08-31", "open": 493.0, "high": 505.0, "low": 486.0, "close": 497.75}, {"time": "2026-09-01", "open": 500.9, "high": 501.1, "low": 490.0, "close": 490.85}, {"time": "2026-09-02", "open": 488.8, "high": 489.9, "low": 478.75, "close": 488.05}, {"time": "2026-09-03", "open": 489.0, "high": 497.0, "low": 485.4, "close": 491.4}, {"time": "2026-09-04", "open": 494.0, "high": 496.7, "low": 484.0, "close": 485.3}, {"time": "2026-09-07", "open": 485.4, "high": 488.95, "low": 480.55, "close": 484.5}, {"time": "2026-09-08", "open": 484.5, "high": 485.65, "low": 476.15, "close": 479.45}, {"time": "2026-09-09", "open": 483.9, "high": 483.9, "low": 468.0, "close": 470.8}, {"time": "2026-09-10", "open": 471.0, "high": 473.95, "low": 460.95, "close": 463.8}, {"time": "2026-09-11", "open": 460.75, "high": 465.75, "low": 457.0, "close": 458.05}, {"time": "2026-09-14", "open": 458.05, "high": 458.05, "low": 458.05, "close": 458.05}, {"time": "2026-09-15", "open": 458.05, "high": 460.95, "low": 445.55, "close": 447.1}, {"time": "2026-09-16", "open": 449.1, "high": 450.7, "low": 444.15, "close": 448.15}, {"time": "2026-09-17", "open": 449.4, "high": 452.35, "low": 443.9, "close": 448.6}, {"time": "2026-09-18", "open": 449.95, "high": 461.8, "low": 448.6, "close": 458.65}, {"time": "2026-09-21", "open": 460.8, "high": 463.0, "low": 448.1, "close": 450.6}, {"time": "2026-09-22", "open": 453.0, "high": 456.9, "low": 448.0, "close": 452.6}, {"time": "2026-09-23", "open": 459.7, "high": 462.0, "low": 455.3, "close": 459.75}, {"time": "2026-09-24", "open": 457.85, "high": 457.85, "low": 444.35, "close": 449.4}, {"time": "2026-09-25", "open": 451.9, "high": 459.0, "low": 449.8, "close": 458.35}, {"time": "2026-09-28", "open": 458.0, "high": 458.85, "low": 450.3, "close": 452.85}, {"time": "2026-09-29", "open": 451.95, "high": 456.4, "low": 441.1, "close": 448.2}, {"time": "2026-09-30", "open": 451.15, "high": 458.75, "low": 449.25, "close": 455.45}]}, "Weekly": {"trend": "NEGATIVE", "reference": 460.8, "bars": [{"time": "2024-06-14", "open": 485.9, "high": 504.95, "low": 481.0, "close": 502.7}, {"time": "2024-06-21", "open": 505.0, "high": 515.0, "low": 497.1, "close": 502.2}, {"time": "2024-06-28", "open": 503.8, "high": 506.9, "low": 494.45, "close": 504.2}, {"time": "2024-07-05", "open": 504.2, "high": 519.5, "low": 503.7, "close": 514.4}, {"time": "2024-07-12", "open": 514.4, "high": 532.5, "low": 505.05, "close": 526.0}, {"time": "2024-07-19", "open": 528.0, "high": 536.85, "low": 507.2, "close": 523.75}, {"time": "2024-07-26", "open": 523.9, "high": 543.5, "low": 511.05, "close": 542.4}, {"time": "2024-08-02", "open": 545.5, "high": 558.45, "low": 537.75, "close": 550.25}, {"time": "2024-08-09", "open": 541.05, "high": 549.65, "low": 514.8, "close": 531.65}, {"time": "2024-08-16", "open": 532.95, "high": 551.95, "low": 521.0, "close": 549.9}, {"time": "2024-08-23", "open": 558.5, "high": 597.2, "low": 548.05, "close": 565.7}, {"time": "2024-08-30", "open": 565.7, "high": 586.0, "low": 563.05, "close": 571.05}, {"time": "2024-09-06", "open": 574.1, "high": 604.5, "low": 570.15, "close": 596.3}, {"time": "2024-09-13", "open": 598.0, "high": 626.9, "low": 593.65, "close": 622.65}, {"time": "2024-09-20", "open": 621.1, "high": 629.5, "low": 613.55, "close": 622.85}, {"time": "2024-09-27", "open": 623.25, "high": 629.15, "low": 600.2, "close": 617.55}, {"time": "2024-10-04", "open": 616.5, "high": 625.0, "low": 574.25, "close": 576.95}, {"time": "2024-10-11", "open": 576.9, "high": 585.0, "low": 561.2, "close": 571.55}, {"time": "2024-10-18", "open": 571.0, "high": 588.6, "low": 549.05, "close": 556.35}, {"time": "2024-10-25", "open": 557.2, "high": 565.45, "low": 530.4, "close": 536.95}, {"time": "2024-11-01", "open": 541.15, "high": 550.35, "low": 528.25, "close": 531.75}, {"time": "2024-11-08", "open": 531.75, "high": 533.75, "low": 502.7, "close": 504.25}, {"time": "2024-11-15", "open": 490.0, "high": 498.0, "low": 485.4, "close": 491.9}, {"time": "2024-11-22", "open": 493.55, "high": 494.0, "low": 463.75, "close": 476.25}, {"time": "2024-11-29", "open": 480.15, "high": 495.55, "low": 474.55, "close": 493.7}, {"time": "2024-12-06", "open": 496.3, "high": 497.95, "low": 476.25, "close": 480.45}, {"time": "2024-12-13", "open": 482.0, "high": 482.9, "low": 465.0, "close": 475.0}, {"time": "2024-12-20", "open": 476.0, "high": 479.9, "low": 441.95, "close": 444.8}, {"time": "2024-12-27", "open": 447.0, "high": 447.95, "low": 437.75, "close": 442.3}, {"time": "2025-01-03", "open": 443.15, "high": 461.0, "low": 437.75, "close": 457.85}, {"time": "2025-01-10", "open": 457.85, "high": 472.4, "low": 442.65, "close": 460.85}, {"time": "2025-01-17", "open": 454.85, "high": 471.1, "low": 449.05, "close": 468.8}, {"time": "2025-01-24", "open": 470.0, "high": 485.45, "low": 465.15, "close": 480.1}, {"time": "2025-01-31", "open": 477.65, "high": 485.35, "low": 457.65, "close": 472.75}, {"time": "2025-02-07", "open": 475.0, "high": 497.0, "low": 468.05, "close": 479.35}, {"time": "2025-02-14", "open": 479.35, "high": 492.8, "low": 469.35, "close": 478.3}, {"time": "2025-02-21", "open": 473.1, "high": 493.8, "low": 473.1, "close": 491.25}, {"time": "2025-02-28", "open": 484.1, "high": 511.75, "low": 484.1, "close": 488.55}, {"time": "2025-03-07", "open": 488.0, "high": 512.0, "low": 478.1, "close": 509.35}, {"time": "2025-03-14", "open": 509.2, "high": 514.7, "low": 473.6, "close": 488.2}, {"time": "2025-03-21", "open": 484.1, "high": 510.4, "low": 484.1, "close": 500.3}, {"time": "2025-03-28", "open": 501.0, "high": 514.15, "low": 497.0, "close": 500.2}, {"time": "2025-04-04", "open": 500.0, "high": 521.5, "low": 486.55, "close": 512.05}, {"time": "2025-04-11", "open": 499.95, "high": 551.0, "low": 494.5, "close": 530.5}, {"time": "2025-04-18", "open": 533.5, "high": 548.6, "low": 520.5, "close": 543.6}, {"time": "2025-04-25", "open": 547.0, "high": 595.85, "low": 544.0, "close": 552.5}, {"time": "2025-05-02", "open": 547.15, "high": 559.25, "low": 539.05, "close": 549.55}, {"time": "2025-05-09", "open": 549.0, "high": 559.95, "low": 525.1, "close": 536.6}, {"time": "2025-05-16", "open": 545.5, "high": 579.8, "low": 536.0, "close": 576.1}, {"time": "2025-05-23", "open": 573.1, "high": 580.0, "low": 544.6, "close": 554.9}, {"time": "2025-05-30", "open": 554.9, "high": 572.0, "low": 544.4, "close": 568.3}, {"time": "2025-06-06", "open": 563.1, "high": 588.5, "low": 553.0, "close": 581.5}, {"time": "2025-06-13", "open": 579.75, "high": 584.0, "low": 545.05, "close": 570.15}, {"time": "2025-06-20", "open": 564.9, "high": 578.0, "low": 529.15, "close": 535.75}, {"time": "2025-06-27", "open": 528.4, "high": 588.35, "low": 528.2, "close": 583.95}, {"time": "2025-07-04", "open": 582.0, "high": 605.0, "low": 576.0, "close": 596.0}, {"time": "2025-07-11", "open": 592.1, "high": 600.0, "low": 569.25, "close": 572.55}, {"time": "2025-07-18", "open": 569.75, "high": 585.25, "low": 555.2, "close": 576.8}, {"time": "2025-07-25", "open": 574.0, "high": 580.15, "low": 554.8, "close": 558.0}, {"time": "2025-08-01", "open": 554.8, "high": 582.0, "low": 554.8, "close": 566.9}, {"time": "2025-08-08", "open": 567.95, "high": 579.35, "low": 542.45, "close": 551.05}, {"time": "2025-08-15", "open": 551.05, "high": 555.5, "low": 528.2, "close": 533.45}, {"time": "2025-08-22", "open": 536.95, "high": 555.95, "low": 524.2, "close": 527.0}, {"time": "2025-08-29", "open": 527.0, "high": 540.8, "low": 522.3, "close": 533.0}, {"time": "2025-09-05", "open": 533.0, "high": 550.0, "low": 532.0, "close": 538.7}, {"time": "2025-09-12", "open": 538.7, "high": 557.85, "low": 528.75, "close": 539.35}, {"time": "2025-09-19", "open": 541.85, "high": 554.4, "low": 530.2, "close": 531.6}, {"time": "2025-09-26", "open": 533.95, "high": 539.85, "low": 513.35, "close": 521.45}, {"time": "2025-10-03", "open": 518.0, "high": 543.45, "low": 506.1, "close": 542.6}, {"time": "2025-10-10", "open": 537.3, "high": 539.9, "low": 524.35, "close": 535.15}, {"time": "2025-10-17", "open": 531.95, "high": 545.8, "low": 525.0, "close": 544.9}, {"time": "2025-10-24", "open": 548.0, "high": 553.15, "low": 536.1, "close": 545.65}, {"time": "2025-10-31", "open": 544.0, "high": 546.0, "low": 538.35, "close": 542.1}, {"time": "2025-11-07", "open": 541.0, "high": 554.8, "low": 528.35, "close": 531.05}, {"time": "2025-11-14", "open": 530.65, "high": 587.95, "low": 528.9, "close": 579.55}, {"time": "2025-11-21", "open": 579.55, "high": 594.55, "low": 574.3, "close": 579.55}, {"time": "2025-11-28", "open": 579.6, "high": 590.45, "low": 558.85, "close": 564.6}, {"time": "2025-12-05", "open": 565.0, "high": 567.4, "low": 549.5, "close": 554.5}, {"time": "2025-12-12", "open": 554.4, "high": 554.5, "low": 529.05, "close": 541.25}, {"time": "2025-12-19", "open": 541.0, "high": 543.5, "low": 531.1, "close": 538.0}, {"time": "2025-12-26", "open": 538.0, "high": 569.15, "low": 536.0, "close": 542.05}, {"time": "2026-01-02", "open": 540.05, "high": 546.85, "low": 518.1, "close": 524.1}, {"time": "2026-01-09", "open": 524.1, "high": 531.8, "low": 511.0, "close": 514.2}, {"time": "2026-01-16", "open": 512.0, "high": 526.4, "low": 505.0, "close": 519.75}, {"time": "2026-01-23", "open": 515.55, "high": 521.35, "low": 502.6, "close": 504.5}, {"time": "2026-01-30", "open": 505.0, "high": 506.0, "low": 459.25, "close": 462.9}, {"time": "2026-02-06", "open": 467.05, "high": 484.95, "low": 452.85, "close": 472.4}, {"time": "2026-02-13", "open": 471.1, "high": 472.4, "low": 448.75, "close": 462.0}, {"time": "2026-02-20", "open": 462.0, "high": 465.5, "low": 451.95, "close": 455.45}, {"time": "2026-02-27", "open": 457.0, "high": 465.5, "low": 454.05, "close": 456.1}, {"time": "2026-03-06", "open": 431.15, "high": 454.9, "low": 429.05, "close": 440.3}, {"time": "2026-03-13", "open": 428.65, "high": 444.75, "low": 404.6, "close": 407.8}, {"time": "2026-03-20", "open": 405.0, "high": 420.4, "low": 391.1, "close": 416.7}, {"time": "2026-03-27", "open": 410.9, "high": 427.7, "low": 403.65, "close": 414.65}, {"time": "2026-04-03", "open": 412.75, "high": 424.9, "low": 404.45, "close": 422.25}, {"time": "2026-04-10", "open": 422.6, "high": 457.9, "low": 416.85, "close": 454.0}, {"time": "2026-04-17", "open": 446.5, "high": 481.95, "low": 439.7, "close": 468.6}, {"time": "2026-04-24", "open": 469.95, "high": 490.0, "low": 458.2, "close": 460.4}, {"time": "2026-05-01", "open": 460.4, "high": 474.9, "low": 455.75, "close": 473.1}, {"time": "2026-05-08", "open": 473.1, "high": 521.95, "low": 465.9, "close": 515.75}, {"time": "2026-05-15", "open": 511.95, "high": 540.35, "low": 479.0, "close": 533.45}, {"time": "2026-05-22", "open": 525.5, "high": 529.0, "low": 496.25, "close": 501.15}, {"time": "2026-05-29", "open": 507.0, "high": 530.0, "low": 495.0, "close": 500.6}, {"time": "2026-06-05", "open": 502.0, "high": 518.85, "low": 487.15, "close": 490.25}, {"time": "2026-06-12", "open": 485.0, "high": 523.35, "low": 481.05, "close": 515.15}, {"time": "2026-06-19", "open": 528.7, "high": 559.7, "low": 504.1, "close": 550.7}, {"time": "2026-06-26", "open": 550.7, "high": 559.7, "low": 525.75, "close": 538.65}, {"time": "2026-07-03", "open": 536.0, "high": 539.9, "low": 507.15, "close": 519.45}, {"time": "2026-07-10", "open": 518.05, "high": 526.0, "low": 486.0, "close": 497.25}, {"time": "2026-07-17", "open": 491.15, "high": 510.0, "low": 484.35, "close": 493.7}, {"time": "2026-07-24", "open": 494.7, "high": 513.35, "low": 488.9, "close": 497.95}, {"time": "2026-07-31", "open": 502.1, "high": 528.1, "low": 497.25, "close": 520.45}, {"time": "2026-08-07", "open": 522.3, "high": 557.3, "low": 522.0, "close": 530.55}, {"time": "2026-08-14", "open": 536.0, "high": 565.9, "low": 530.8, "close": 545.1}, {"time": "2026-08-21", "open": 549.0, "high": 553.55, "low": 522.0, "close": 524.4}, {"time": "2026-08-28", "open": 524.4, "high": 525.45, "low": 493.0, "close": 494.35}, {"time": "2026-09-04", "open": 493.0, "high": 505.0, "low": 478.75, "close": 485.3}, {"time": "2026-09-11", "open": 485.4, "high": 488.95, "low": 457.0, "close": 458.05}, {"time": "2026-09-18", "open": 458.05, "high": 461.8, "low": 443.9, "close": 458.65}, {"time": "2026-09-25", "open": 460.8, "high": 463.0, "low": 444.35, "close": 458.35}]}, "Monthly": {"trend": "NEGATIVE", "reference": 500.9, "bars": [{"time": "2021-10-31", "open": 676.08, "high": 714.12, "low": 596.67, "close": 617.92}, {"time": "2021-11-30", "open": 621.67, "high": 677.67, "low": 614.29, "close": 626.46}, {"time": "2021-12-31", "open": 631.58, "high": 650.83, "low": 600.83, "close": 643.12}, {"time": "2022-01-31", "open": 643.58, "high": 666.21, "low": 578.38, "close": 602.0}, {"time": "2022-02-28", "open": 607.25, "high": 624.0, "low": 534.17, "close": 575.38}, {"time": "2022-03-31", "open": 566.67, "high": 602.88, "low": 517.04, "close": 583.08}, {"time": "2022-04-30", "open": 587.67, "high": 619.17, "low": 580.04, "close": 598.29}, {"time": "2022-05-31", "open": 594.58, "high": 597.38, "low": 453.0, "close": 512.42}, {"time": "2022-06-30", "open": 512.5, "high": 526.42, "low": 457.12, "close": 473.58}, {"time": "2022-07-31", "open": 475.38, "high": 522.79, "low": 469.79, "close": 520.58}, {"time": "2022-08-31", "open": 520.83, "high": 591.92, "low": 520.58, "close": 561.42}, {"time": "2022-09-30", "open": 564.17, "high": 573.29, "low": 505.29, "close": 514.17}, {"time": "2022-10-31", "open": 512.5, "high": 529.92, "low": 474.54, "close": 488.17}, {"time": "2022-11-30", "open": 491.42, "high": 522.5, "low": 480.21, "close": 518.67}, {"time": "2022-12-31", "open": 519.17, "high": 525.0, "low": 474.25, "close": 484.46}, {"time": "2023-01-31", "open": 487.0, "high": 488.33, "low": 445.04, "close": 457.62}, {"time": "2023-02-28", "open": 460.62, "high": 485.79, "low": 439.29, "close": 483.0}, {"time": "2023-03-31", "open": 485.83, "high": 507.42, "low": 471.0, "close": 484.75}, {"time": "2023-04-30", "open": 482.5, "high": 510.0, "low": 473.21, "close": 508.62}, {"time": "2023-05-31", "open": 510.04, "high": 545.58, "low": 506.29, "close": 542.04}, {"time": "2023-06-30", "open": 543.75, "high": 574.17, "low": 532.71, "close": 565.08}, {"time": "2023-07-31", "open": 566.58, "high": 579.54, "low": 545.62, "close": 568.67}, {"time": "2023-08-31", "open": 569.04, "high": 604.92, "low": 564.62, "close": 598.83}, {"time": "2023-09-30", "open": 599.71, "high": 679.75, "low": 566.25, "close": 568.85}, {"time": "2023-10-31", "open": 573.4, "high": 585.9, "low": 533.1, "close": 558.6}, {"time": "2023-11-30", "open": 558.55, "high": 592.65, "low": 541.15, "close": 574.4}, {"time": "2023-12-31", "open": 576.0, "high": 607.0, "low": 562.7, "close": 604.65}, {"time": "2024-01-31", "open": 607.5, "high": 609.0, "low": 542.55, "close": 565.15}, {"time": "2024-02-29", "open": 565.55, "high": 620.6, "low": 543.45, "close": 606.7}, {"time": "2024-03-31", "open": 589.3, "high": 595.15, "low": 542.25, "close": 573.05}, {"time": "2024-04-30", "open": 570.0, "high": 574.0, "low": 500.7, "close": 508.55}, {"time": "2024-05-31", "open": 511.05, "high": 527.75, "low": 450.8, "close": 460.0}, {"time": "2024-06-30", "open": 463.0, "high": 515.0, "low": 439.0, "close": 504.2}, {"time": "2024-07-31", "open": 504.2, "high": 558.45, "low": 503.7, "close": 554.9}, {"time": "2024-08-31", "open": 553.85, "high": 597.2, "low": 514.8, "close": 571.05}, {"time": "2024-09-30", "open": 574.1, "high": 629.5, "low": 570.15, "close": 622.3}, {"time": "2024-10-31", "open": 621.9, "high": 624.0, "low": 528.25, "close": 536.8}, {"time": "2024-11-30", "open": 539.0, "high": 542.75, "low": 463.75, "close": 493.7}, {"time": "2024-12-31", "open": 496.3, "high": 497.95, "low": 437.75, "close": 448.55}, {"time": "2025-01-31", "open": 448.0, "high": 485.45, "low": 442.65, "close": 472.75}, {"time": "2025-02-28", "open": 475.0, "high": 511.75, "low": 468.05, "close": 488.55}, {"time": "2025-03-31", "open": 488.0, "high": 514.7, "low": 473.6, "close": 500.2}, {"time": "2025-04-30", "open": 500.0, "high": 595.85, "low": 486.55, "close": 544.2}, {"time": "2025-05-31", "open": 542.0, "high": 580.0, "low": 525.1, "close": 568.3}, {"time": "2025-06-30", "open": 563.1, "high": 594.8, "low": 528.2, "close": 592.65}, {"time": "2025-07-31", "open": 595.25, "high": 605.0, "low": 554.8, "close": 564.9}, {"time": "2025-08-31", "open": 562.0, "high": 582.0, "low": 522.3, "close": 533.0}, {"time": "2025-09-30", "open": 533.0, "high": 557.85, "low": 506.1, "close": 515.2}, {"time": "2025-10-31", "open": 512.1, "high": 553.15, "low": 511.05, "close": 542.1}, {"time": "2025-11-30", "open": 541.0, "high": 594.55, "low": 528.35, "close": 564.6}, {"time": "2025-12-31", "open": 565.0, "high": 569.15, "low": 518.1, "close": 536.55}, {"time": "2026-01-31", "open": 539.0, "high": 539.0, "low": 459.25, "close": 462.9}, {"time": "2026-02-28", "open": 467.05, "high": 484.95, "low": 448.75, "close": 456.1}, {"time": "2026-03-31", "open": 431.15, "high": 454.9, "low": 391.1, "close": 410.0}, {"time": "2026-04-30", "open": 419.15, "high": 490.0, "low": 405.75, "close": 473.1}, {"time": "2026-05-31", "open": 473.1, "high": 540.35, "low": 465.9, "close": 500.6}, {"time": "2026-06-30", "open": 502.0, "high": 559.7, "low": 481.05, "close": 510.1}, {"time": "2026-07-31", "open": 510.1, "high": 529.0, "low": 484.35, "close": 520.45}, {"time": "2026-08-31", "open": 522.3, "high": 565.9, "low": 486.0, "close": 497.75}, {"time": "2026-09-30", "open": 500.9, "high": 501.1, "low": 441.1, "close": 455.45}]}};
+let chart = null;
+let candleSeries=null, currentTF="Daily", drawings=[], mode=null, firstPoint=null;
+const drawCanvas=document.getElementById("drawCanvas");
+const drawHit=document.getElementById("drawHit");
+const pen=drawCanvas.getContext("2d");
+const ohlcBox=document.getElementById("ohlc");
+
+document.getElementById("title").textContent = DATA.name + " (" + DATA.code + ")";
+document.getElementById("subtitle").textContent = "CMP: " + DATA.cmp;
+
+function statusClass(trend) {
+  if (trend === "POSITIVE") return "status positive";
+  if (trend === "NEGATIVE") return "status negative";
+  return "status nodata";
+}
+
+function setupStatuses() {
+  [["dailyStatus","Daily"],["weeklyStatus","Weekly"],["monthlyStatus","Monthly"]].forEach(pair => {
+    const el = document.getElementById(pair[0]);
+    const tf = pair[1];
+    el.className = statusClass(DATA[tf].trend);
+    el.innerHTML = tf + "<br>" + DATA[tf].trend;
+  });
+}
+
+function renderTF(tf) {
+  currentTF=tf; firstPoint=null; mode=null; drawHit.style.pointerEvents="none"; redraw();
+  document.querySelectorAll(".toolbar button").forEach(b => b.classList.remove("active"));
+  const btn = document.getElementById(tf);
+  if (btn) btn.classList.add("active");
+
+  const holder = document.getElementById("chart");
+  holder.innerHTML = "";
+  const item = DATA[tf];
+
+  document.getElementById("info").innerHTML =
+    "<b>" + tf + " Trend:</b> " + item.trend +
+    " &nbsp;&nbsp; <b>Active Reversal Open:</b> " +
+    (item.reference === null ? "-" : item.reference);
+
+  chart = LightweightCharts.createChart(holder, {
+    width:holder.clientWidth,
+    height:holder.clientHeight,
+    layout:{ background:{ color:"#0f172a" }, textColor:"#cbd5e1" },
+    grid:{ vertLines:{ color:"#1e293b" }, horzLines:{ color:"#1e293b" } },
+    rightPriceScale:{ borderColor:"#475569" },
+    timeScale:{ borderColor:"#475569", timeVisible:true }
+  });
+
+  candleSeries = chart.addCandlestickSeries({
+    upColor:"#22c55e",
+    downColor:"#ef4444",
+    borderVisible:false,
+    wickUpColor:"#22c55e",
+    wickDownColor:"#ef4444"
+  });
+
+  candleSeries.setData(item.bars);
+  setupCrosshairOHLC();
+
+  if (item.reference !== null) {
+    candleSeries.createPriceLine({
+      price:item.reference,
+      color:"#f59e0b",
+      lineWidth:2,
+      lineStyle:2,
+      axisLabelVisible:true,
+      title:"Reference Open"
+    });
+  }
+
+  chart.timeScale().fitContent();
+  setTimeout(resizeDrawingCanvas,0);
+}
+
+function fitChart(){if(chart)chart.timeScale().fitContent();}
+function zoomBy(f){
+  if(!chart)return;
+  const t=chart.timeScale(), r=t.getVisibleLogicalRange();
+  if(!r)return;
+  const m=(r.from+r.to)/2, h=(r.to-r.from)*f/2;
+  t.setVisibleLogicalRange({from:m-h,to:m+h});
+}
+function fitChart(){ if(chart) chart.timeScale().fitContent(); }
+function resetChart(){ fitChart(); clearDrawings(); }
+
+function resizeDrawingCanvas(){
+  const r=drawCanvas.getBoundingClientRect();
+  const dpr=window.devicePixelRatio||1;
+  drawCanvas.width=Math.max(1,Math.round(r.width*dpr));
+  drawCanvas.height=Math.max(1,Math.round(r.height*dpr));
+  pen.setTransform(dpr,0,0,dpr,0,0);
+  redraw();
+}
+function setMode(m){
+  mode=(mode===m?null:m);
+  firstPoint=null;
+  drawHit.style.pointerEvents=mode?"auto":"none";
+  document.querySelectorAll(".toolbar button").forEach(b=>b.classList.remove("tool-active"));
+  const ids={h:"toolH",v:"toolV",t:"toolT",r:"toolR"};
+  if(mode && ids[mode]) document.getElementById(ids[mode]).classList.add("tool-active");
+}
+function drawH(){setMode("h")}
+function drawV(){setMode("v")}
+function drawTrend(){setMode("t")}
+function drawRay(){setMode("r")}
+function clearDrawings(){
+  drawings=[];
+  firstPoint=null;
+  mode=null;
+  drawHit.style.pointerEvents="none";
+  document.querySelectorAll(".toolbar button").forEach(b=>b.classList.remove("tool-active"));
+  redraw();
+}
+function hitPoint(e){
+  const r=drawHit.getBoundingClientRect();
+  return {x:e.clientX-r.left,y:e.clientY-r.top};
+}
+function line(x1,y1,x2,y2){
+  pen.beginPath(); pen.moveTo(x1,y1); pen.lineTo(x2,y2);
+  pen.strokeStyle="#f59e0b"; pen.lineWidth=2; pen.stroke();
+}
+function redraw(){
+  const r=drawCanvas.getBoundingClientRect();
+  pen.clearRect(0,0,r.width,r.height);
+  drawings.filter(d=>d.tf===currentTF).forEach(d=>{
+    if(d.k==="h") line(0,d.a.y,r.width,d.a.y);
+    else if(d.k==="v") line(d.a.x,0,d.a.x,r.height);
+    else if(d.k==="t") line(d.a.x,d.a.y,d.b.x,d.b.y);
+    else if(d.k==="r"){
+      const dx=d.b.x-d.a.x,dy=d.b.y-d.a.y;
+      if(Math.abs(dx)<0.001) line(d.a.x,d.a.y,d.a.x,dy>=0?r.height:0);
+      else{
+        const tx=dx>=0?r.width:0, q=(tx-d.a.x)/dx;
+        line(d.a.x,d.a.y,tx,d.a.y+q*dy);
+      }
+    }
+  });
+}
+drawHit.addEventListener("click",e=>{
+  if(!mode)return;
+  const p=hitPoint(e);
+  if(mode==="h"||mode==="v"){
+    drawings.push({tf:currentTF,k:mode,a:p});
+    redraw(); setMode(null); return;
+  }
+  if(firstPoint===null){
+    firstPoint=p;
+  }else{
+    drawings.push({tf:currentTF,k:mode,a:firstPoint,b:p});
+    firstPoint=null; redraw(); setMode(null);
+  }
+});
+
+function setupCrosshairOHLC(){
+  if(!chart||!candleSeries)return;
+  chart.subscribeCrosshairMove(param=>{
+    if(!param || !param.time){
+      ohlcBox.innerHTML="<span>Hover candle → OHLC</span>";
+      return;
+    }
+    const d=param.seriesData && param.seriesData.get(candleSeries);
+    if(!d || d.open===undefined){
+      ohlcBox.innerHTML="<span>Hover candle → OHLC</span>";
+      return;
+    }
+    let date="";
+    if(typeof param.time==="string") date=param.time;
+    else if(param.time.year) date=param.time.year+"-"+String(param.time.month).padStart(2,"0")+"-"+String(param.time.day).padStart(2,"0");
+    else date=String(param.time);
+    ohlcBox.innerHTML="<span>"+date+"</span>"+
+      "<span>O: "+Number(d.open).toFixed(2)+"</span>"+
+      "<span>H: "+Number(d.high).toFixed(2)+"</span>"+
+      "<span>L: "+Number(d.low).toFixed(2)+"</span>"+
+      "<span>C: "+Number(d.close).toFixed(2)+"</span>";
+  });
+}
+
+setupStatuses();
+try {
+  renderTF("Daily");
+} catch (err) {
+  document.getElementById("chart").innerHTML =
+    '<div style="padding:24px;color:#fecaca;font-weight:700;">Chart error: ' +
+    String(err) + '</div>';
+  console.error(err);
+}
+
+window.addEventListener("resize", () => {
+  if (!chart) return;
+  const holder = document.getElementById("chart");
+  chart.applyOptions({ width:holder.clientWidth });
+  resizeDrawingCanvas();
+});
+</script>
+</body>
+</html>
