@@ -675,24 +675,6 @@ def is_sma20_slope_up(daily_df):
         return False
 
 
-def calculate_weekly_vwap(daily_df):
-    """Current calendar-week VWAP approximation using daily HLC3 x Volume."""
-    try:
-        d = daily_df.dropna(subset=["High","Low","Close","Volume"]).copy()
-        if d.empty: return None
-        last = d.index[-1]
-        start = (last - pd.Timedelta(days=last.weekday())).normalize()
-        w = d[d.index >= start]
-        vol = pd.to_numeric(w["Volume"], errors="coerce").fillna(0)
-        if float(vol.sum()) <= 0: return None
-        tp = (pd.to_numeric(w["High"], errors="coerce") +
-              pd.to_numeric(w["Low"], errors="coerce") +
-              pd.to_numeric(w["Close"], errors="coerce")) / 3.0
-        return round(float((tp * vol).sum() / vol.sum()), 2)
-    except Exception:
-        return None
-
-
 def calculate_rs_vs_nifty_1m(stock_daily, nifty_daily):
     """21-session relative return: Stock 1M % minus NIFTY 1M %."""
     try:
@@ -1047,7 +1029,7 @@ def write_sheet(book, results, summary):
 
     headers = [
         "Stock Name", "NSE Code", "CMP", "Last Month Close", "1 Month % Change",
-        "Rank", "SMA20 SLOPE", "WEEKLY VWAP", "Signal", "BUY PRICE", "BUY UNIT", "TOTAL VALUE",
+        "Rank", "SMA20 SLOPE", "Signal", "BUY PRICE", "BUY UNIT", "TOTAL VALUE",
         "PROFIT/LOSS", "% PROFIT/LOSS", "BOOK PROFIT/LOSS",
         "Daily Trend", "Weekly Trend", "Monthly Trend", "Chart"
     ]
@@ -1070,10 +1052,6 @@ def write_sheet(book, results, summary):
             "" if r.get("one_month_change_pct") is None else r["one_month_change_pct"],
             rank,
             "" if code == "^NSEI" else ("UP" if r.get("sma20_slope_up") is True else "DOWN"),
-            "" if r.get("weekly_vwap") is None else (
-                f"{r['weekly_vwap']:.2f} | ABOVE" if float(r["cmp"]) >= float(r["weekly_vwap"])
-                else f"{r['weekly_vwap']:.2f} | BELOW"
-            ),
             signal,
             r.get("buy_price", ""), r.get("buy_unit", ""), r.get("total_value", ""),
             r.get("profit_loss", ""), r.get("profit_loss_pct", ""),
@@ -1082,13 +1060,13 @@ def write_sheet(book, results, summary):
         ])
 
     ws.update(
-        range_name=f"A1:S{len(values)}",
+        range_name=f"A1:R{len(values)}",
         values=values,
         value_input_option="USER_ENTERED",
     )
     ws.freeze(rows=1, cols=1)
 
-    # Portfolio Summary box in T:U
+    # Portfolio Summary box in S:T
     summary_values = [
         ["PORTFOLIO SUMMARY", "VALUE"],
         ["CAPITAL", summary["capital"]],
@@ -1100,26 +1078,26 @@ def write_sheet(book, results, summary):
         ["BOOK PROFIT/LOSS", summary["booked_pl"]],
         ["TOTAL PROFIT/LOSS", summary["total_pl"]],
     ]
-    ws.update(range_name="T1:U9", values=summary_values, value_input_option="USER_ENTERED")
+    ws.update(range_name="S1:T9", values=summary_values, value_input_option="USER_ENTERED")
 
-    ws.format("T1:U1", {
+    ws.format("S1:T1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{"foregroundColor":{"red":1,"green":1,"blue":1},"bold":True},
         "horizontalAlignment":"CENTER",
     })
-    ws.format("T2:T9", {"textFormat":{"bold":True}})
-    ws.format("U2:U9", {"horizontalAlignment":"RIGHT"})
+    ws.format("S2:S9", {"textFormat":{"bold":True}})
+    ws.format("T2:T9", {"horizontalAlignment":"RIGHT"})
 
-    ws.format("A1:S1", {
+    ws.format("A1:R1", {
         "backgroundColor":{"red":0.10,"green":0.18,"blue":0.32},
         "textFormat":{"foregroundColor":{"red":1,"green":1,"blue":1},"bold":True,"fontSize":11},
         "horizontalAlignment":"CENTER","verticalAlignment":"MIDDLE",
     })
 
     if len(values) > 1:
-        ws.format(f"A2:S{len(values)}", {"verticalAlignment":"MIDDLE"})
-        ws.format(f"B2:S{len(values)}", {"horizontalAlignment":"CENTER"})
-        ws.format("A2:O2", {
+        ws.format(f"A2:R{len(values)}", {"verticalAlignment":"MIDDLE"})
+        ws.format(f"B2:R{len(values)}", {"horizontalAlignment":"CENTER"})
+        ws.format("A2:N2", {
             "backgroundColor":{"red":0.88,"green":0.93,"blue":1.0},
             "textFormat":{"bold":True},
         })
@@ -1162,41 +1140,19 @@ def write_sheet(book, results, summary):
                   {"red":0.96,"green":0.78,"blue":0.78},
                   {"red":0.70,"green":0.05,"blue":0.05})
 
-    # WEEKLY VWAP H: green when CMP is above VWAP, red when below.
-    for formula, bg, fg in [
-        ('=REGEXMATCH($H2,"ABOVE$")',
-         {"red":0.78,"green":0.93,"blue":0.80},
-         {"red":0.05,"green":0.45,"blue":0.12}),
-        ('=REGEXMATCH($H2,"BELOW$")',
-         {"red":0.96,"green":0.78,"blue":0.78},
-         {"red":0.70,"green":0.05,"blue":0.05}),
-    ]:
-        requests.append({
-            "addConditionalFormatRule":{
-                "rule":{
-                    "ranges":[{"sheetId":sheet_id,"startRowIndex":1,
-                               "startColumnIndex":7,"endColumnIndex":8}],
-                    "booleanRule":{
-                        "condition":{"type":"CUSTOM_FORMULA","values":[{"userEnteredValue":formula}]},
-                        "format":{"backgroundColor":bg,"textFormat":{"foregroundColor":fg,"bold":True}},
-                    },
-                },"index":0
-            }
-        })
-
-    # Signal I: BUY green, HOLD yellow, EXIT red.
-    add_text_rule(8, "BUY",
+    # Signal H: BUY green, HOLD yellow, EXIT red.
+    add_text_rule(7, "BUY",
                   {"red":0.80,"green":0.94,"blue":0.81},
                   {"red":0.05,"green":0.45,"blue":0.12})
-    add_text_rule(8, "HOLD",
+    add_text_rule(7, "HOLD",
                   {"red":1.00,"green":0.94,"blue":0.70},
                   {"red":0.55,"green":0.35,"blue":0.00})
-    add_text_rule(8, "EXIT",
+    add_text_rule(7, "EXIT",
                   {"red":0.96,"green":0.80,"blue":0.80},
                   {"red":0.70,"green":0.05,"blue":0.05})
 
     # Daily/Weekly/Monthly O:Q: POSITIVE green, NEGATIVE red.
-    for col0 in [15, 16, 17]:
+    for col0 in [14, 15, 16]:
         add_text_rule(col0, "POSITIVE",
                       {"red":0.78,"green":0.93,"blue":0.80},
                       {"red":0.05,"green":0.45,"blue":0.12})
@@ -1205,7 +1161,7 @@ def write_sheet(book, results, summary):
                       {"red":0.70,"green":0.05,"blue":0.05})
 
     # Profit/Loss L, % P/L M, Book P/L N: positive green, negative red.
-    for col0 in [12, 13, 14]:
+    for col0 in [11, 12, 13]:
         requests.append({
             "addConditionalFormatRule":{
                 "rule":{
@@ -1247,7 +1203,7 @@ def write_sheet(book, results, summary):
                 "addConditionalFormatRule":{
                     "rule":{
                         "ranges":[{"sheetId":sheet_id,"startRowIndex":row0,
-                                   "endRowIndex":row0+1,"startColumnIndex":20,"endColumnIndex":21}],
+                                   "endRowIndex":row0+1,"startColumnIndex":19,"endColumnIndex":20}],
                         "booleanRule":{
                             "condition":{"type":cond_type,"values":[{"userEnteredValue":"0"}]},
                             "format":{"backgroundColor":bg,
@@ -1258,9 +1214,9 @@ def write_sheet(book, results, summary):
             })
 
     widths = {
-        0:190,1:110,2:100,3:125,4:125,5:70,6:105,7:145,8:90,
-        9:100,10:85,11:110,12:110,13:110,14:125,
-        15:115,16:115,17:125,18:125,19:165,20:120
+        0:190,1:110,2:100,3:125,4:125,5:70,6:105,7:90,
+        8:100,9:85,10:110,11:110,12:110,13:125,
+        14:115,15:115,16:125,17:125,18:165,19:120
     }
     for col, pixels in widths.items():
         requests.append({
@@ -1274,7 +1230,7 @@ def write_sheet(book, results, summary):
     if requests:
         book.batch_update({"requests":requests})
 
-    # Clickable chart links in S.
+    # Clickable chart links in R.
     try:
         link_requests = []
         for row_index, row in enumerate(results, start=2):
@@ -1284,7 +1240,7 @@ def write_sheet(book, results, summary):
             link_requests.append({
                 "updateCells":{
                     "range":{"sheetId":ws.id,"startRowIndex":row_index-1,
-                             "endRowIndex":row_index,"startColumnIndex":18,"endColumnIndex":19},
+                             "endRowIndex":row_index,"startColumnIndex":17,"endColumnIndex":18},
                     "rows":[{"values":[{
                         "userEnteredValue":{"stringValue":"OPEN CHART"},
                         "textFormatRuns":[{"startIndex":0,"format":{
@@ -1355,7 +1311,6 @@ def main():
             r["one_month_change_pct"] = None
 
         r["sma20_slope_up"] = is_sma20_slope_up(r.get("_daily_df"))
-        r["weekly_vwap"] = calculate_weekly_vwap(r.get("_daily_df"))
 
     # V17.7 RANK RULE:
     # 1) Monthly trend must be POSITIVE
