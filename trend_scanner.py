@@ -1077,24 +1077,34 @@ def write_sheet(book, results, summary):
     ]
     values = [headers]
 
+    # Signals describe position status separately from new-entry eligibility.
+    nifty = next((x for x in results if x.get("code") == "^NSEI"), None)
+    nifty_weekly_positive = bool(nifty and nifty.get("weekly") == "POSITIVE")
     for r in results:
         code = r.get("code")
         rank = r.get("rank", "")
-        # Ranking display rule remains unchanged.
-        nifty = next((x for x in results if x.get("code") == "^NSEI"), None)
-        nifty_weekly_positive = bool(nifty and nifty.get("weekly") == "POSITIVE")
-        new_buy_eligible = (
-            rank != "" and int(rank) <= 10
+        rank_num = int(rank) if rank not in ("", None) else None
+        is_held = bool(r.get("buy_price") not in ("", None) and r.get("buy_unit") not in ("", None))
+        entry_eligible = (
+            rank_num is not None and 1 <= rank_num <= 10
             and r.get("daily") == "POSITIVE"
             and float(r.get("one_month_change_pct") or 0) > 0
-            and nifty_weekly_positive
         )
-        signal = (
-            "" if code == "^NSEI" else
-            "BUY" if new_buy_eligible else
-            "HOLD" if rank != "" and int(rank) <= 20 else
-            "EXIT"
-        )
+        if code == "^NSEI":
+            signal = ""
+        elif is_held:
+            # Keep the portfolio EXIT rule unchanged: rank 21+ / unranked.
+            # Risk exits are checked during scheduled trade execution.
+            signal = "EXIT" if rank_num is None or rank_num >= 21 else (
+                "ACTIVE" if rank_num <= 10 else "HOLD"
+            )
+        elif entry_eligible:
+            signal = "BUY" if nifty_weekly_positive else "BUY PAUSED"
+        elif rank_num is not None and rank_num <= 10:
+            signal = "WAIT"
+        else:
+            # Not held: EXIT would misleadingly imply an actual position exit.
+            signal = "WAIT"
 
         values.append([
             r["name"], code, r["cmp"],
@@ -1190,10 +1200,19 @@ def write_sheet(book, results, summary):
                   {"red":0.96,"green":0.78,"blue":0.78},
                   {"red":0.70,"green":0.05,"blue":0.05})
 
-    # Signal H: BUY green, HOLD yellow, EXIT red.
+    # Signal H: separate new BUY, paused entry, waiting, owned and EXIT.
     add_text_rule(7, "BUY",
                   {"red":0.80,"green":0.94,"blue":0.81},
                   {"red":0.05,"green":0.45,"blue":0.12})
+    add_text_rule(7, "BUY PAUSED",
+                  {"red":1.00,"green":0.91,"blue":0.73},
+                  {"red":0.55,"green":0.31,"blue":0.03})
+    add_text_rule(7, "WAIT",
+                  {"red":0.90,"green":0.91,"blue":0.93},
+                  {"red":0.35,"green":0.38,"blue":0.44})
+    add_text_rule(7, "ACTIVE",
+                  {"red":0.79,"green":0.91,"blue":0.98},
+                  {"red":0.05,"green":0.32,"blue":0.65})
     add_text_rule(7, "HOLD",
                   {"red":1.00,"green":0.94,"blue":0.70},
                   {"red":0.55,"green":0.35,"blue":0.00})
