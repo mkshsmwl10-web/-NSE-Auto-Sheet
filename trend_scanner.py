@@ -1362,19 +1362,14 @@ def main():
 
         r["sma20_slope_up"] = is_sma20_slope_up(r.get("_daily_df"))
 
-    # V18: Ranking unchanged. New BUY filters and risk exits are applied separately.
-    # V17.7 RANK RULE:
-    # 1) Monthly trend must be POSITIVE
-    # 2) Weekly trend must be POSITIVE
-    # 3) Daily trend is NOT used
-    # 4) Completed-daily SMA20 slope must be UP
-    # 5) Eligible stocks are ranked ONLY by 1 Month % Change, highest first
+    # V18.1 RANK RULE (requested):
+    # Only completed-daily SMA20 SLOPE UP qualifies for ranking.
+    # Sort eligible stocks by 1 Month % Change, descending (negative values allowed).
+    # Daily/Weekly/Monthly trend do NOT filter rank; BUY rules remain separate.
     ranked_stocks = [
         r for r in results
         if r.get("code") != "^NSEI"
         and r.get("one_month_change_pct") is not None
-        and r.get("monthly") == "POSITIVE"
-        and r.get("weekly") == "POSITIVE"
         and r.get("sma20_slope_up") is True
     ]
     ranked_stocks.sort(key=lambda r: -float(r["one_month_change_pct"]))
