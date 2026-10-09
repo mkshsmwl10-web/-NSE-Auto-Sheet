@@ -638,6 +638,7 @@ def scan_stock(stock):
         "weekly": weekly_info[0],
         "monthly": monthly_info[0],
         "_daily_df": daily,
+        "_price_df": df,
         "chart": chart_url,
     }
 
@@ -873,23 +874,59 @@ def is_trade_execution_time():
     return TRADE_START_IST <= current_time <= TRADE_END_IST
 
 
+def v18_risk_exit_reason(result, position):
+    """Paper risk exit, checked at scanner execution using current CMP.
+
+    5% initial stop; after price reaches +10% from entry, trail 5% below
+    highest observed daily high since entry. A scanner run is not a broker SL.
+    """
+    buy_price = float(position.get("buy_price") or 0)
+    cmp_price = float(result.get("cmp") or 0)
+    if buy_price <= 0 or cmp_price <= 0:
+        return ""
+
+    peak = buy_price
+    prices = result.get("_price_df")
+    if prices is not None and not prices.empty:
+        try:
+            buy_date = pd.Timestamp(position.get("buy_date"))
+            since_entry = prices[prices.index.normalize() >= buy_date.normalize()]
+            if not since_entry.empty:
+                highs = pd.to_numeric(since_entry["High"], errors="coerce").dropna()
+                if not highs.empty:
+                    peak = max(peak, float(highs.max()))
+        except (ValueError, TypeError, KeyError):
+            pass
+
+    initial_stop = buy_price * 0.95
+    if peak >= buy_price * 1.10:
+        stop = max(initial_stop, peak * 0.95)
+        return "TRAILING STOP" if cmp_price <= stop else ""
+    return "INITIAL STOP" if cmp_price <= initial_stop else ""
+
+
 def update_portfolio(book, results):
     """
     Rules:
       - Maximum 2 NEW buys per trading day/run.
-      - New entry only from current Rank 1-10, best rank first.
+      - New entry from Rank 1-10 only when Daily POSITIVE, 1M% > 0,
+        and NIFTY Weekly POSITIVE; best rank first.
       - Already-owned stocks are skipped; scanner keeps moving down the ranks
         until it finds up to 2 new eligible stocks.
       - Previously bought Rank 11-20 positions remain HOLD.
       - Existing Rank 1-10 stays active.
       - Existing Rank 11-20 = HOLD.
       - Existing Rank 21+ OR blank rank = EXIT, profit or loss.
+      - Risk EXIT at CMP <= 5% below entry; after +10% peak, trail 5% below peak.
       - Approx Rs 10,000 per new stock: floor(10000 / buy price) units.
       - Every BUY/EXIT is permanently appended to Trade Transactions.
     """
     tx_ws = get_transaction_sheet(book)
     open_positions, booked_by_code = load_trade_state(tx_ws)
     by_code = {r.get("code"): r for r in results if r.get("code") != "^NSEI"}
+    nifty = next((r for r in results if r.get("code") == "^NSEI"), None)
+    market_allows_buy = bool(nifty and nifty.get("weekly") == "POSITIVE")
+    print(f"V18 NIFTY WEEKLY FILTER: {'BUY ALLOWED' if market_allows_buy else 'NEW BUY PAUSED'}")
 
     execute_trades = is_trade_execution_time()
     if execute_trades:
@@ -905,7 +942,10 @@ def update_portfolio(book, results):
         rank = r.get("rank", "") if r else ""
         rank_num = int(rank) if rank not in ("", None) else None
 
-        if r is None or rank_num is None or rank_num >= 21:
+        risk_reason = v18_risk_exit_reason(r, pos) if r is not None else ""
+        if r is None or rank_num is None or rank_num >= 21 or risk_reason:
+            if risk_reason:
+                print(f"V18 RISK EXIT: {code} - {risk_reason}")
             exit_price = float(r.get("cmp")) if r and r.get("cmp") is not None else pos["buy_price"]
             units = int(pos["units"])
             realized = round((exit_price - float(pos["buy_price"])) * units, 2)
@@ -949,6 +989,8 @@ def update_portfolio(book, results):
             if r.get("code") != "^NSEI"
             and r.get("rank", "") != ""
             and 1 <= int(r["rank"]) <= 10
+            and r.get("daily") == "POSITIVE"
+            and float(r.get("one_month_change_pct") or 0) > 0
             and r.get("code") not in open_positions
         ],
         key=lambda r: int(r["rank"])
@@ -957,7 +999,7 @@ def update_portfolio(book, results):
     # Maximum 2 NEW stocks per trading day/run.
     # Already-owned stocks were excluded above, so this naturally picks the
     # next best available ranks (e.g. if Rank 1 & 2 are owned, buy Rank 3 & 4).
-    buy_candidates = candidates[:remaining_buys_today] if execute_trades else []
+    buy_candidates = candidates[:remaining_buys_today] if (execute_trades and market_allows_buy) else []
     for r in buy_candidates:
         buy_price = float(r["cmp"])
         units = int(TARGET_PER_STOCK // buy_price) if buy_price > 0 else 0
@@ -1039,9 +1081,17 @@ def write_sheet(book, results, summary):
         code = r.get("code")
         rank = r.get("rank", "")
         # Ranking display rule remains unchanged.
+        nifty = next((x for x in results if x.get("code") == "^NSEI"), None)
+        nifty_weekly_positive = bool(nifty and nifty.get("weekly") == "POSITIVE")
+        new_buy_eligible = (
+            rank != "" and int(rank) <= 10
+            and r.get("daily") == "POSITIVE"
+            and float(r.get("one_month_change_pct") or 0) > 0
+            and nifty_weekly_positive
+        )
         signal = (
             "" if code == "^NSEI" else
-            "BUY" if rank != "" and int(rank) <= 10 else
+            "BUY" if new_buy_eligible else
             "HOLD" if rank != "" and int(rank) <= 20 else
             "EXIT"
         )
@@ -1312,6 +1362,7 @@ def main():
 
         r["sma20_slope_up"] = is_sma20_slope_up(r.get("_daily_df"))
 
+    # V18: Ranking unchanged. New BUY filters and risk exits are applied separately.
     # V17.7 RANK RULE:
     # 1) Monthly trend must be POSITIVE
     # 2) Weekly trend must be POSITIVE
