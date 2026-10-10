@@ -15,7 +15,7 @@ INPUT_SHEET = os.getenv('INPUT_SHEET', 'NIFTY200')
 FINAL_SHEET = os.getenv('FINAL_LIST_SHEET', 'Final List')
 CHART_DIR = Path(os.getenv('CHART_OUTPUT_DIR', 'docs/charts'))
 CHART_BASE = os.getenv('CHART_BASE_URL', 'https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/charts').rstrip('/')
-COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 9','SMA 18','SMA 50','SMA 200','SMA 50 Slope','50 Slope %','SMA 200 Distance %','Vol Ratio','RSI 14','20D Breakout','Score','Support SMA','Candle Pattern','Entry Above','Stop Below','Pullback Signal','Chart Link']
+COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 9','SMA 18','SMA 50','SMA 200','SMA 50 Slope','50 Slope %','SMA 200 Distance %','Vol Ratio','RSI 14','20D Breakout','Score','Support SMA','Candle Pattern','Entry Above','Stop Below','RS 1M vs NIFTY %','Pullback Signal','Chart Link']
 
 def google_book():
     raw = os.environ.get('GCP_CREDENTIALS','').strip()
@@ -86,7 +86,28 @@ def pullback_setup(df):
     }
 
 
-def chart_html(name, code, df):
+def relative_strength_21(stock_close, benchmark_close):
+    """21-session stock return minus NIFTY50 return on shared trading dates.
+    Compare close levels 21 shared sessions apart (22 close observations).
+    Return None if benchmark history is missing/stale.
+    """
+    stock = stock_close.copy()
+    bench = benchmark_close.copy()
+    stock.index = pd.to_datetime(stock.index).tz_localize(None).normalize()
+    bench.index = pd.to_datetime(bench.index).tz_localize(None).normalize()
+    common = pd.concat([stock.rename('stock'), bench.rename('nifty')], axis=1,
+                       join='inner').dropna().sort_index()
+    if len(common) < 22 or common.index[-1] != stock.index[-1]:
+        return None
+    start, end = common.iloc[-22], common.iloc[-1]
+    if start['stock'] <= 0 or start['nifty'] <= 0:
+        return None
+    stock_return = (end['stock'] / start['stock'] - 1) * 100
+    nifty_return = (end['nifty'] / start['nifty'] - 1) * 100
+    return round(float(stock_return - nifty_return), 2)
+
+
+def chart_html(name, code, df, rs_1m=None):
     """Daily candlestick, SMA overlay and volume with responsive time-range buttons."""
     shown = df.tail(320)
     dates = [d.strftime('%Y-%m-%d') for d in shown.index]
@@ -147,6 +168,7 @@ def chart_html(name, code, df):
             'marker':{'color':'#16a34a','size':16,'symbol':'triangle-up'},
             'xaxis':'x','yaxis':'y'
         })
+    details['rs1m'] = rs_1m
     payload = json.dumps({'traces': traces, 'details': details}, separators=(',', ':'))
     title = html.escape(f'{name} ({code}) — Advanced Daily SMA Chart')
     page = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -193,6 +215,7 @@ m('Volume Ratio',d.volratio===null?'N/A':d.volratio.toFixed(2)+'x')+
 m('RSI 14',d.rsi===null?'N/A':d.rsi.toFixed(1))+
 m('20D Breakout',d.breakout?'YES':'NO',d.breakout?'green':'')+
 m('SMA Alignment',d.alignment?'9 > 18 > 50':'Mixed',d.alignment?'green':'')+
+m('RS 1M vs NIFTY 50',d.rs1m===null?'N/A':((d.rs1m>0?'+':'')+d.rs1m.toFixed(2)+' pp'),d.rs1m===null?'':(d.rs1m>0?'green':'red'))+
 m('Pullback Signal',d.pullback,d.pullback==='BUY OPPORTUNITY'?'green':'')+
 m('Support SMA',d.supportSma||'—')+
 m('Candle',d.candle||'—')+
@@ -229,7 +252,7 @@ else document.getElementById('plot').textContent='Plotly CDN unavailable. Check 
     return page.replace('__TITLE__', title).replace('__DATA__', payload)
 
 
-def scan(name,code):
+def scan(name,code,nifty_close):
     raw=yf.Ticker(code+'.NS').history(period='3y',interval='1d',auto_adjust=False,actions=False)
     if raw is None or raw.empty or len(raw)<202: return None
     close=pd.to_numeric(raw['Close'],errors='coerce').dropna()
@@ -254,10 +277,11 @@ def scan(name,code):
     latest=df.iloc[-1]; prev=df.iloc[-2]
     if pd.isna(latest['SMA 200']) or pd.isna(prev['SMA 50']): return None
     if not (latest['Close']>latest['SMA 200'] and latest['SMA 50']>prev['SMA 50']): return None
+    rs_1m = relative_strength_21(close, nifty_close) if nifty_close is not None else None
     CHART_DIR.mkdir(parents=True,exist_ok=True)
     filename=re.sub(r'[^A-Za-z0-9_-]','-',code)+'-sma-chart.html'
-    (CHART_DIR/filename).write_text(chart_html(name,code,df),encoding='utf-8')
-    url=f'{CHART_BASE}/{filename}?v=5'
+    (CHART_DIR/filename).write_text(chart_html(name,code,df,rs_1m),encoding='utf-8')
+    url=f'{CHART_BASE}/{filename}?v=6'
     slope_pct = (float(latest['SMA 50'])/float(prev['SMA 50'])-1)*100
     distance_pct = (float(latest['Close'])/float(latest['SMA 200'])-1)*100
     vol_ratio = float(latest['Vol Ratio']) if pd.notna(latest['Vol Ratio']) else 0.0
@@ -284,7 +308,9 @@ def scan(name,code):
             'Score':score,
             'Pullback Signal':setup['signal'],'Support SMA':setup['sma'],
             'Candle Pattern':setup['candle'],'Entry Above':setup['entry'],
-            'Stop Below':setup['stop'],'Chart Link':url}
+            'Stop Below':setup['stop'],
+            'RS 1M vs NIFTY %':rs_1m if rs_1m is not None else '',
+            'Chart Link':url}
 
 def write_output(book, rows):
     """Keep ALL qualifying stocks, sorted by score and ranked 1..N."""
@@ -299,7 +325,7 @@ def write_output(book, rows):
     ws.clear()
     ws.resize(rows=max(100,len(rows)+2), cols=len(COLUMNS))
     values = [COLUMNS] + [[r.get(c,'') for c in COLUMNS] for r in rows]
-    end_col = 'U'
+    end_col = 'V'
     ws.update(values, range_name=f'A1:{end_col}{len(values)}', value_input_option='RAW')
     ws.freeze(rows=1, cols=3)
     ws.format(f'A1:{end_col}1', {
@@ -328,7 +354,7 @@ def write_output(book, rows):
         for i,row in enumerate(rows,start=2):
             requests.append({'updateCells':{
                 'range':{'sheetId':ws.id,'startRowIndex':i-1,'endRowIndex':i,
-                         'startColumnIndex':20,'endColumnIndex':21},
+                         'startColumnIndex':21,'endColumnIndex':22},
                 'rows':[{'values':[{
                     'userEnteredValue':{'stringValue':'OPEN CHART'},
                     'textFormatRuns':[{'startIndex':0,'format':{
@@ -340,9 +366,12 @@ def write_output(book, rows):
         for i in range(0,len(requests),100):
             book.batch_update({'requests':requests[i:i+100]})
     if rows:
-        ws.format(f'T2:T{len(rows)+1}', {
+        ws.format(f'U2:U{len(rows)+1}', {
             'backgroundColor':{'red':0.91,'green':0.97,'blue':0.91},
             'textFormat':{'bold':True}
+        })
+        ws.format(f'T2:T{len(rows)+1}', {
+            'numberFormat':{'type':'NUMBER','pattern':'+0.00;-0.00;0.00'}
         })
         ws.format(f'R2:S{len(rows)+1}', {
             'numberFormat':{'type':'NUMBER','pattern':'0.00'}
@@ -378,10 +407,20 @@ def main():
     book=google_book()
     stocks=get_stocks(book)
     print(f'Scanning {len(stocks)} stocks for CMP>SMA200 and SMA50 slope UP')
+    # Fetch NIFTY once for all stocks; never request it separately per ticker.
+    nifty_close = None
+    try:
+        nifty_history = yf.Ticker('^NSEI').history(
+            period='3mo', interval='1d', auto_adjust=False, actions=False)
+        if nifty_history is not None and not nifty_history.empty:
+            nifty_close = pd.to_numeric(nifty_history['Close'], errors='coerce').dropna()
+            print('NIFTY50 benchmark observations:',len(nifty_close))
+    except Exception as exc:
+        print('NIFTY50 benchmark unavailable:',exc)
     rows=[]
     for i,(name,code) in enumerate(stocks,1):
         try:
-            result=scan(name,code)
+            result=scan(name,code,nifty_close)
             if result: rows.append(result); print(f'  PASS {code}')
         except Exception as exc: print(f'  ERROR {code}: {exc}')
         if i%50==0: print(f'Processed {i}/{len(stocks)}')
