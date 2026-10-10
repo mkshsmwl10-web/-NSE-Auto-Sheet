@@ -76,7 +76,8 @@ def pullback_setup(df):
     volume=float(bar['Vol Ratio']) if pd.notna(bar['Vol Ratio']) else 0.
     rsi=float(bar['RSI 14']) if pd.notna(bar['RSI 14']) else 0.
     stop=min(float(df.iloc[-1-i]['Low']) for i in range(age+1))
-    confirmed=bool(candle and cl>prev_cl and volume>=.8 and rsi>=50 and stop<hi)
+    confirmed=bool(candle and cl>prev_cl and volume>=.8 and rsi>=50 and stop<hi
+                   and float(bar['SMA 50']) > float(prev['SMA 50']))
     return {
         'signal':'BUY OPPORTUNITY' if confirmed else 'PULLBACK WATCH',
         'sma':f'SMA {n}','candle':candle or 'WAIT CANDLE',
