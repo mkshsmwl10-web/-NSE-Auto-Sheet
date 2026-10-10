@@ -15,7 +15,7 @@ INPUT_SHEET = os.getenv('INPUT_SHEET', 'NIFTY200')
 FINAL_SHEET = os.getenv('FINAL_LIST_SHEET', 'Final List')
 CHART_DIR = Path(os.getenv('CHART_OUTPUT_DIR', 'docs/charts'))
 CHART_BASE = os.getenv('CHART_BASE_URL', 'https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/charts').rstrip('/')
-COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 9','SMA 18','SMA 50','SMA 200','SMA 50 Slope','50 Slope %','SMA 200 Distance %','Vol Ratio','RSI 14','20D Breakout','Score','Pullback Signal','Support SMA','Candle Pattern','Entry Above','Stop Below','Chart Link']
+COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 9','SMA 18','SMA 50','SMA 200','SMA 50 Slope','50 Slope %','SMA 200 Distance %','Vol Ratio','RSI 14','20D Breakout','Score','Support SMA','Candle Pattern','Entry Above','Stop Below','Pullback Signal','Chart Link']
 
 def google_book():
     raw = os.environ.get('GCP_CREDENTIALS','').strip()
@@ -340,13 +340,37 @@ def write_output(book, rows):
         for i in range(0,len(requests),100):
             book.batch_update({'requests':requests[i:i+100]})
     if rows:
-        ws.format(f'Q2:Q{len(rows)+1}', {
+        ws.format(f'T2:T{len(rows)+1}', {
             'backgroundColor':{'red':0.91,'green':0.97,'blue':0.91},
             'textFormat':{'bold':True}
         })
-        ws.format(f'T2:U{len(rows)+1}', {
+        ws.format(f'R2:S{len(rows)+1}', {
             'numberFormat':{'type':'NUMBER','pattern':'0.00'}
         })
+    # Reset previous row colors; give a soft green full-row fill to BUY setups.
+    if rows:
+        color_requests = [{
+            'repeatCell':{
+                'range':{'sheetId':ws.id,'startRowIndex':1,
+                         'endRowIndex':len(rows)+1,
+                         'startColumnIndex':0,'endColumnIndex':len(COLUMNS)},
+                'cell':{'userEnteredFormat':{'backgroundColor':{
+                    'red':1.0,'green':1.0,'blue':1.0}}},
+                'fields':'userEnteredFormat.backgroundColor'
+            }
+        }]
+        for i,row in enumerate(rows, start=1):
+            if row.get('Pullback Signal') == 'BUY OPPORTUNITY':
+                color_requests.append({'repeatCell':{
+                    'range':{'sheetId':ws.id,'startRowIndex':i,
+                             'endRowIndex':i+1,
+                             'startColumnIndex':0,'endColumnIndex':len(COLUMNS)},
+                    'cell':{'userEnteredFormat':{'backgroundColor':{
+                        'red':0.86,'green':0.97,'blue':0.88}}},
+                    'fields':'userEnteredFormat.backgroundColor'
+                }})
+        for start in range(0,len(color_requests),100):
+            book.batch_update({'requests':color_requests[start:start+100]})
     print(f'Final List updated: {len(rows)} qualifying stocks, all ranked, {len(COLUMNS)} columns')
 
 
@@ -361,7 +385,9 @@ def main():
             if result: rows.append(result); print(f'  PASS {code}')
         except Exception as exc: print(f'  ERROR {code}: {exc}')
         if i%50==0: print(f'Processed {i}/{len(stocks)}')
-    rows.sort(key=lambda r: (-r['Score'], -r['50 Slope %'], r['NSE Code']))
+    priority = {'BUY OPPORTUNITY':0, 'PULLBACK WATCH':1, 'NO SETUP':2}
+    rows.sort(key=lambda r:(priority.get(r.get('Pullback Signal'),3),
+                            -r['Score'],-r['50 Slope %'],r['NSE Code']))
     for rank, row in enumerate(rows, 1):
         row['Rank'] = rank
     write_output(book,rows)
