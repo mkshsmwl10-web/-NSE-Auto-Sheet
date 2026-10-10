@@ -15,7 +15,7 @@ INPUT_SHEET = os.getenv('INPUT_SHEET', 'NIFTY200')
 FINAL_SHEET = os.getenv('FINAL_LIST_SHEET', 'Final List')
 CHART_DIR = Path(os.getenv('CHART_OUTPUT_DIR', 'docs/charts'))
 CHART_BASE = os.getenv('CHART_BASE_URL', 'https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/charts').rstrip('/')
-COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 9','SMA 18','SMA 50','SMA 200','SMA 50 Slope','50 Slope %','SMA 200 Distance %','Vol Ratio','RSI 14','20D Breakout','Score','Support SMA','Candle Pattern','Entry Above','Stop Below','RS 1M vs NIFTY %','RS 55D vs NIFTY %','Pullback Signal','Chart Link']
+COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 9','SMA 18','SMA 50','SMA 200','SMA 50 Slope','50 Slope %','SMA 200 Distance %','Vol Ratio','RSI 14','20D Breakout','Score','Support SMA','Candle Pattern','Entry Above','Stop Below','RS 1M vs NIFTY %','RS 55D vs NIFTY %','Cumulative RS','Pullback Signal','Chart Link']
 
 def google_book():
     raw = os.environ.get('GCP_CREDENTIALS','').strip()
@@ -199,6 +199,7 @@ def chart_html(name, code, df, rs_1m=None, rs_55=None, score=None):
     details['rs1m'] = rs_1m
     details['rs55'] = rs_55
     details['score'] = score
+    details['cumulativeRs'] = round(rs_1m + rs_55, 2) if rs_1m is not None and rs_55 is not None else None
     payload = json.dumps({'traces': traces, 'details': details}, separators=(',', ':'))
     title = html.escape(f'{name} ({code}) — Advanced Daily SMA Chart')
     page = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -247,6 +248,7 @@ m('20D Breakout',d.breakout?'YES':'NO',d.breakout?'green':'')+
 m('SMA Alignment',d.alignment?'9 > 18 > 50':'Mixed',d.alignment?'green':'')+
 m('RS 21D vs NIFTY 50',d.rs1m===null?'N/A':((d.rs1m>0?'+':'')+d.rs1m.toFixed(2)+' pp'),d.rs1m===null?'':(d.rs1m>0?'green':'red'))+
 m('RS 55D vs NIFTY 50',d.rs55===null?'N/A':((d.rs55>0?'+':'')+d.rs55.toFixed(2)+' pp'),d.rs55===null?'':(d.rs55>0?'green':'red'))+
+m('Cumulative RS',d.cumulativeRs===null?'N/A':((d.cumulativeRs>0?'+':'')+d.cumulativeRs.toFixed(2)+' pp'),d.cumulativeRs===null?'':(d.cumulativeRs>0?'green':'red'))+
 m('Quality Score',d.score===null?'N/A':d.score.toFixed(2)+'/100')+
 m('Pullback Signal',d.pullback,d.pullback==='BUY OPPORTUNITY'?'green':'')+
 m('Support SMA',d.supportSma||'—')+
@@ -315,7 +317,7 @@ def scan(name,code,nifty_close):
     CHART_DIR.mkdir(parents=True,exist_ok=True)
     filename=re.sub(r'[^A-Za-z0-9_-]','-',code)+'-sma-chart.html'
     (CHART_DIR/filename).write_text(chart_html(name,code,df,rs_1m,rs_55,score),encoding='utf-8')
-    url=f'{CHART_BASE}/{filename}?v=7'
+    url=f'{CHART_BASE}/{filename}?v=8'
     slope_pct = (float(latest['SMA 50'])/float(prev['SMA 50'])-1)*100
     distance_pct = (float(latest['Close'])/float(latest['SMA 200'])-1)*100
     vol_ratio = float(latest['Vol Ratio']) if pd.notna(latest['Vol Ratio']) else 0.0
@@ -338,6 +340,7 @@ def scan(name,code,nifty_close):
             'Stop Below':setup['stop'],
             'RS 1M vs NIFTY %':rs_1m if rs_1m is not None else '',
             'RS 55D vs NIFTY %':rs_55 if rs_55 is not None else '',
+            'Cumulative RS':round(rs_1m + rs_55, 2) if rs_1m is not None and rs_55 is not None else '',
             'Chart Link':url}
 
 def write_output(book, rows):
@@ -353,7 +356,7 @@ def write_output(book, rows):
     ws.clear()
     ws.resize(rows=max(100,len(rows)+2), cols=len(COLUMNS))
     values = [COLUMNS] + [[r.get(c,'') for c in COLUMNS] for r in rows]
-    end_col = 'W'
+    end_col = 'X'
     ws.update(values, range_name=f'A1:{end_col}{len(values)}', value_input_option='RAW')
     ws.freeze(rows=1, cols=3)
     ws.format(f'A1:{end_col}1', {
@@ -382,7 +385,7 @@ def write_output(book, rows):
         for i,row in enumerate(rows,start=2):
             requests.append({'updateCells':{
                 'range':{'sheetId':ws.id,'startRowIndex':i-1,'endRowIndex':i,
-                         'startColumnIndex':22,'endColumnIndex':23},
+                         'startColumnIndex':23,'endColumnIndex':24},
                 'rows':[{'values':[{
                     'userEnteredValue':{'stringValue':'OPEN CHART'},
                     'textFormatRuns':[{'startIndex':0,'format':{
@@ -394,11 +397,11 @@ def write_output(book, rows):
         for i in range(0,len(requests),100):
             book.batch_update({'requests':requests[i:i+100]})
     if rows:
-        ws.format(f'V2:V{len(rows)+1}', {
+        ws.format(f'W2:W{len(rows)+1}', {
             'backgroundColor':{'red':0.91,'green':0.97,'blue':0.91},
             'textFormat':{'bold':True}
         })
-        ws.format(f'T2:U{len(rows)+1}', {
+        ws.format(f'T2:V{len(rows)+1}', {
             'numberFormat':{'type':'NUMBER','pattern':'+0.00;-0.00;0.00'}
         })
         ws.format(f'R2:S{len(rows)+1}', {
@@ -452,9 +455,13 @@ def main():
             if result: rows.append(result); print(f'  PASS {code}')
         except Exception as exc: print(f'  ERROR {code}: {exc}')
         if i%50==0: print(f'Processed {i}/{len(stocks)}')
-    priority = {'BUY OPPORTUNITY':0, 'PULLBACK WATCH':1, 'NO SETUP':2}
-    rows.sort(key=lambda r:(priority.get(r.get('Pullback Signal'),3),
-                            -r['Score'],-r['50 Slope %'],r['NSE Code']))
+    # Pure cumulative RS rank across all stocks; setup is informational only.
+    # Missing RS observations rank last, not as artificially zero strength.
+    rows.sort(key=lambda r: (
+        r['Cumulative RS'] == '',
+        -r['Cumulative RS'] if r['Cumulative RS'] != '' else 0,
+        -r['Score'], r['NSE Code']
+    ))
     for rank, row in enumerate(rows, 1):
         row['Rank'] = rank
     write_output(book,rows)
