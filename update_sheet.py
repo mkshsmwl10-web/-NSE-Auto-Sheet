@@ -15,7 +15,7 @@ INPUT_SHEET = os.getenv('INPUT_SHEET', 'NIFTY200')
 FINAL_SHEET = os.getenv('FINAL_LIST_SHEET', 'Final List')
 CHART_DIR = Path(os.getenv('CHART_OUTPUT_DIR', 'docs/charts'))
 CHART_BASE = os.getenv('CHART_BASE_URL', 'https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/charts').rstrip('/')
-COLUMNS = ['Stock Name','NSE Code','CMP','SMA 9','SMA 18','SMA 50','SMA 200','SMA 50 Slope','Chart Link']
+COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 9','SMA 18','SMA 50','SMA 200','SMA 50 Slope','50 Slope %','SMA 200 Distance %','Vol Ratio','RSI 14','20D Breakout','Score','Chart Link']
 
 def google_book():
     raw = os.environ.get('GCP_CREDENTIALS','').strip()
@@ -88,7 +88,11 @@ def chart_html(name, code, df):
         'slope': round(pct, 4),
         'priceAbove': bool(last['Close'] > last['SMA 200']),
         'support': round(float(window['Low'].min()), 2),
-        'resistance': round(float(window['High'].max()), 2)
+        'resistance': round(float(window['High'].max()), 2),
+        'rsi': round(float(last['RSI 14']), 2) if pd.notna(last['RSI 14']) else None,
+        'volratio': round(float(last['Vol Ratio']), 2) if pd.notna(last['Vol Ratio']) else None,
+        'breakout': bool(last['Close'] > df['High'].iloc[-21:-1].max()),
+        'alignment': bool(last['SMA 9'] > last['SMA 18'] > last['SMA 50'])
     }
     payload = json.dumps({'traces': traces, 'details': details}, separators=(',', ':'))
     title = html.escape(f'{name} ({code}) — Advanced Daily SMA Chart')
@@ -131,7 +135,11 @@ m('SMA 200','₹'+d.sma200.toLocaleString('en-IN'))+
 m('50 SMA slope',d.slope.toFixed(4)+'%',d.slope>0?'green':'red')+
 m('Above SMA 200',d.priceAbove?'YES':'NO',d.priceAbove?'green':'red')+
 m('60-day low','₹'+d.support.toLocaleString('en-IN'))+
-m('60-day high','₹'+d.resistance.toLocaleString('en-IN'));
+m('60-day high','₹'+d.resistance.toLocaleString('en-IN'))+
+m('Volume Ratio',d.volratio===null?'N/A':d.volratio.toFixed(2)+'x')+
+m('RSI 14',d.rsi===null?'N/A':d.rsi.toFixed(1))+
+m('20D Breakout',d.breakout?'YES':'NO',d.breakout?'green':'')+
+m('SMA Alignment',d.alignment?'9 > 18 > 50':'Mixed',d.alignment?'green':'');
 const dates=t[0].x,last=dates[dates.length-1];
 let showLevels=true;
 const shapes=[
@@ -175,40 +183,102 @@ def scan(name,code):
     if df[['Open', 'High', 'Low']].isna().any().any():
         return None
     df['Volume'] = df['Volume'].fillna(0)
-    for n in (9,18,50,200): df[f'SMA {n}']=close.rolling(n,min_periods=n).mean()
+    for n in (9,18,50,200):
+        df[f'SMA {n}'] = close.rolling(n, min_periods=n).mean()
+    delta = close.diff()
+    gain = delta.clip(lower=0).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    loss = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False, min_periods=14).mean()
+    rs = gain / loss.replace(0, float('nan'))
+    df['RSI 14'] = (100 - 100/(1+rs)).fillna(100).where(loss != 0, 100)
+    avg_vol = df['Volume'].shift(1).rolling(20, min_periods=20).mean()
+    df['Vol Ratio'] = df['Volume'] / avg_vol.replace(0, float('nan'))
+
     latest=df.iloc[-1]; prev=df.iloc[-2]
     if pd.isna(latest['SMA 200']) or pd.isna(prev['SMA 50']): return None
     if not (latest['Close']>latest['SMA 200'] and latest['SMA 50']>prev['SMA 50']): return None
     CHART_DIR.mkdir(parents=True,exist_ok=True)
     filename=re.sub(r'[^A-Za-z0-9_-]','-',code)+'-sma-chart.html'
     (CHART_DIR/filename).write_text(chart_html(name,code,df),encoding='utf-8')
-    url=f'{CHART_BASE}/{filename}?v=3'
+    url=f'{CHART_BASE}/{filename}?v=4'
+    slope_pct = (float(latest['SMA 50'])/float(prev['SMA 50'])-1)*100
+    distance_pct = (float(latest['Close'])/float(latest['SMA 200'])-1)*100
+    vol_ratio = float(latest['Vol Ratio']) if pd.notna(latest['Vol Ratio']) else 0.0
+    rsi = float(latest['RSI 14']) if pd.notna(latest['RSI 14']) else 50.0
+    alignment = bool(latest['SMA 9'] > latest['SMA 18'] > latest['SMA 50'])
+    breakout = bool(latest['Close'] > df['High'].iloc[-21:-1].max())
+    # Transparent 100-point score: slope 40, alignment 25, volume 20, RSI 15.
+    # Slope: 0.5% daily = full 40; volume: 2x prior 20 days = full 20.
+    slope_points = min(max(slope_pct / 0.5, 0), 1) * 40
+    align_points = 25 if alignment else 0
+    volume_points = min(max(vol_ratio/2, 0), 1) * 20
+    rsi_points = min(max((rsi-40)/30, 0), 1) * 15
+    score = round(slope_points + align_points + volume_points + rsi_points, 2)
     return {'Stock Name':name,'NSE Code':code,'CMP':round(float(latest['Close']),2),
             'SMA 9':round(float(latest['SMA 9']),2),'SMA 18':round(float(latest['SMA 18']),2),
             'SMA 50':round(float(latest['SMA 50']),2),'SMA 200':round(float(latest['SMA 200']),2),
-            'SMA 50 Slope':'UP','Chart Link':url}
+            'SMA 50 Slope':'UP',
+            '50 Slope %':round(slope_pct,4),
+            'SMA 200 Distance %':round(distance_pct,2),
+            'Vol Ratio':round(vol_ratio,2),
+            'RSI 14':round(rsi,2),
+            '20D Breakout':'YES' if breakout else 'NO',
+            'Score':score,'Chart Link':url}
 
-def write_output(book,rows):
-    try: ws=book.worksheet(FINAL_SHEET)
-    except gspread.WorksheetNotFound: ws=book.add_worksheet(title=FINAL_SHEET,rows=1000,cols=len(COLUMNS))
-    # Old merged cells and old columns must not survive schema migration.
+def write_output(book, rows):
+    """Keep ALL qualifying stocks, sorted by score and ranked 1..N."""
+    try:
+        ws = book.worksheet(FINAL_SHEET)
+    except gspread.WorksheetNotFound:
+        ws = book.add_worksheet(title=FINAL_SHEET, rows=1000, cols=len(COLUMNS))
     try:
         book.batch_update({'requests':[{'unmergeCells':{'range':{'sheetId':ws.id}}}]})
-    except Exception as exc: print('Unmerge warning:',exc)
+    except Exception as exc:
+        print('Unmerge warning:', exc)
     ws.clear()
-    ws.resize(rows=max(100,len(rows)+2),cols=len(COLUMNS))
-    values=[COLUMNS]+[[r.get(c,'') for c in COLUMNS] for r in rows]
-    ws.update(values,range_name=f'A1:I{len(values)}',value_input_option='RAW')
-    ws.freeze(rows=1,cols=2)
-    ws.format('A1:I1',{'backgroundColor':{'red':0.82,'green':0.91,'blue':0.98},'textFormat':{'bold':True,'fontSize':10},'horizontalAlignment':'CENTER','wrapStrategy':'WRAP'})
+    ws.resize(rows=max(100,len(rows)+2), cols=len(COLUMNS))
+    values = [COLUMNS] + [[r.get(c,'') for c in COLUMNS] for r in rows]
+    end_col = 'P'
+    ws.update(values, range_name=f'A1:{end_col}{len(values)}', value_input_option='RAW')
+    ws.freeze(rows=1, cols=3)
+    ws.format(f'A1:{end_col}1', {
+        'backgroundColor':{'red':0.80,'green':0.90,'blue':0.99},
+        'textFormat':{'bold':True,'fontSize':10},
+        'horizontalAlignment':'CENTER','wrapStrategy':'WRAP'
+    })
     if rows:
-        ws.format(f'C2:G{len(values)}',{'numberFormat':{'type':'NUMBER','pattern':'0.00'},'horizontalAlignment':'RIGHT'})
-        ws.format(f'H2:H{len(values)}',{'backgroundColor':{'red':0.85,'green':0.96,'blue':0.87},'textFormat':{'bold':True}})
-        requests=[]
-        for i,r in enumerate(rows,2):
-            requests.append({'updateCells':{'range':{'sheetId':ws.id,'startRowIndex':i-1,'endRowIndex':i,'startColumnIndex':8,'endColumnIndex':9},'rows':[{'values':[{'userEnteredValue':{'stringValue':'OPEN CHART'},'textFormatRuns':[{'startIndex':0,'format':{'link':{'uri':r['Chart Link']},'underline':True}}]}]}],'fields':'userEnteredValue,textFormatRuns'}})
-        for i in range(0,len(requests),100): book.batch_update({'requests':requests[i:i+100]})
-    print(f'Final List updated: {len(rows)} qualifying stocks; 9 columns')
+        last_row = len(values)
+        ws.format(f'D2:K{last_row}',{
+            'numberFormat':{'type':'NUMBER','pattern':'0.00'}
+        })
+        ws.format(f'M2:M{last_row}',{
+            'numberFormat':{'type':'NUMBER','pattern':'0.00'}
+        })
+        ws.format(f'O2:O{last_row}',{
+            'backgroundColor':{'red':0.88,'green':0.96,'blue':0.88},
+            'textFormat':{'bold':True},
+            'numberFormat':{'type':'NUMBER','pattern':'0.00'}
+        })
+        ws.format(f'A2:A{last_row}',{
+            'backgroundColor':{'red':0.9,'green':0.94,'blue':1.0},
+            'textFormat':{'bold':True}
+        })
+        requests = []
+        for i,row in enumerate(rows,start=2):
+            requests.append({'updateCells':{
+                'range':{'sheetId':ws.id,'startRowIndex':i-1,'endRowIndex':i,
+                         'startColumnIndex':15,'endColumnIndex':16},
+                'rows':[{'values':[{
+                    'userEnteredValue':{'stringValue':'OPEN CHART'},
+                    'textFormatRuns':[{'startIndex':0,'format':{
+                        'link':{'uri':row['Chart Link']},'underline':True
+                    }}]
+                }]}],
+                'fields':'userEnteredValue,textFormatRuns'
+            }})
+        for i in range(0,len(requests),100):
+            book.batch_update({'requests':requests[i:i+100]})
+    print(f'Final List updated: {len(rows)} qualifying stocks, all ranked, {len(COLUMNS)} columns')
+
 
 def main():
     book=google_book()
@@ -221,7 +291,9 @@ def main():
             if result: rows.append(result); print(f'  PASS {code}')
         except Exception as exc: print(f'  ERROR {code}: {exc}')
         if i%50==0: print(f'Processed {i}/{len(stocks)}')
-    rows.sort(key=lambda r:(-(r['CMP']/r['SMA 200']-1),r['NSE Code']))
+    rows.sort(key=lambda r: (-r['Score'], -r['50 Slope %'], r['NSE Code']))
+    for rank, row in enumerate(rows, 1):
+        row['Rank'] = rank
     write_output(book,rows)
     print('Charts generated in',CHART_DIR,'— ensure workflow publishes docs/charts to GitHub Pages.')
 
