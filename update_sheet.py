@@ -45,16 +45,123 @@ def get_stocks(book):
     return stocks
 
 def chart_html(name, code, df):
-    # Plotly CDN is loaded when the chart is opened in a browser.
-    # A single source of SMA calculations is used by sheet and chart.
-    last=df.tail(320).copy()
-    x=[d.strftime('%Y-%m-%d') for d in last.index]
-    traces=[]
-    for col,color,width in [('Close','#334155',2),('SMA 9','#f59e0b',1.8),('SMA 18','#8b5cf6',1.8),('SMA 50','#16a34a',2.4),('SMA 200','#dc2626',2.4)]:
-        vals=[None if pd.isna(v) else round(float(v),3) for v in last[col]]
-        traces.append({'x':x,'y':vals,'name':col,'type':'scatter','mode':'lines','line':{'color':color,'width':width}})
-    title=html.escape(f'{name} ({code}) — Daily SMA Chart')
-    return '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'''+title+'''</title><script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script><style>body{font-family:Arial,sans-serif;margin:0;background:#f8fafc;color:#0f172a}.wrap{max-width:1400px;margin:auto;padding:18px}#chart{height:75vh;min-height:460px;background:white;border-radius:12px}.note{color:#475569}</style></head><body><div class="wrap"><h2>'''+title+'''</h2><p class="note">Daily close with SMA 9 (amber), SMA 18 (purple), SMA 50 (green), SMA 200 (red).</p><div id="chart"></div></div><script>const traces='''+json.dumps(traces,separators=(',',':'))+''';Plotly.newPlot('chart',traces,{hovermode:'x unified',legend:{orientation:'h'},xaxis:{rangeslider:{visible:true}},yaxis:{title:'Price (INR)'},margin:{l:65,r:25,t:30,b:55},paper_bgcolor:'#fff',plot_bgcolor:'#fff'},{responsive:true,displaylogo:false});</script></body></html>'''
+    """Daily candlestick, SMA overlay and volume with responsive time-range buttons."""
+    shown = df.tail(320)
+    dates = [d.strftime('%Y-%m-%d') for d in shown.index]
+    def numbers(col):
+        return [None if pd.isna(v) else round(float(v), 3) for v in shown[col]]
+    traces = [{
+        'type': 'candlestick', 'name': 'Candles', 'x': dates,
+        'open': numbers('Open'), 'high': numbers('High'),
+        'low': numbers('Low'), 'close': numbers('Close'),
+        'increasing': {'line': {'color': '#16a34a'}},
+        'decreasing': {'line': {'color': '#dc2626'}},
+        'xaxis': 'x', 'yaxis': 'y'
+    }]
+    for col, color, width in [
+        ('SMA 9', '#f59e0b', 1.8),
+        ('SMA 18', '#8b5cf6', 1.8),
+        ('SMA 50', '#16a34a', 2.5),
+        ('SMA 200', '#dc2626', 2.5)
+    ]:
+        traces.append({
+            'type': 'scatter', 'mode': 'lines',
+            'name': col + ' (' + format(float(df[col].iloc[-1]), ',.2f') + ')',
+            'x': dates, 'y': numbers(col),
+            'line': {'color': color, 'width': width}, 'xaxis': 'x', 'yaxis': 'y'
+        })
+    colors = ['#86efac' if c >= o else '#fca5a5'
+              for o, c in zip(shown['Open'], shown['Close'])]
+    traces.append({
+        'type': 'bar', 'name': 'Volume', 'x': dates,
+        'y': numbers('Volume'), 'marker': {'color': colors},
+        'xaxis': 'x2', 'yaxis': 'y2'
+    })
+    last = df.iloc[-1]
+    previous = df.iloc[-2]
+    pct = (float(last['SMA 50']) / float(previous['SMA 50']) - 1) * 100
+    window = df.iloc[-61:-1]
+    details = {
+        'cmp': round(float(last['Close']), 2),
+        'sma50': round(float(last['SMA 50']), 2),
+        'sma200': round(float(last['SMA 200']), 2),
+        'slope': round(pct, 4),
+        'priceAbove': bool(last['Close'] > last['SMA 200']),
+        'support': round(float(window['Low'].min()), 2),
+        'resistance': round(float(window['High'].max()), 2)
+    }
+    payload = json.dumps({'traces': traces, 'details': details}, separators=(',', ':'))
+    title = html.escape(f'{name} ({code}) — Advanced Daily SMA Chart')
+    page = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>__TITLE__</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+body{font:14px system-ui,sans-serif;background:#f1f5f9;color:#172033;margin:0}
+main{max-width:1550px;margin:auto;padding:18px}
+h1{font-size:24px}p{color:#64748b}
+#metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:18px 0}
+.metric{background:white;border-radius:12px;padding:12px;border:1px solid #e2e8f0}
+.metric small{display:block;color:#64748b;margin-bottom:5px}.metric strong{font-size:19px}
+.green{color:#15803d}.red{color:#b91c1c}
+.controls{display:flex;flex-wrap:wrap;gap:9px;margin:10px 0}
+button{background:white;border:1px solid #cbd5e1;border-radius:9px;padding:9px 13px;cursor:pointer}
+button.sel{border-color:#2563eb;background:#dbeafe}
+#plot{height:75vh;min-height:550px;background:white;border-radius:12px}
+.note{font-size:12px;line-height:1.5}
+</style></head><body><main><h1>__TITLE__</h1>
+<p>Daily candles • SMA 9 orange • SMA 18 purple • SMA 50 green • SMA 200 red • Volume</p>
+<div id="metrics"></div>
+<div class="controls">
+<button onclick="range(63,this)">3 months</button>
+<button onclick="range(126,this)" class="sel">6 months</button>
+<button onclick="range(252,this)">1 year</button>
+<button onclick="range(320,this)">All</button>
+<button onclick="levels(this)" class="sel">Support / Resistance</button>
+</div><div id="plot"></div>
+<p class="note">Support and resistance are indicative previous-60-session low/high. Not live buy/exit levels or broker orders. SMA slope is based on the latest two daily SMA50 values.</p>
+</main><script>
+const data=__DATA__;
+const t=data.traces,d=data.details;
+const m=(name,value,style='')=>'<div class="metric"><small>'+name+'</small><strong class="'+style+'">'+value+'</strong></div>';
+document.getElementById('metrics').innerHTML=
+m('Latest close','₹'+d.cmp.toLocaleString('en-IN'))+
+m('SMA 50','₹'+d.sma50.toLocaleString('en-IN'))+
+m('SMA 200','₹'+d.sma200.toLocaleString('en-IN'))+
+m('50 SMA slope',d.slope.toFixed(4)+'%',d.slope>0?'green':'red')+
+m('Above SMA 200',d.priceAbove?'YES':'NO',d.priceAbove?'green':'red')+
+m('60-day low','₹'+d.support.toLocaleString('en-IN'))+
+m('60-day high','₹'+d.resistance.toLocaleString('en-IN'));
+const dates=t[0].x,last=dates[dates.length-1];
+let showLevels=true;
+const shapes=[
+{type:'line',xref:'x',x0:dates[0],x1:last,yref:'y',y0:d.support,y1:d.support,line:{color:'#0891b2',dash:'dot',width:1.5}},
+{type:'line',xref:'x',x0:dates[0],x1:last,yref:'y',y0:d.resistance,y1:d.resistance,line:{color:'#ea580c',dash:'dot',width:1.5}}
+];
+const layout={
+margin:{l:70,r:30,t:55,b:45},paper_bgcolor:'#fff',plot_bgcolor:'#fff',
+hovermode:'x unified',legend:{orientation:'h',y:1.09,x:0},
+xaxis:{type:'date',domain:[0,1],anchor:'y',rangeslider:{visible:false},rangebreaks:[{bounds:['sat','mon']}],range:[dates[Math.max(0,dates.length-126)],last]},
+yaxis:{domain:[.28,1],title:'Price (INR)',gridcolor:'#e2e8f0'},
+xaxis2:{type:'date',domain:[0,1],anchor:'y2',matches:'x',rangebreaks:[{bounds:['sat','mon']}]},
+yaxis2:{domain:[0,.21],title:'Volume',rangemode:'tozero',gridcolor:'#f1f5f9'},
+shapes:shapes,dragmode:'zoom'
+};
+function range(n,btn){
+const from=dates[Math.max(0,dates.length-n)];
+Plotly.relayout('plot',{'xaxis.range':[from,last]});
+document.querySelectorAll('.controls button:nth-child(-n+4)').forEach(b=>b.classList.remove('sel'));
+btn.classList.add('sel');
+}
+function levels(btn){
+showLevels=!showLevels;Plotly.relayout('plot',{shapes:showLevels?shapes:[]});
+btn.classList.toggle('sel',showLevels);
+}
+if(window.Plotly) Plotly.newPlot('plot',t,layout,{responsive:true,displaylogo:false,scrollZoom:true});
+else document.getElementById('plot').textContent='Plotly CDN unavailable. Check your connection.';
+</script></body></html>"""
+    return page.replace('__TITLE__', title).replace('__DATA__', payload)
+
 
 def scan(name,code):
     raw=yf.Ticker(code+'.NS').history(period='3y',interval='1d',auto_adjust=False,actions=False)
@@ -63,6 +170,11 @@ def scan(name,code):
     if len(close)<202: return None
     df=pd.DataFrame(index=close.index)
     df['Close']=close
+    for field in ('Open', 'High', 'Low', 'Volume'):
+        df[field] = pd.to_numeric(raw[field], errors='coerce').reindex(df.index)
+    if df[['Open', 'High', 'Low']].isna().any().any():
+        return None
+    df['Volume'] = df['Volume'].fillna(0)
     for n in (9,18,50,200): df[f'SMA {n}']=close.rolling(n,min_periods=n).mean()
     latest=df.iloc[-1]; prev=df.iloc[-2]
     if pd.isna(latest['SMA 200']) or pd.isna(prev['SMA 50']): return None
@@ -70,7 +182,7 @@ def scan(name,code):
     CHART_DIR.mkdir(parents=True,exist_ok=True)
     filename=re.sub(r'[^A-Za-z0-9_-]','-',code)+'-sma-chart.html'
     (CHART_DIR/filename).write_text(chart_html(name,code,df),encoding='utf-8')
-    url=f'{CHART_BASE}/{filename}?v=1'
+    url=f'{CHART_BASE}/{filename}?v=3'
     return {'Stock Name':name,'NSE Code':code,'CMP':round(float(latest['Close']),2),
             'SMA 9':round(float(latest['SMA 9']),2),'SMA 18':round(float(latest['SMA 18']),2),
             'SMA 50':round(float(latest['SMA 50']),2),'SMA 200':round(float(latest['SMA 200']),2),
