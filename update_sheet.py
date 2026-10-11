@@ -455,12 +455,15 @@ def main():
             if result: rows.append(result); print(f'  PASS {code}')
         except Exception as exc: print(f'  ERROR {code}: {exc}')
         if i%50==0: print(f'Processed {i}/{len(stocks)}')
-    # Favor stocks no more than 10% above SMA200. Extended stocks remain
-    # visible, but can never outrank the <=10% group.
-    # Within each group cumulative 21D + 55D RS controls rank.
-    # Missing RS observations rank last within their distance group.
+    # Ranking priorities:
+    # 1) Close within 10% above SMA200; extended stocks come afterward.
+    # 2) Rising SMA50 within each distance group (DOWN cannot take rank 1
+    #    while an eligible UP-slope stock exists in the <=10% group).
+    # 3) Highest cumulative NIFTY-relative strength (21D + 55D).
+    # Missing RS values rank last within their respective trend group.
     rows.sort(key=lambda r: (
         r['SMA 200 Distance %'] > 10.0,
+        r['SMA 50 Slope'] != 'UP',
         r['Cumulative RS'] == '',
         -r['Cumulative RS'] if r['Cumulative RS'] != '' else 0,
         -r['Score'], r['NSE Code']
