@@ -15,7 +15,7 @@ INPUT_SHEET = os.getenv('INPUT_SHEET', 'NIFTY200')
 FINAL_SHEET = os.getenv('FINAL_LIST_SHEET', 'Final List')
 CHART_DIR = Path(os.getenv('CHART_OUTPUT_DIR', 'docs/charts'))
 CHART_BASE = os.getenv('CHART_BASE_URL', 'https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/charts').rstrip('/')
-COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 50','SMA 200','SMA 50 Slope','SMA 200 Distance %','RS 1M vs NIFTY %','RS 55D vs NIFTY %','Cumulative RS','Score','ST Trend','Supertrend 10,3','Entry Above','Stop Below','Supertrend Signal','Chart Link']
+COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 50','SMA 200','SMA 50 Slope','SMA 200 Distance %','RS 1M vs NIFTY %','RS 55D vs NIFTY %','Cumulative RS','Score','ST Trend','Supertrend 10,3','BUY Level','Stop Below','Supertrend Signal','Chart Link']
 
 def google_book():
     raw = os.environ.get('GCP_CREDENTIALS','').strip()
@@ -85,6 +85,21 @@ def supertrend_setup(df, atr_period=10, multiplier=3.0):
     # Every stock currently in an UP Supertrend receives BUY status.
     # All scan results are already restricted to Close > SMA200.
     buy=bool(bullish[-1] and float(close.iloc[-1])>float(df['SMA 200'].iloc[-1]))
+    # Highest candle HIGH throughout the active green Supertrend run,
+    # starting with the latest red-to-green flip candle (inclusive).
+    # A green run may last one day or many days.
+    buy_level = ''
+    buy_high_date = ''
+    green_start_date = ''
+    if buy:
+        green_start=len(df)-1
+        while green_start>start+1 and bullish[green_start-1]:
+            green_start-=1
+        active_high=high.iloc[green_start:]
+        highest_index=int(active_high.to_numpy().argmax())+green_start
+        buy_level=round(float(high.iloc[highest_index]),2)
+        buy_high_date=str(df.index[highest_index].date())
+        green_start_date=str(df.index[green_start].date())
     # Historical chart lines use exactly the same bands and trend states
     # as the latest signal. None breaks the line when trend changes.
     history_up=[round(float(final_lower.iloc[i]),3) if bullish[i] and i>start
@@ -93,9 +108,10 @@ def supertrend_setup(df, atr_period=10, multiplier=3.0):
                   else None for i in range(len(df))]
     return {'signal':'BUY' if buy else '',
             'trend':trend,'line':round(value,2),
-            'entry':round(float(high.iloc[-1]),2) if buy else '',
+            'entry':buy_level,
             'stop':round(float(df['SMA 200'].iloc[-1])*0.95,2) if buy else '',
-            'date':str(df.index[-1].date()) if buy else '',
+            'date':buy_high_date,
+            'green_start_date':green_start_date,
             'history_up':history_up,'history_down':history_down}
 
 
@@ -210,13 +226,24 @@ def chart_html(name, code, df, rs_1m=None, rs_55=None, score=None, st=None):
         'alignment': bool(last['SMA 9'] > last['SMA 18'] > last['SMA 50'])
     }
     details.update({'stSignal':setup['signal'],'stTrend':setup['trend'],
-                    'stLine':setup['line'],'entry':setup['entry'],'stop':setup['stop']})
+                    'stLine':setup['line'],'entry':setup['entry'],'stop':setup['stop'],
+                    'greenStartDate':setup['green_start_date'],'buyHighDate':setup['date']})
     if setup['signal']=='BUY':
+        # Mark the candle that set the current green-streak high.
+        if setup['date'] in dates:
+            traces.append({
+                'type':'scatter','mode':'markers+text','name':'BUY Level High',
+                'x':[setup['date']],'y':[setup['entry']],
+                'text':['BUY ₹'+format(setup['entry'],',.2f')],
+                'textposition':'top center',
+                'marker':{'color':'#0f766e','size':13,'symbol':'diamond'},
+                'xaxis':'x','yaxis':'y'
+            })
+        # Persistent horizontal BUY breakout level across the visible chart.
         traces.append({
-            'type':'scatter','mode':'markers+text','name':'Supertrend BUY',
-            'x':[setup['date']],'y':[setup['entry']],
-            'text':['BUY (ST UP)'],'textposition':'top center',
-            'marker':{'color':'#16a34a','size':16,'symbol':'triangle-up'},
+            'type':'scatter','mode':'lines','name':'BUY Level ₹'+format(setup['entry'],',.2f'),
+            'x':[dates[0],dates[-1]],'y':[setup['entry'],setup['entry']],
+            'line':{'color':'#0f766e','width':2.5,'dash':'dash'},
             'xaxis':'x','yaxis':'y'
         })
     details['rs1m'] = rs_1m
@@ -252,7 +279,7 @@ button.sel{border-color:#2563eb;background:#dbeafe}
 <button onclick="range(320,this)">All</button>
 <button onclick="levels(this)" class="sel">Support / Resistance</button>
 </div><div id="plot"></div>
-<p class="note">Supertrend BUY means the current daily (10,3) trend is UP, not necessarily a new reversal today. DOWN-trend stocks are listed after UP-trend stocks in the sheet; no SELL signals are shown. Entry above latest candle high and SL at 95% of SMA200 are indicative, not broker orders. 60-session support/resistance are informational.</p>
+<p class="note">Supertrend BUY means the current daily (10,3) trend is UP, not necessarily a new reversal today. DOWN-trend stocks are listed after UP-trend stocks in the sheet; no SELL signals are shown. BUY Level is the highest candle high since the latest red-to-green Supertrend flip (including flip day), not just today's high. SL at 95% of SMA200 is indicative, not a broker order. 60-session support/resistance are informational.</p>
 </main><script>
 const data=__DATA__;
 const t=data.traces,d=data.details;
@@ -275,7 +302,9 @@ m('Quality Score',d.score===null?'N/A':d.score.toFixed(2)+'/100')+
 m('Supertrend Signal',d.stSignal||'—',d.stSignal==='BUY'?'green':'')+
 m('Supertrend Trend',d.stTrend,d.stTrend==='UP'?'green':'red')+
 m('Supertrend (10,3)',d.stLine===null?'N/A':'₹'+d.stLine.toLocaleString('en-IN'))+
-m('Entry trigger',d.entry?'Above ₹'+d.entry:'—')+
+m('BUY Level (green-run high)',d.entry?'Above ₹'+d.entry:'—')+
+m('Green trend began',d.greenStartDate||'—')+
+m('Highest high date',d.buyHighDate||'—')+
 m('SL (SMA200 - 5%)',d.stop?'₹'+d.stop:'—');
 const dates=t[0].x,last=dates[dates.length-1];
 let showLevels=true;
@@ -340,7 +369,7 @@ def scan(name,code,nifty_close):
     CHART_DIR.mkdir(parents=True,exist_ok=True)
     filename=re.sub(r'[^A-Za-z0-9_-]','-',code)+'-sma-chart.html'
     (CHART_DIR/filename).write_text(chart_html(name,code,df,rs_1m,rs_55,score,setup),encoding='utf-8')
-    url=f'{CHART_BASE}/{filename}?v=11'
+    url=f'{CHART_BASE}/{filename}?v=12'
     slope_pct = (float(latest['SMA 50'])/float(prev['SMA 50'])-1)*100
     distance_pct = (float(latest['Close'])/float(latest['SMA 200'])-1)*100
     vol_ratio = float(latest['Vol Ratio']) if pd.notna(latest['Vol Ratio']) else 0.0
@@ -359,7 +388,7 @@ def scan(name,code,nifty_close):
             'Score':score,
             'Supertrend Signal':setup['signal'],
             'Supertrend 10,3':setup['line'] if setup['line'] is not None else '',
-            'ST Trend':setup['trend'],'Entry Above':setup['entry'],
+            'ST Trend':setup['trend'],'BUY Level':setup['entry'],
             'Stop Below':setup['stop'],
             'RS 1M vs NIFTY %':rs_1m if rs_1m is not None else '',
             'RS 55D vs NIFTY %':rs_55 if rs_55 is not None else '',
