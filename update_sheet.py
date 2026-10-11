@@ -15,7 +15,7 @@ INPUT_SHEET = os.getenv('INPUT_SHEET', 'NIFTY200')
 FINAL_SHEET = os.getenv('FINAL_LIST_SHEET', 'Final List')
 CHART_DIR = Path(os.getenv('CHART_OUTPUT_DIR', 'docs/charts'))
 CHART_BASE = os.getenv('CHART_BASE_URL', 'https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/charts').rstrip('/')
-COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 50','SMA 200','SMA 50 Slope','SMA 200 Distance %','RS 1M vs NIFTY %','RS 55D vs NIFTY %','Cumulative RS','Score','ST Trend','Supertrend 10,3','BUY Level','Stop Below','Supertrend Signal','Chart Link']
+COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 50','SMA 200','SMA 50 Slope','SMA 200 Distance %','RS 1M vs NIFTY %','RS 55D vs NIFTY %','Cumulative RS','Score','ST Trend','Supertrend 10,3','BUY Level','Stop Below','Supertrend Signal','BUY Status','Chart Link']
 
 def google_book():
     raw = os.environ.get('GCP_CREDENTIALS','').strip()
@@ -91,6 +91,8 @@ def supertrend_setup(df, atr_period=10, multiplier=3.0):
     buy_level = ''
     buy_high_date = ''
     green_start_date = ''
+    buy_status = ''
+    prior_high = ''
     if buy:
         green_start=len(df)-1
         while green_start>start+1 and bullish[green_start-1]:
@@ -100,6 +102,11 @@ def supertrend_setup(df, atr_period=10, multiplier=3.0):
         buy_level=round(float(high.iloc[highest_index]),2)
         buy_high_date=str(df.index[highest_index].date())
         green_start_date=str(df.index[green_start].date())
+        if green_start < len(df)-1:
+            prior_high=float(high.iloc[green_start:-1].max())
+            buy_status='BREAKOUT' if float(close.iloc[-1])>prior_high else 'WAIT BREAKOUT'
+        else:
+            buy_status='WAIT BREAKOUT'
     # Historical chart lines use exactly the same bands and trend states
     # as the latest signal. None breaks the line when trend changes.
     history_up=[round(float(final_lower.iloc[i]),3) if bullish[i] and i>start
@@ -112,6 +119,7 @@ def supertrend_setup(df, atr_period=10, multiplier=3.0):
             'stop':round(float(df['SMA 200'].iloc[-1])*0.95,2) if buy else '',
             'date':buy_high_date,
             'green_start_date':green_start_date,
+            'buy_status':buy_status,'prior_high':round(prior_high,2) if prior_high != '' else '',
             'history_up':history_up,'history_down':history_down}
 
 
@@ -227,7 +235,8 @@ def chart_html(name, code, df, rs_1m=None, rs_55=None, score=None, st=None):
     }
     details.update({'stSignal':setup['signal'],'stTrend':setup['trend'],
                     'stLine':setup['line'],'entry':setup['entry'],'stop':setup['stop'],
-                    'greenStartDate':setup['green_start_date'],'buyHighDate':setup['date']})
+                    'greenStartDate':setup['green_start_date'],'buyHighDate':setup['date'],
+                    'buyStatus':setup['buy_status'],'priorHigh':setup['prior_high']})
     if setup['signal']=='BUY':
         # Mark the candle that set the current green-streak high.
         if setup['date'] in dates:
@@ -303,6 +312,7 @@ m('Supertrend Signal',d.stSignal||'—',d.stSignal==='BUY'?'green':'')+
 m('Supertrend Trend',d.stTrend,d.stTrend==='UP'?'green':'red')+
 m('Supertrend (10,3)',d.stLine===null?'N/A':'₹'+d.stLine.toLocaleString('en-IN'))+
 m('BUY Level (green-run high)',d.entry?'Above ₹'+d.entry:'—')+
+m('BUY Status',d.buyStatus||'—',d.buyStatus==='BREAKOUT'?'green':'')+
 m('Green trend began',d.greenStartDate||'—')+
 m('Highest high date',d.buyHighDate||'—')+
 m('SL (SMA200 - 5%)',d.stop?'₹'+d.stop:'—');
@@ -369,7 +379,7 @@ def scan(name,code,nifty_close):
     CHART_DIR.mkdir(parents=True,exist_ok=True)
     filename=re.sub(r'[^A-Za-z0-9_-]','-',code)+'-sma-chart.html'
     (CHART_DIR/filename).write_text(chart_html(name,code,df,rs_1m,rs_55,score,setup),encoding='utf-8')
-    url=f'{CHART_BASE}/{filename}?v=12'
+    url=f'{CHART_BASE}/{filename}?v=13'
     slope_pct = (float(latest['SMA 50'])/float(prev['SMA 50'])-1)*100
     distance_pct = (float(latest['Close'])/float(latest['SMA 200'])-1)*100
     vol_ratio = float(latest['Vol Ratio']) if pd.notna(latest['Vol Ratio']) else 0.0
@@ -389,7 +399,7 @@ def scan(name,code,nifty_close):
             'Supertrend Signal':setup['signal'],
             'Supertrend 10,3':setup['line'] if setup['line'] is not None else '',
             'ST Trend':setup['trend'],'BUY Level':setup['entry'],
-            'Stop Below':setup['stop'],
+            'Stop Below':setup['stop'],'BUY Status':setup['buy_status'],
             'RS 1M vs NIFTY %':rs_1m if rs_1m is not None else '',
             'RS 55D vs NIFTY %':rs_55 if rs_55 is not None else '',
             'Cumulative RS':round(rs_1m + rs_55, 2) if rs_1m is not None and rs_55 is not None else '',
@@ -408,7 +418,7 @@ def write_output(book, rows):
     ws.clear()
     ws.resize(rows=max(100,len(rows)+2), cols=len(COLUMNS))
     values=[COLUMNS]+[[row.get(c,'') for c in COLUMNS] for row in rows]
-    end_col='R'
+    end_col='S'
     ws.update(values, range_name=f'A1:{end_col}{len(values)}', value_input_option='RAW')
     ws.freeze(rows=1, cols=3)
     ws.format(f'A1:{end_col}1',{
@@ -434,7 +444,7 @@ def write_output(book, rows):
         for i,row in enumerate(rows,start=2):
             chart_requests.append({'updateCells':{
                 'range':{'sheetId':ws.id,'startRowIndex':i-1,'endRowIndex':i,
-                         'startColumnIndex':17,'endColumnIndex':18},
+                         'startColumnIndex':18,'endColumnIndex':19},
                 'rows':[{'values':[{
                     'userEnteredValue':{'stringValue':'OPEN CHART'},
                     'textFormatRuns':[{'startIndex':0,'format':{
@@ -451,7 +461,7 @@ def write_output(book, rows):
             book.batch_update({'requests':chart_requests[start:start+100]})
         for start in range(0,len(colors),100):
             book.batch_update({'requests':colors[start:start+100]})
-        ws.format(f'Q2:Q{last_row}',{'textFormat':{'bold':True}})
+        ws.format(f'Q2:R{last_row}',{'textFormat':{'bold':True}})
     print(f'Final List updated: {len(rows)} qualifying stocks, {len(COLUMNS)} columns')
 
 
