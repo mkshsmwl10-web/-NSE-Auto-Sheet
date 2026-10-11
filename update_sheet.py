@@ -15,7 +15,7 @@ INPUT_SHEET = os.getenv('INPUT_SHEET', 'NIFTY200')
 FINAL_SHEET = os.getenv('FINAL_LIST_SHEET', 'Final List')
 CHART_DIR = Path(os.getenv('CHART_OUTPUT_DIR', 'docs/charts'))
 CHART_BASE = os.getenv('CHART_BASE_URL', 'https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/charts').rstrip('/')
-COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 9','SMA 18','SMA 50','SMA 200','SMA 50 Slope','50 Slope %','SMA 200 Distance %','Vol Ratio','RSI 14','20D Breakout','Score','Supertrend 10,3','ST Trend','Entry Above','Stop Below','RS 1M vs NIFTY %','RS 55D vs NIFTY %','Cumulative RS','Supertrend Signal','Chart Link']
+COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 50','SMA 200','SMA 50 Slope','SMA 200 Distance %','RS 1M vs NIFTY %','RS 55D vs NIFTY %','Cumulative RS','Score','ST Trend','Supertrend 10,3','Entry Above','Stop Below','Supertrend Signal','Chart Link']
 
 def google_book():
     raw = os.environ.get('GCP_CREDENTIALS','').strip()
@@ -350,7 +350,7 @@ def scan(name,code,nifty_close):
             'Chart Link':url}
 
 def write_output(book, rows):
-    """Keep ALL qualifying stocks, sorted by score and ranked 1..N."""
+    """Write compact 18-column Final List; preserve signals and rank."""
     try:
         ws = book.worksheet(FINAL_SHEET)
     except gspread.WorksheetNotFound:
@@ -361,84 +361,53 @@ def write_output(book, rows):
         print('Unmerge warning:', exc)
     ws.clear()
     ws.resize(rows=max(100,len(rows)+2), cols=len(COLUMNS))
-    values = [COLUMNS] + [[r.get(c,'') for c in COLUMNS] for r in rows]
-    end_col = 'X'
+    values=[COLUMNS]+[[row.get(c,'') for c in COLUMNS] for row in rows]
+    end_col='R'
     ws.update(values, range_name=f'A1:{end_col}{len(values)}', value_input_option='RAW')
     ws.freeze(rows=1, cols=3)
-    ws.format(f'A1:{end_col}1', {
+    ws.format(f'A1:{end_col}1',{
         'backgroundColor':{'red':0.80,'green':0.90,'blue':0.99},
         'textFormat':{'bold':True,'fontSize':10},
         'horizontalAlignment':'CENTER','wrapStrategy':'WRAP'
     })
     if rows:
-        last_row = len(values)
-        ws.format(f'D2:K{last_row}',{
-            'numberFormat':{'type':'NUMBER','pattern':'0.00'}
-        })
-        ws.format(f'M2:M{last_row}',{
-            'numberFormat':{'type':'NUMBER','pattern':'0.00'}
-        })
-        ws.format(f'O2:O{last_row}',{
-            'backgroundColor':{'red':0.88,'green':0.96,'blue':0.88},
-            'textFormat':{'bold':True},
-            'numberFormat':{'type':'NUMBER','pattern':'0.00'}
-        })
-        ws.format(f'A2:A{last_row}',{
-            'backgroundColor':{'red':0.9,'green':0.94,'blue':1.0},
-            'textFormat':{'bold':True}
-        })
-        requests = []
+        last_row=len(rows)+1
+        for col in ('D','E','F','H','L','N','O','P'):
+            ws.format(f'{col}2:{col}{last_row}',{
+                'numberFormat':{'type':'NUMBER','pattern':'0.00'}})
+        ws.format(f'I2:K{last_row}',{
+            'numberFormat':{'type':'NUMBER','pattern':'+0.00;-0.00;0.00'}})
+        # Reset old visual highlighting and mark today's Supertrend BUY rows.
+        colors=[{'repeatCell':{
+            'range':{'sheetId':ws.id,'startRowIndex':1,'endRowIndex':last_row,
+                     'startColumnIndex':0,'endColumnIndex':len(COLUMNS)},
+            'cell':{'userEnteredFormat':{
+                'backgroundColor':{'red':1,'green':1,'blue':1}}},
+            'fields':'userEnteredFormat.backgroundColor'}}]
+        chart_requests=[]
         for i,row in enumerate(rows,start=2):
-            requests.append({'updateCells':{
+            chart_requests.append({'updateCells':{
                 'range':{'sheetId':ws.id,'startRowIndex':i-1,'endRowIndex':i,
-                         'startColumnIndex':23,'endColumnIndex':24},
+                         'startColumnIndex':17,'endColumnIndex':18},
                 'rows':[{'values':[{
                     'userEnteredValue':{'stringValue':'OPEN CHART'},
                     'textFormatRuns':[{'startIndex':0,'format':{
-                        'link':{'uri':row['Chart Link']},'underline':True
-                    }}]
-                }]}],
-                'fields':'userEnteredValue,textFormatRuns'
-            }})
-        for i in range(0,len(requests),100):
-            book.batch_update({'requests':requests[i:i+100]})
-    if rows:
-        ws.format(f'W2:W{len(rows)+1}', {
-            'backgroundColor':{'red':0.91,'green':0.97,'blue':0.91},
-            'textFormat':{'bold':True}
-        })
-        ws.format(f'T2:V{len(rows)+1}', {
-            'numberFormat':{'type':'NUMBER','pattern':'+0.00;-0.00;0.00'}
-        })
-        ws.format(f'P2:P{len(rows)+1}', {'numberFormat':{'type':'NUMBER','pattern':'0.00'}})
-        ws.format(f'R2:S{len(rows)+1}', {
-            'numberFormat':{'type':'NUMBER','pattern':'0.00'}
-        })
-    # Reset previous row colors; give a soft green full-row fill to BUY setups.
-    if rows:
-        color_requests = [{
-            'repeatCell':{
-                'range':{'sheetId':ws.id,'startRowIndex':1,
-                         'endRowIndex':len(rows)+1,
-                         'startColumnIndex':0,'endColumnIndex':len(COLUMNS)},
-                'cell':{'userEnteredFormat':{'backgroundColor':{
-                    'red':1.0,'green':1.0,'blue':1.0}}},
-                'fields':'userEnteredFormat.backgroundColor'
-            }
-        }]
-        for i,row in enumerate(rows, start=1):
-            if row.get('Supertrend Signal') == 'BUY':
-                color_requests.append({'repeatCell':{
-                    'range':{'sheetId':ws.id,'startRowIndex':i,
-                             'endRowIndex':i+1,
+                        'link':{'uri':row['Chart Link']},'underline':True}}]}]}],
+                'fields':'userEnteredValue,textFormatRuns'}})
+            if row.get('Supertrend Signal')=='BUY':
+                colors.append({'repeatCell':{
+                    'range':{'sheetId':ws.id,'startRowIndex':i-1,'endRowIndex':i,
                              'startColumnIndex':0,'endColumnIndex':len(COLUMNS)},
-                    'cell':{'userEnteredFormat':{'backgroundColor':{
-                        'red':0.86,'green':0.97,'blue':0.88}}},
-                    'fields':'userEnteredFormat.backgroundColor'
-                }})
-        for start in range(0,len(color_requests),100):
-            book.batch_update({'requests':color_requests[start:start+100]})
-    print(f'Final List updated: {len(rows)} qualifying stocks, all ranked, {len(COLUMNS)} columns')
+                    'cell':{'userEnteredFormat':{
+                        'backgroundColor':{'red':0.86,'green':0.97,'blue':0.88}}},
+                    'fields':'userEnteredFormat.backgroundColor'}})
+        for start in range(0,len(chart_requests),100):
+            book.batch_update({'requests':chart_requests[start:start+100]})
+        for start in range(0,len(colors),100):
+            book.batch_update({'requests':colors[start:start+100]})
+        ws.format(f'Q2:Q{last_row}',{'textFormat':{'bold':True}})
+    print(f'Final List updated: {len(rows)} qualifying stocks, {len(COLUMNS)} columns')
+
 
 
 def main():
