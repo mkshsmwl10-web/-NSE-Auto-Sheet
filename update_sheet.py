@@ -74,10 +74,12 @@ def supertrend_setup(df, atr_period=10, multiplier=3.0):
         final_lower.iloc[i]=(lower.iloc[i] if lower.iloc[i]>final_lower.iloc[prev]
                              or close.iloc[prev]<final_lower.iloc[prev]
                              else final_lower.iloc[prev])
+        # Compare against the PREVIOUS finalized band on trend changes;
+        # current bands can move with the signal candle and delay flips.
         if bullish[prev]:
-            bullish[i]=bool(close.iloc[i]>=final_lower.iloc[i])
+            bullish[i]=bool(close.iloc[i]>=final_lower.iloc[prev])
         else:
-            bullish[i]=bool(close.iloc[i]>final_upper.iloc[i])
+            bullish[i]=bool(close.iloc[i]>final_upper.iloc[prev])
     trend='UP' if bullish[-1] else 'DOWN'
     flip=bool(bullish[-1] and not bullish[-2])
     value=float(final_lower.iloc[-1] if bullish[-1] else final_upper.iloc[-1])
@@ -326,7 +328,6 @@ def scan(name,code,nifty_close):
     distance_pct = (float(latest['Close'])/float(latest['SMA 200'])-1)*100
     vol_ratio = float(latest['Vol Ratio']) if pd.notna(latest['Vol Ratio']) else 0.0
     rsi = float(latest['RSI 14']) if pd.notna(latest['RSI 14']) else 50.0
-    setup = supertrend_setup(df)
     alignment = bool(latest['SMA 9'] > latest['SMA 18'] > latest['SMA 50'])
     breakout = bool(latest['Close'] > df['High'].iloc[-21:-1].max())
     return {'Stock Name':name,'NSE Code':code,'CMP':round(float(latest['Close']),2),
