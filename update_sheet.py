@@ -455,9 +455,12 @@ def main():
             if result: rows.append(result); print(f'  PASS {code}')
         except Exception as exc: print(f'  ERROR {code}: {exc}')
         if i%50==0: print(f'Processed {i}/{len(stocks)}')
-    # Pure cumulative RS rank across all stocks; setup is informational only.
-    # Missing RS observations rank last, not as artificially zero strength.
+    # Favor stocks no more than 10% above SMA200. Extended stocks remain
+    # visible, but can never outrank the <=10% group.
+    # Within each group cumulative 21D + 55D RS controls rank.
+    # Missing RS observations rank last within their distance group.
     rows.sort(key=lambda r: (
+        r['SMA 200 Distance %'] > 10.0,
         r['Cumulative RS'] == '',
         -r['Cumulative RS'] if r['Cumulative RS'] != '' else 0,
         -r['Score'], r['NSE Code']
