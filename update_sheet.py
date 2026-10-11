@@ -45,8 +45,8 @@ def get_stocks(book):
     return stocks
 
 def supertrend_setup(df, atr_period=10, multiplier=3.0):
-    """Daily Supertrend 10,3. BUY only on latest bearish-to-bullish flip.
-    Stop is exactly 95% of latest SMA200; no SELL signals generated.
+    """Daily Supertrend 10,3. BUY whenever the current trend is UP.
+    Stop is 95% of latest SMA200 for all BUY rows; no SELL signals generated.
     """
     high,low,close=df['High'],df['Low'],df['Close']
     prev_close=close.shift(1)
@@ -81,9 +81,10 @@ def supertrend_setup(df, atr_period=10, multiplier=3.0):
         else:
             bullish[i]=bool(close.iloc[i]>final_upper.iloc[prev])
     trend='UP' if bullish[-1] else 'DOWN'
-    flip=bool(bullish[-1] and not bullish[-2])
     value=float(final_lower.iloc[-1] if bullish[-1] else final_upper.iloc[-1])
-    buy=flip and float(close.iloc[-1])>float(df['SMA 200'].iloc[-1])
+    # Every stock currently in an UP Supertrend receives BUY status.
+    # All scan results are already restricted to Close > SMA200.
+    buy=bool(bullish[-1] and float(close.iloc[-1])>float(df['SMA 200'].iloc[-1]))
     # Historical chart lines use exactly the same bands and trend states
     # as the latest signal. None breaks the line when trend changes.
     history_up=[round(float(final_lower.iloc[i]),3) if bullish[i] and i>start
@@ -213,8 +214,8 @@ def chart_html(name, code, df, rs_1m=None, rs_55=None, score=None, st=None):
     if setup['signal']=='BUY':
         traces.append({
             'type':'scatter','mode':'markers+text','name':'Supertrend BUY',
-            'x':[setup['date']],'y':[setup['stop']],
-            'text':['ST BUY'],'textposition':'bottom center',
+            'x':[setup['date']],'y':[setup['entry']],
+            'text':['BUY (ST UP)'],'textposition':'top center',
             'marker':{'color':'#16a34a','size':16,'symbol':'triangle-up'},
             'xaxis':'x','yaxis':'y'
         })
@@ -251,7 +252,7 @@ button.sel{border-color:#2563eb;background:#dbeafe}
 <button onclick="range(320,this)">All</button>
 <button onclick="levels(this)" class="sel">Support / Resistance</button>
 </div><div id="plot"></div>
-<p class="note">Supertrend BUY appears only when the daily 10,3 trend flips from bearish to bullish; no SELL signal is shown. BUY entry above signal candle high; SL at 95% of SMA200 (indicative, not a broker order). 60-session support/resistance are informational.</p>
+<p class="note">Supertrend BUY means the current daily (10,3) trend is UP, not necessarily a new reversal today. DOWN-trend stocks are listed after UP-trend stocks in the sheet; no SELL signals are shown. Entry above latest candle high and SL at 95% of SMA200 are indicative, not broker orders. 60-session support/resistance are informational.</p>
 </main><script>
 const data=__DATA__;
 const t=data.traces,d=data.details;
@@ -339,7 +340,7 @@ def scan(name,code,nifty_close):
     CHART_DIR.mkdir(parents=True,exist_ok=True)
     filename=re.sub(r'[^A-Za-z0-9_-]','-',code)+'-sma-chart.html'
     (CHART_DIR/filename).write_text(chart_html(name,code,df,rs_1m,rs_55,score,setup),encoding='utf-8')
-    url=f'{CHART_BASE}/{filename}?v=10'
+    url=f'{CHART_BASE}/{filename}?v=11'
     slope_pct = (float(latest['SMA 50'])/float(prev['SMA 50'])-1)*100
     distance_pct = (float(latest['Close'])/float(latest['SMA 200'])-1)*100
     vol_ratio = float(latest['Vol Ratio']) if pd.notna(latest['Vol Ratio']) else 0.0
@@ -448,12 +449,12 @@ def main():
         except Exception as exc: print(f'  ERROR {code}: {exc}')
         if i%50==0: print(f'Processed {i}/{len(stocks)}')
     # Ranking priorities:
-    # 1) Close within 10% above SMA200; extended stocks come afterward.
-    # 2) Rising SMA50 within each distance group (DOWN cannot take rank 1
-    #    while an eligible UP-slope stock exists in the <=10% group).
-    # 3) Highest cumulative NIFTY-relative strength (21D + 55D).
-    # Missing RS values rank last within their respective trend group.
+    # 1) All Supertrend UP/BUY stocks first, DOWN stocks afterward.
+    # 2) Within each trend group, favor close within 10% of SMA200.
+    # 3) Within each distance group, prefer rising SMA50.
+    # 4) Within those groups, rank by cumulative 21D + 55D RS.
     rows.sort(key=lambda r: (
+        r['ST Trend'] != 'UP',
         r['SMA 200 Distance %'] > 10.0,
         r['SMA 50 Slope'] != 'UP',
         r['Cumulative RS'] == '',
