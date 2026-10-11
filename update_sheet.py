@@ -84,11 +84,18 @@ def supertrend_setup(df, atr_period=10, multiplier=3.0):
     flip=bool(bullish[-1] and not bullish[-2])
     value=float(final_lower.iloc[-1] if bullish[-1] else final_upper.iloc[-1])
     buy=flip and float(close.iloc[-1])>float(df['SMA 200'].iloc[-1])
+    # Historical chart lines use exactly the same bands and trend states
+    # as the latest signal. None breaks the line when trend changes.
+    history_up=[round(float(final_lower.iloc[i]),3) if bullish[i] and i>start
+                else None for i in range(len(df))]
+    history_down=[round(float(final_upper.iloc[i]),3) if not bullish[i] and i>start
+                  else None for i in range(len(df))]
     return {'signal':'BUY' if buy else '',
             'trend':trend,'line':round(value,2),
             'entry':round(float(high.iloc[-1]),2) if buy else '',
             'stop':round(float(df['SMA 200'].iloc[-1])*0.95,2) if buy else '',
-            'date':str(df.index[-1].date()) if buy else ''}
+            'date':str(df.index[-1].date()) if buy else '',
+            'history_up':history_up,'history_down':history_down}
 
 
 
@@ -155,9 +162,7 @@ def chart_html(name, code, df, rs_1m=None, rs_55=None, score=None, st=None):
         'xaxis': 'x', 'yaxis': 'y'
     }]
     for col, color, width in [
-        ('SMA 9', '#f59e0b', 1.8),
-        ('SMA 18', '#8b5cf6', 1.8),
-        ('SMA 50', '#16a34a', 2.5),
+        ('SMA 50', '#2563eb', 2.2),
         ('SMA 200', '#dc2626', 2.5)
     ]:
         traces.append({
@@ -165,6 +170,19 @@ def chart_html(name, code, df, rs_1m=None, rs_55=None, score=None, st=None):
             'name': col + ' (' + format(float(df[col].iloc[-1]), ',.2f') + ')',
             'x': dates, 'y': numbers(col),
             'line': {'color': color, 'width': width}, 'xaxis': 'x', 'yaxis': 'y'
+        })
+    # Historical Supertrend overlays: green in UP trend, red in DOWN trend.
+    # No SELL markers/signals are generated.
+    setup = st if st is not None else supertrend_setup(df)
+    for key, label, color in (
+        ('history_up','Supertrend 10,3 UP','#16a34a'),
+        ('history_down','Supertrend 10,3 DOWN','#dc2626')
+    ):
+        traces.append({
+            'type':'scatter','mode':'lines','name':label,
+            'x':dates,'y':setup[key][-len(shown):],
+            'line':{'color':color,'width':2.8},
+            'connectgaps':False,'xaxis':'x','yaxis':'y'
         })
     colors = ['#86efac' if c >= o else '#fca5a5'
               for o, c in zip(shown['Open'], shown['Close'])]
@@ -190,7 +208,6 @@ def chart_html(name, code, df, rs_1m=None, rs_55=None, score=None, st=None):
         'breakout': bool(last['Close'] > df['High'].iloc[-21:-1].max()),
         'alignment': bool(last['SMA 9'] > last['SMA 18'] > last['SMA 50'])
     }
-    setup = st if st is not None else supertrend_setup(df)
     details.update({'stSignal':setup['signal'],'stTrend':setup['trend'],
                     'stLine':setup['line'],'entry':setup['entry'],'stop':setup['stop']})
     if setup['signal']=='BUY':
@@ -206,7 +223,7 @@ def chart_html(name, code, df, rs_1m=None, rs_55=None, score=None, st=None):
     details['score'] = score
     details['cumulativeRs'] = round(rs_1m + rs_55, 2) if rs_1m is not None and rs_55 is not None else None
     payload = json.dumps({'traces': traces, 'details': details}, separators=(',', ':'))
-    title = html.escape(f'{name} ({code}) — Advanced Daily SMA Chart')
+    title = html.escape(f'{name} ({code}) — Daily SMA & Supertrend Chart')
     page = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>__TITLE__</title>
@@ -225,7 +242,7 @@ button.sel{border-color:#2563eb;background:#dbeafe}
 #plot{height:75vh;min-height:550px;background:white;border-radius:12px}
 .note{font-size:12px;line-height:1.5}
 </style></head><body><main><h1>__TITLE__</h1>
-<p>Daily candles • SMA 9 orange • SMA 18 purple • SMA 50 green • SMA 200 red • Volume</p>
+<p>Daily candles • SMA 50 blue • SMA 200 red • Supertrend (10,3) green UP / red DOWN • Volume</p>
 <div id="metrics"></div>
 <div class="controls">
 <button onclick="range(63,this)">3 months</button>
@@ -250,7 +267,6 @@ m('60-day high','₹'+d.resistance.toLocaleString('en-IN'))+
 m('Volume Ratio',d.volratio===null?'N/A':d.volratio.toFixed(2)+'x')+
 m('RSI 14',d.rsi===null?'N/A':d.rsi.toFixed(1))+
 m('20D Breakout',d.breakout?'YES':'NO',d.breakout?'green':'')+
-m('SMA Alignment',d.alignment?'9 > 18 > 50':'Mixed',d.alignment?'green':'')+
 m('RS 21D vs NIFTY 50',d.rs1m===null?'N/A':((d.rs1m>0?'+':'')+d.rs1m.toFixed(2)+' pp'),d.rs1m===null?'':(d.rs1m>0?'green':'red'))+
 m('RS 55D vs NIFTY 50',d.rs55===null?'N/A':((d.rs55>0?'+':'')+d.rs55.toFixed(2)+' pp'),d.rs55===null?'':(d.rs55>0?'green':'red'))+
 m('Cumulative RS',d.cumulativeRs===null?'N/A':((d.cumulativeRs>0?'+':'')+d.cumulativeRs.toFixed(2)+' pp'),d.cumulativeRs===null?'':(d.cumulativeRs>0?'green':'red'))+
@@ -323,7 +339,7 @@ def scan(name,code,nifty_close):
     CHART_DIR.mkdir(parents=True,exist_ok=True)
     filename=re.sub(r'[^A-Za-z0-9_-]','-',code)+'-sma-chart.html'
     (CHART_DIR/filename).write_text(chart_html(name,code,df,rs_1m,rs_55,score,setup),encoding='utf-8')
-    url=f'{CHART_BASE}/{filename}?v=9'
+    url=f'{CHART_BASE}/{filename}?v=10'
     slope_pct = (float(latest['SMA 50'])/float(prev['SMA 50'])-1)*100
     distance_pct = (float(latest['Close'])/float(latest['SMA 200'])-1)*100
     vol_ratio = float(latest['Vol Ratio']) if pd.notna(latest['Vol Ratio']) else 0.0
