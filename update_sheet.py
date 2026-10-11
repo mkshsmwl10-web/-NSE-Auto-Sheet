@@ -15,7 +15,7 @@ INPUT_SHEET = os.getenv('INPUT_SHEET', 'NIFTY200')
 FINAL_SHEET = os.getenv('FINAL_LIST_SHEET', 'Final List')
 CHART_DIR = Path(os.getenv('CHART_OUTPUT_DIR', 'docs/charts'))
 CHART_BASE = os.getenv('CHART_BASE_URL', 'https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/charts').rstrip('/')
-COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 9','SMA 18','SMA 50','SMA 200','SMA 50 Slope','50 Slope %','SMA 200 Distance %','Vol Ratio','RSI 14','20D Breakout','Score','Support SMA','Candle Pattern','Entry Above','Stop Below','RS 1M vs NIFTY %','RS 55D vs NIFTY %','Cumulative RS','Pullback Signal','Chart Link']
+COLUMNS = ['Rank','Stock Name','NSE Code','CMP','SMA 9','SMA 18','SMA 50','SMA 200','SMA 50 Slope','50 Slope %','SMA 200 Distance %','Vol Ratio','RSI 14','20D Breakout','Score','Supertrend 10,3','ST Trend','Entry Above','Stop Below','RS 1M vs NIFTY %','RS 55D vs NIFTY %','Cumulative RS','Supertrend Signal','Chart Link']
 
 def google_book():
     raw = os.environ.get('GCP_CREDENTIALS','').strip()
@@ -44,47 +44,50 @@ def get_stocks(book):
         stocks.append((name or code,code)); seen.add(code)
     return stocks
 
-def pullback_setup(df):
-    """Uptrend SMA touch followed by bullish rejection candle, latest daily bar only."""
-    empty={'signal':'NO SETUP','sma':'','candle':'','entry':'','stop':'','date':''}
-    if len(df)<202: return empty
-    bar,prev=df.iloc[-1],df.iloc[-2]
-    op,hi,lo,cl=(float(bar[k]) for k in ('Open','High','Low','Close'))
-    prev_op,prev_cl=float(prev['Open']),float(prev['Close'])
-    span=hi-lo
-    if span<=0: return empty
-    body=abs(cl-op)
-    high_close=(hi-cl)/span<=.25
-    strong=(cl>op and body/span>=.55 and high_close)
-    engulf=(prev_cl<prev_op and cl>op and op<=prev_cl and cl>=prev_op and high_close)
-    hammer=(cl>op and body>0 and (min(op,cl)-lo)>=1.8*body and high_close)
-    candle='BULLISH ENGULFING' if engulf else 'HAMMER' if hammer else 'STRONG GREEN' if strong else ''
-    touches=[]
-    for n in (9,18,50,200):
-        col=f'SMA {n}'
-        for age in (0,1,2):
-            b=df.iloc[-1-age]
-            level=float(b[col])
-            if pd.isna(level) or level<=0: continue
-            low=float(b['Low'])
-            if level*.99<=low<=level*1.01 and float(b['High'])>=level and cl>level:
-                touches.append((age,abs(low/level-1),n))
-                break
-    if not touches: return empty
-    touches.sort()
-    age,_,n=touches[0]
-    volume=float(bar['Vol Ratio']) if pd.notna(bar['Vol Ratio']) else 0.
-    rsi=float(bar['RSI 14']) if pd.notna(bar['RSI 14']) else 0.
-    stop=min(float(df.iloc[-1-i]['Low']) for i in range(age+1))
-    confirmed=bool(candle and cl>prev_cl and volume>=.8 and rsi>=50 and stop<hi
-                   and float(bar['SMA 50']) > float(prev['SMA 50']))
-    return {
-        'signal':'BUY OPPORTUNITY' if confirmed else 'PULLBACK WATCH',
-        'sma':f'SMA {n}','candle':candle or 'WAIT CANDLE',
-        'entry':round(hi,2) if confirmed else '',
-        'stop':round(stop,2) if confirmed else '',
-        'date':str(df.index[-1].date()) if confirmed else ''
-    }
+def supertrend_setup(df, atr_period=10, multiplier=3.0):
+    """Daily Supertrend 10,3. BUY only on latest bearish-to-bullish flip.
+    Stop is exactly 95% of latest SMA200; no SELL signals generated.
+    """
+    high,low,close=df['High'],df['Low'],df['Close']
+    prev_close=close.shift(1)
+    true_range=pd.concat([(high-low).abs(),
+                          (high-prev_close).abs(),
+                          (low-prev_close).abs()],axis=1).max(axis=1)
+    # Wilder ATR with SMA-seeded initial observation.
+    atr=pd.Series(float('nan'),index=df.index,dtype='float64')
+    if len(df)<max(202,atr_period+2):
+        return {'signal':'','trend':'','line':None,'entry':'','stop':'','date':''}
+    start=atr_period-1
+    atr.iloc[start]=float(true_range.iloc[:atr_period].mean())
+    for i in range(start+1,len(df)):
+        atr.iloc[i]=(atr.iloc[i-1]*(atr_period-1)+float(true_range.iloc[i]))/atr_period
+    upper=(high+low)/2+multiplier*atr
+    lower=(high+low)/2-multiplier*atr
+    final_upper=upper.copy()
+    final_lower=lower.copy()
+    bullish=[False]*len(df)
+    for i in range(start+1,len(df)):
+        prev=i-1
+        final_upper.iloc[i]=(upper.iloc[i] if upper.iloc[i]<final_upper.iloc[prev]
+                             or close.iloc[prev]>final_upper.iloc[prev]
+                             else final_upper.iloc[prev])
+        final_lower.iloc[i]=(lower.iloc[i] if lower.iloc[i]>final_lower.iloc[prev]
+                             or close.iloc[prev]<final_lower.iloc[prev]
+                             else final_lower.iloc[prev])
+        if bullish[prev]:
+            bullish[i]=bool(close.iloc[i]>=final_lower.iloc[i])
+        else:
+            bullish[i]=bool(close.iloc[i]>final_upper.iloc[i])
+    trend='UP' if bullish[-1] else 'DOWN'
+    flip=bool(bullish[-1] and not bullish[-2])
+    value=float(final_lower.iloc[-1] if bullish[-1] else final_upper.iloc[-1])
+    buy=flip and float(close.iloc[-1])>float(df['SMA 200'].iloc[-1])
+    return {'signal':'BUY' if buy else '',
+            'trend':trend,'line':round(value,2),
+            'entry':round(float(high.iloc[-1]),2) if buy else '',
+            'stop':round(float(df['SMA 200'].iloc[-1])*0.95,2) if buy else '',
+            'date':str(df.index[-1].date()) if buy else ''}
+
 
 
 def relative_strength(stock_close, benchmark_close, sessions):
@@ -135,7 +138,7 @@ def quality_score(df, rs21, rs55):
 
 
 
-def chart_html(name, code, df, rs_1m=None, rs_55=None, score=None):
+def chart_html(name, code, df, rs_1m=None, rs_55=None, score=None, st=None):
     """Daily candlestick, SMA overlay and volume with responsive time-range buttons."""
     shown = df.tail(320)
     dates = [d.strftime('%Y-%m-%d') for d in shown.index]
@@ -185,14 +188,14 @@ def chart_html(name, code, df, rs_1m=None, rs_55=None, score=None):
         'breakout': bool(last['Close'] > df['High'].iloc[-21:-1].max()),
         'alignment': bool(last['SMA 9'] > last['SMA 18'] > last['SMA 50'])
     }
-    setup = pullback_setup(df)
-    details.update({'pullback':setup['signal'],'supportSma':setup['sma'],
-                    'candle':setup['candle'],'entry':setup['entry'],'stop':setup['stop']})
-    if setup['signal']=='BUY OPPORTUNITY':
+    setup = st if st is not None else supertrend_setup(df)
+    details.update({'stSignal':setup['signal'],'stTrend':setup['trend'],
+                    'stLine':setup['line'],'entry':setup['entry'],'stop':setup['stop']})
+    if setup['signal']=='BUY':
         traces.append({
-            'type':'scatter','mode':'markers+text','name':'Pullback Opportunity',
+            'type':'scatter','mode':'markers+text','name':'Supertrend BUY',
             'x':[setup['date']],'y':[setup['stop']],
-            'text':['BUY SETUP'],'textposition':'bottom center',
+            'text':['ST BUY'],'textposition':'bottom center',
             'marker':{'color':'#16a34a','size':16,'symbol':'triangle-up'},
             'xaxis':'x','yaxis':'y'
         })
@@ -229,7 +232,7 @@ button.sel{border-color:#2563eb;background:#dbeafe}
 <button onclick="range(320,this)">All</button>
 <button onclick="levels(this)" class="sel">Support / Resistance</button>
 </div><div id="plot"></div>
-<p class="note">Support and resistance are indicative previous-60-session low/high. Not live buy/exit levels or broker orders. SMA slope is based on the latest two daily SMA50 values.</p>
+<p class="note">Supertrend BUY appears only when the daily 10,3 trend flips from bearish to bullish; no SELL signal is shown. BUY entry above signal candle high; SL at 95% of SMA200 (indicative, not a broker order). 60-session support/resistance are informational.</p>
 </main><script>
 const data=__DATA__;
 const t=data.traces,d=data.details;
@@ -250,11 +253,11 @@ m('RS 21D vs NIFTY 50',d.rs1m===null?'N/A':((d.rs1m>0?'+':'')+d.rs1m.toFixed(2)+
 m('RS 55D vs NIFTY 50',d.rs55===null?'N/A':((d.rs55>0?'+':'')+d.rs55.toFixed(2)+' pp'),d.rs55===null?'':(d.rs55>0?'green':'red'))+
 m('Cumulative RS',d.cumulativeRs===null?'N/A':((d.cumulativeRs>0?'+':'')+d.cumulativeRs.toFixed(2)+' pp'),d.cumulativeRs===null?'':(d.cumulativeRs>0?'green':'red'))+
 m('Quality Score',d.score===null?'N/A':d.score.toFixed(2)+'/100')+
-m('Pullback Signal',d.pullback,d.pullback==='BUY OPPORTUNITY'?'green':'')+
-m('Support SMA',d.supportSma||'—')+
-m('Candle',d.candle||'—')+
+m('Supertrend Signal',d.stSignal||'—',d.stSignal==='BUY'?'green':'')+
+m('Supertrend Trend',d.stTrend,d.stTrend==='UP'?'green':'red')+
+m('Supertrend (10,3)',d.stLine===null?'N/A':'₹'+d.stLine.toLocaleString('en-IN'))+
 m('Entry trigger',d.entry?'Above ₹'+d.entry:'—')+
-m('Setup stop',d.stop?'Below ₹'+d.stop:'—');
+m('SL (SMA200 - 5%)',d.stop?'₹'+d.stop:'—');
 const dates=t[0].x,last=dates[dates.length-1];
 let showLevels=true;
 const shapes=[
@@ -314,15 +317,16 @@ def scan(name,code,nifty_close):
     rs_1m = relative_strength(close, nifty_close, 21)
     rs_55 = relative_strength(close, nifty_close, 55)
     score = quality_score(df, rs_1m, rs_55)
+    setup = supertrend_setup(df)
     CHART_DIR.mkdir(parents=True,exist_ok=True)
     filename=re.sub(r'[^A-Za-z0-9_-]','-',code)+'-sma-chart.html'
-    (CHART_DIR/filename).write_text(chart_html(name,code,df,rs_1m,rs_55,score),encoding='utf-8')
-    url=f'{CHART_BASE}/{filename}?v=8'
+    (CHART_DIR/filename).write_text(chart_html(name,code,df,rs_1m,rs_55,score,setup),encoding='utf-8')
+    url=f'{CHART_BASE}/{filename}?v=9'
     slope_pct = (float(latest['SMA 50'])/float(prev['SMA 50'])-1)*100
     distance_pct = (float(latest['Close'])/float(latest['SMA 200'])-1)*100
     vol_ratio = float(latest['Vol Ratio']) if pd.notna(latest['Vol Ratio']) else 0.0
     rsi = float(latest['RSI 14']) if pd.notna(latest['RSI 14']) else 50.0
-    setup = pullback_setup(df)
+    setup = supertrend_setup(df)
     alignment = bool(latest['SMA 9'] > latest['SMA 18'] > latest['SMA 50'])
     breakout = bool(latest['Close'] > df['High'].iloc[-21:-1].max())
     return {'Stock Name':name,'NSE Code':code,'CMP':round(float(latest['Close']),2),
@@ -335,8 +339,9 @@ def scan(name,code,nifty_close):
             'RSI 14':round(rsi,2),
             '20D Breakout':'YES' if breakout else 'NO',
             'Score':score,
-            'Pullback Signal':setup['signal'],'Support SMA':setup['sma'],
-            'Candle Pattern':setup['candle'],'Entry Above':setup['entry'],
+            'Supertrend Signal':setup['signal'],
+            'Supertrend 10,3':setup['line'] if setup['line'] is not None else '',
+            'ST Trend':setup['trend'],'Entry Above':setup['entry'],
             'Stop Below':setup['stop'],
             'RS 1M vs NIFTY %':rs_1m if rs_1m is not None else '',
             'RS 55D vs NIFTY %':rs_55 if rs_55 is not None else '',
@@ -404,6 +409,7 @@ def write_output(book, rows):
         ws.format(f'T2:V{len(rows)+1}', {
             'numberFormat':{'type':'NUMBER','pattern':'+0.00;-0.00;0.00'}
         })
+        ws.format(f'P2:P{len(rows)+1}', {'numberFormat':{'type':'NUMBER','pattern':'0.00'}})
         ws.format(f'R2:S{len(rows)+1}', {
             'numberFormat':{'type':'NUMBER','pattern':'0.00'}
         })
@@ -420,7 +426,7 @@ def write_output(book, rows):
             }
         }]
         for i,row in enumerate(rows, start=1):
-            if row.get('Pullback Signal') == 'BUY OPPORTUNITY':
+            if row.get('Supertrend Signal') == 'BUY':
                 color_requests.append({'repeatCell':{
                     'range':{'sheetId':ws.id,'startRowIndex':i,
                              'endRowIndex':i+1,
