@@ -24,7 +24,7 @@ SIGNALS_TAB = os.getenv("HALF_MONTH_SIGNALS", "HalfMonth Signals")
 WATCH_COLS = ["Type", "Sector / Theme", "Name", "NSE Code"]
 RESULT_COLS = [
     "Type", "Sector / Theme", "Name", "NSE Code", "Strategy",
-    "1-15 High", "1-15 Low", "BUY Level", "CMP", "Today High", "Today Low",
+    "Previous Half High", "Previous Half Low", "BUY Level", "CMP", "Today High", "Today Low",
     "BUY Status", "Price Date", "Valid From", "Valid Till",
     "Budget", "Planned Qty", "Trigger Date", "Paper Entry",
     "Invested", "Current Value", "P/L Rs", "P/L %"
