@@ -221,57 +221,135 @@ def build_row(item, df, error, today):
                    entry, invested, current, pnl, pnl_pct]
 
 
-def update_results(book, rows):
+def update_results(book, rows, excluded=0):
+    """Refresh a clean, readable 23-column dashboard and its paper positions."""
     ws = worksheet(book, SIGNALS_TAB, len(RESULT_COLS))
     ws.clear()
-    ws.resize(rows=max(100, len(rows) + 2), cols=len(RESULT_COLS))
-    ws.update([RESULT_COLS] + rows,
-              range_name="A1:W" + str(len(rows) + 1),
-              value_input_option="RAW")
-    ws.freeze(rows=1, cols=4)
-    ws.format("A1:W1", {
-        "backgroundColor": {"red": 0.11, "green": 0.20, "blue": 0.34},
-        "textFormat": {"bold": True,
-                       "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
-        "horizontalAlignment": "CENTER", "wrapStrategy": "WRAP"
-    })
-    if not rows:
-        return
-    end = len(rows) + 1
-    for col in ("F", "G", "H", "I", "J", "K", "P", "S", "T", "U", "V", "W"):
-        ws.format(f"{col}2:{col}{end}", {"numberFormat": {
-            "type": "NUMBER", "pattern": "#,##0.00;[Red]-#,##0.00"}})
-    ws.format(f"Q2:Q{end}", {"numberFormat": {"type": "NUMBER", "pattern": "0"}})
+    ws.resize(rows=max(100, len(rows) + 8), cols=len(RESULT_COLS))
+    triggered = [r for r in rows if "BUY TRIGGERED" in r[11] and r[19] != ""]
+    invested = round(sum(float(r[19]) for r in triggered), 2)
+    current = round(sum(float(r[20]) for r in triggered), 2)
+    profit = round(current - invested, 2)
+    return_pct = round(profit / invested * 100, 2) if invested else 0
+    summary_labels = ["SYMBOLS", "STOCKS", "ETFs", "BUY TRIGGERED",
+                      "INVESTED ₹", "CURRENT ₹", "P/L ₹", "RETURN %",
+                      "EXCLUDED QTY < 2"]
+    summary_values = [len(rows), sum(r[0] == "STOCK" for r in rows),
+                      sum(r[0] == "ETF" for r in rows), len(triggered),
+                      invested, current, profit, return_pct, excluded]
+    # Row 1 dashboard title, rows 3-4 KPIs, row 6 actual data headers.
+    # Use two columns per KPI for less visual crowding.
+    data = [["HALF-MONTH | STOCK BREAKOUT + ETF DIP",
+             "₹5,000 per symbol • Minimum 2 units • Paper P/L only"]]
+    data.append([])
+    label_row, value_row = [""] * 23, [""] * 23
+    for i, (label, value) in enumerate(zip(summary_labels, summary_values)):
+        label_row[i * 2] = label
+        value_row[i * 2] = value
+    data.extend([label_row, value_row,
+                 ["Stocks: above previous half HIGH   |   ETFs: below previous half LOW"
+                  "   |   Price Date and STALE PRICE warnings matter."],
+                 RESULT_COLS])
+    data.extend(rows)
+    ws.update(data, range_name="A1:W" + str(len(data)), value_input_option="RAW")
+    ws.freeze(rows=6, cols=4)
+
+    navy = {"red": 0.16, "green": 0.25, "blue": 0.35}
+    ivory = {"red": 0.97, "green": 0.98, "blue": 0.98}
+    muted = {"red": 0.34, "green": 0.42, "blue": 0.47}
+    teal = {"red": 0.06, "green": 0.38, "blue": 0.40}
     styles = []
-    for row_no, row in enumerate(rows, start=2):
-        status = row[11]
-        bg = ({"red": 0.93, "green": 0.96, "blue": 1.0} if row[0] == "STOCK"
-              else {"red": 0.95, "green": 0.92, "blue": 1.0})
-        if "BUY TRIGGERED" in status:
-            bg = {"red": 0.80, "green": 0.96, "blue": 0.83}
-        elif "DATA ERROR" in status or "NO REFERENCE DATA" in status:
-            bg = {"red": 1, "green": 0.86, "blue": 0.83}
-        elif "STALE PRICE" in status:
-            bg = {"red": 1, "green": 0.94, "blue": 0.78}
-        styles.append({"repeatCell": {
-            "range": {"sheetId": ws.id, "startRowIndex": row_no - 1,
-                      "endRowIndex": row_no, "startColumnIndex": 0,
-                      "endColumnIndex": len(RESULT_COLS)},
-            "cell": {"userEnteredFormat": {"backgroundColor": bg}},
-            "fields": "userEnteredFormat.backgroundColor"}})
-        if row[21] != "":
-            pl = float(row[21])
-            fg = ({"red": 0.04, "green": 0.43, "blue": 0.19} if pl >= 0
-                  else {"red": 0.75, "green": 0.11, "blue": 0.11})
+    def format_range(a1, fmt):
+        ws.format(a1, fmt)
+
+    format_range("A1:W1", {
+        "backgroundColor": navy, "textFormat": {
+            "bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1},
+            "fontSize": 12}, "verticalAlignment": "MIDDLE"})
+    format_range("A3:R3", {
+        "backgroundColor": {"red": 0.90, "green": 0.95, "blue": 0.95},
+        "textFormat": {"bold": True, "fontSize": 9,
+                       "foregroundColor": muted}})
+    format_range("A4:R4", {
+        "backgroundColor": {"red": 0.95, "green": 0.98, "blue": 0.97},
+        "textFormat": {"bold": True, "fontSize": 13,
+                       "foregroundColor": navy}})
+    format_range("A5:W5", {
+        "backgroundColor": ivory,
+        "textFormat": {"italic": True, "foregroundColor": muted}})
+    format_range("A6:W6", {
+        "backgroundColor": teal,
+        "textFormat": {"bold": True, "fontSize": 10,
+                       "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+        "horizontalAlignment": "CENTER", "verticalAlignment": "MIDDLE",
+        "wrapStrategy": "WRAP"})
+    ws.format("K4:Q4", {"numberFormat": {
+        "type": "NUMBER", "pattern": "#,##0.00;[Red]-#,##0.00"}})
+    format_range("Q4", {"textFormat": {
+        "bold": True,
+        "foregroundColor": ({"red": 0.10, "green": 0.46, "blue": 0.31}
+                            if profit >= 0 else
+                            {"red": 0.74, "green": 0.22, "blue": 0.23})}})
+    end = len(rows) + 6
+    if rows:
+        for col in ("F", "G", "H", "I", "J", "K", "P", "S", "T", "U", "V", "W"):
+            ws.format(f"{col}7:{col}{end}", {"numberFormat": {
+                "type": "NUMBER", "pattern": "#,##0.00;[Red]-#,##0.00"}})
+        ws.format(f"Q7:Q{end}", {"numberFormat": {
+            "type": "NUMBER", "pattern": "0"}})
+        for row_no, row in enumerate(rows, start=7):
+            status = str(row[11])
+            stock = row[0] == "STOCK"
+            even = row_no % 2 == 0
+            bg = ({"red": 0.94, "green": 0.97, "blue": 0.99} if stock
+                  else {"red": 0.96, "green": 0.96, "blue": 0.99})
+            if even:
+                bg = ({"red": 0.90, "green": 0.95, "blue": 0.98} if stock
+                      else {"red": 0.93, "green": 0.94, "blue": 0.98})
+            if "DATA ERROR" in status or "NO REFERENCE DATA" in status:
+                bg = {"red": 1.0, "green": 0.90, "blue": 0.88}
+            elif "STALE PRICE" in status:
+                bg = {"red": 0.99, "green": 0.96, "blue": 0.88}
+            elif "BUY TRIGGERED" in status:
+                bg = {"red": 0.88, "green": 0.96, "blue": 0.90}
             styles.append({"repeatCell": {
                 "range": {"sheetId": ws.id, "startRowIndex": row_no - 1,
-                          "endRowIndex": row_no, "startColumnIndex": 21,
-                          "endColumnIndex": 23},
+                          "endRowIndex": row_no,
+                          "startColumnIndex": 0, "endColumnIndex": 23},
                 "cell": {"userEnteredFormat": {
-                    "textFormat": {"bold": True, "foregroundColor": fg}}},
-                "fields": "userEnteredFormat.textFormat"}})
+                    "backgroundColor": bg,
+                    "verticalAlignment": "MIDDLE"}},
+                "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.verticalAlignment"}})
+            if row[21] != "":
+                positive = float(row[21]) >= 0
+                fg = ({"red": 0.08, "green": 0.47, "blue": 0.31} if positive
+                      else {"red": 0.75, "green": 0.24, "blue": 0.26})
+                styles.append({"repeatCell": {
+                    "range": {"sheetId": ws.id, "startRowIndex": row_no - 1,
+                              "endRowIndex": row_no,
+                              "startColumnIndex": 21, "endColumnIndex": 23},
+                    "cell": {"userEnteredFormat": {
+                        "textFormat": {"bold": True, "foregroundColor": fg}}},
+                    "fields": "userEnteredFormat.textFormat"}})
+
+    # One batch formats status rows and sets compact but readable column widths.
+    widths = {0: 78, 1: 155, 2: 220, 3: 116, 4: 142,
+              11: 240, 12: 110, 13: 110, 14: 110,
+              17: 112, 18: 108, 21: 100, 22: 95}
+    for idx, width in widths.items():
+        styles.append({"updateDimensionProperties": {
+            "range": {"sheetId": ws.id, "dimension": "COLUMNS",
+                      "startIndex": idx, "endIndex": idx + 1},
+            "properties": {"pixelSize": width}, "fields": "pixelSize"}})
+    styles.append({"updateDimensionProperties": {
+        "range": {"sheetId": ws.id, "dimension": "ROWS",
+                  "startIndex": 5, "endIndex": 6},
+        "properties": {"pixelSize": 44}, "fields": "pixelSize"}})
     for i in range(0, len(styles), 100):
         book.batch_update({"requests": styles[i:i + 100]})
+    print("Summary:", len(rows), "eligible,", excluded, "excluded;",
+          "invested", invested, "current", current, "P/L", profit)
+
 
 
 def main():
@@ -282,15 +360,23 @@ def main():
     if not watchlist:
         raise ValueError("HalfMonth Watchlist has no valid symbols")
     rows = []
+    excluded = 0
     for item in watchlist:
         df, error = fetch_daily(item[3])
         row = build_row(item, df, error, today)
+        qty = row[16]
+        # Keep user watchlist untouched, but exclude anything with <2 whole
+        # units at the prior half-period's reference entry price.
+        if isinstance(qty, (int, float)) and qty < 2:
+            excluded += 1
+            print("EXCLUDED (quantity under 2):", item[0], item[3], qty)
+            continue
         rows.append(row)
         print(item[0], item[3], row[11])
     rows.sort(key=lambda row: (0 if row[0] == "STOCK" else 1,
                                0 if "BUY TRIGGERED" in row[11] else 1,
                                row[1], row[3]))
-    update_results(book, rows)
+    update_results(book, rows, excluded)
     print("HalfMonth Signals updated:", len(rows), "symbols on", today)
 
 
