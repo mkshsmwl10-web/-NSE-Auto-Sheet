@@ -299,6 +299,8 @@ def update_results(book, rows, excluded=0):
             "type": "NUMBER", "pattern": "0"}})
         for row_no, row in enumerate(rows, start=7):
             status = str(row[11])
+            triggered = "BUY TRIGGERED" in status
+            stale = "STALE PRICE" in status
             stock = row[0] == "STOCK"
             even = row_no % 2 == 0
             bg = ({"red": 0.94, "green": 0.97, "blue": 0.99} if stock
@@ -308,28 +310,43 @@ def update_results(book, rows, excluded=0):
                       else {"red": 0.93, "green": 0.94, "blue": 0.98})
             if "DATA ERROR" in status or "NO REFERENCE DATA" in status:
                 bg = {"red": 1.0, "green": 0.90, "blue": 0.88}
-            elif "STALE PRICE" in status:
+            elif triggered:
+                # Strong emerald background + bold white text across the row,
+                # including triggered rows with a STALE PRICE warning.
+                bg = {"red": 0.05, "green": 0.42, "blue": 0.27}
+            elif stale:
                 bg = {"red": 0.99, "green": 0.96, "blue": 0.88}
-            elif "BUY TRIGGERED" in status:
-                bg = {"red": 0.88, "green": 0.96, "blue": 0.90}
+            cell_format = {"backgroundColor": bg, "verticalAlignment": "MIDDLE"}
+            if triggered:
+                cell_format["textFormat"] = {
+                    "bold": True, "fontSize": 11,
+                    "foregroundColor": {"red": 1, "green": 1, "blue": 1}}
+                cell_format["borders"] = {
+                    edge: {"style": "SOLID_MEDIUM",
+                           "color": {"red": 0.02, "green": 0.30, "blue": 0.19}}
+                    for edge in ("top", "bottom")}
             styles.append({"repeatCell": {
                 "range": {"sheetId": ws.id, "startRowIndex": row_no - 1,
                           "endRowIndex": row_no,
                           "startColumnIndex": 0, "endColumnIndex": 23},
-                "cell": {"userEnteredFormat": {
-                    "backgroundColor": bg,
-                    "verticalAlignment": "MIDDLE"}},
-                "fields": "userEnteredFormat.backgroundColor,userEnteredFormat.verticalAlignment"}})
+                "cell": {"userEnteredFormat": cell_format},
+                "fields": ("userEnteredFormat" if triggered else
+                           "userEnteredFormat.backgroundColor,"
+                           "userEnteredFormat.verticalAlignment")}})
+            # Profit and loss cells keep their own high-contrast distinction.
             if row[21] != "":
                 positive = float(row[21]) >= 0
-                fg = ({"red": 0.08, "green": 0.47, "blue": 0.31} if positive
+                fg = ({"red": 0.76, "green": 1.0, "blue": 0.76} if positive
+                      else {"red": 1.0, "green": 0.77, "blue": 0.70}) if triggered else (
+                      {"red": 0.08, "green": 0.47, "blue": 0.31} if positive
                       else {"red": 0.75, "green": 0.24, "blue": 0.26})
                 styles.append({"repeatCell": {
                     "range": {"sheetId": ws.id, "startRowIndex": row_no - 1,
                               "endRowIndex": row_no,
                               "startColumnIndex": 21, "endColumnIndex": 23},
                     "cell": {"userEnteredFormat": {
-                        "textFormat": {"bold": True, "foregroundColor": fg}}},
+                        "textFormat": {"bold": True, "fontSize": 11,
+                                       "foregroundColor": fg}}},
                     "fields": "userEnteredFormat.textFormat"}})
 
     # One batch formats status rows and sets compact but readable column widths.
