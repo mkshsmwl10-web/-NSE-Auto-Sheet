@@ -83,15 +83,26 @@ def worksheet(book, name, cols):
 def get_watchlist(book):
     ws = worksheet(book, WATCHLIST_TAB, len(WATCH_COLS))
     raw = ws.get_all_values()
-    if not raw:
-        # Create user-owned watchlist only once. Later updates never overwrite.
-        ws.update([WATCH_COLS] + [list(row) for row in DEFAULT_WATCHLIST],
-                  range_name="A1:D" + str(len(DEFAULT_WATCHLIST) + 1))
+    # A newly created tab may return [], [[]], blank rows, or headers only.
+    # Seed the starter universe only when there are no meaningful user rows.
+    normalized = [[str(x).strip() for x in row] for row in raw]
+    meaningful = [row for row in normalized if any(row)]
+    header = [x.lower() for x in WATCH_COLS]
+    has_header = bool(meaningful and
+                      [x.lower() for x in meaningful[0][:4]] == header)
+
+    if not meaningful or (has_header and len(meaningful) == 1):
+        seeded = [WATCH_COLS] + [list(row) for row in DEFAULT_WATCHLIST]
+        ws.resize(rows=max(ws.row_count, len(seeded) + 1), cols=4)
+        ws.update(seeded, range_name="A1:D" + str(len(seeded)),
+                  value_input_option="RAW")
         ws.freeze(rows=1)
-        raw = [WATCH_COLS] + [list(row) for row in DEFAULT_WATCHLIST]
-        print("Created editable watchlist with", len(DEFAULT_WATCHLIST), "items")
+        meaningful = seeded
+        has_header = True
+        print("Initialized editable watchlist with", len(DEFAULT_WATCHLIST), "symbols")
+
     items, seen = [], set()
-    for row in raw[1:]:
+    for row in meaningful[1:] if has_header else meaningful:
         if len(row) < 4:
             continue
         kind, sector, name, symbol = [str(x).strip() for x in row[:4]]
@@ -102,6 +113,13 @@ def get_watchlist(book):
             continue
         items.append((kind, sector, name or symbol, symbol))
         seen.add(symbol)
+    if not items:
+        raise ValueError(
+            "HalfMonth Watchlist has rows but no valid symbols. "
+            "Set columns A-D to Type, Sector / Theme, Name, NSE Code; "
+            "Type must be ETF or STOCK and NSE Code must be an NSE ticker. "
+            "Existing user data was left unchanged."
+        )
     return items
 
 
