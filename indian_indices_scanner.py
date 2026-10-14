@@ -7,6 +7,7 @@ ranking all official constituents. Price returns are not total returns.
 """
 import json, os, math, time
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta
 from pathlib import Path
 from datetime import date
@@ -117,47 +118,85 @@ def download(ticker):
             print("Fetch error",ticker,str(ex)[:90])
             time.sleep(attempt+1)
     return None
-def official_nse_index(name):
-    """Best-effort official price-index OHLC fallback, never ETF proxy.
-    NSE's undocumented historical endpoint can block runners; leave unavailable
-    on error rather than display an invented index price.
-    """
-    if not name.upper().startswith("NIFTY"):return None
-    finish=date.today();start=finish-timedelta(days=350)
-    payload={"name":name,"startDate":start.strftime("%d-%b-%Y"),
-             "endDate":finish.strftime("%d-%b-%Y"),"indexName":name}
-    url="https://www.niftyindices.com/Backpage.aspx/getHistoricaldatatabletoString"
-    headers={"Content-Type":"application/json; charset=UTF-8",
-             "X-Requested-With":"XMLHttpRequest",
+def _nse_history_post(name, start, finish):
+    """Request official price-return OHLC; parse NSE's doubly encoded JSON."""
+    body={"cinfo":("{'name':'"+name.upper()+"','startDate':'"+
+                   start.strftime("%d %b %Y")+"','endDate':'"+
+                   finish.strftime("%d %b %Y")+"','indexName':'"+
+                   name.upper()+"'}")}
+    headers={"Content-Type":"application/json; charset=utf-8",
+             "Accept":"application/json, text/javascript, */*",
              "Referer":"https://www.niftyindices.com/reports/historical-data",
-             "User-Agent":"Mozilla/5.0 (compatible; IndexStrengthResearch/1.0)"}
+             "User-Agent":"Mozilla/5.0"}
+    url="https://www.niftyindices.com/Backpage.aspx/getHistoricaldatatabletoString"
+    resp=requests.post(url,json=body,headers=headers,timeout=12)
+    resp.raise_for_status()
+    payload=resp.json()
+    if not isinstance(payload,dict):return None
+    raw=payload.get("d")
+    if raw in (None,"false",""):return None
+    if isinstance(raw,str):
+        raw=json.loads(raw)
+    if not isinstance(raw,list) or len(raw)<35:return None
+    frame=pd.DataFrame(raw)
+    if "HistoricalDate" not in frame:return None
+    frame.index=pd.to_datetime(frame["HistoricalDate"],format="%d %b %Y",errors="coerce")
+    for key in ("OPEN","HIGH","LOW","CLOSE"):
+        if key not in frame:return None
+        frame[key]=pd.to_numeric(frame[key].astype(str).str.replace(",","",regex=False).replace("-",pd.NA),errors="coerce")
+    frame=frame[["OPEN","HIGH","LOW","CLOSE"]].rename(columns=str.title)
+    frame=frame.dropna(subset=["Close"])
+    if frame.empty:return None
+    # Historical back-computed index levels sometimes lack intraday OHLC.
+    for col in ("Open","High","Low"):
+        frame[col]=frame[col].fillna(frame["Close"])
+    frame["Volume"]=0
+    frame=frame.loc[~frame.index.isna()].sort_index()
+    frame=frame[~frame.index.duplicated(keep="last")]
+    return frame if len(frame)>=35 else None
+
+
+def official_nse_index(name, long_names=None):
+    """Try NSE's true historical price index OHLC; never substitute an ETF."""
+    if not name.upper().startswith("NIFTY"):return None
+    finish=date.today()
+    start=finish-timedelta(days=350)
+    mapping=(long_names or {}).get(name.upper(),name)
+    # Different indices have different historical/display aliases.
+    possibilities=list(dict.fromkeys([mapping,name]))
+    for candidate in possibilities:
+        try:
+            df=_nse_history_post(candidate,start,finish)
+            if df is not None:
+                print("Official NSE index OHLC:",name,"mapped as",candidate,len(df),"sessions")
+                return df
+        except (requests.RequestException,ValueError,TypeError,KeyError) as exc:
+            print("NSE index historical issue:",name,str(exc)[:95])
+            # A blocked remote endpoint is unlikely to work with another alias.
+            if isinstance(exc,requests.RequestException):break
+    print("No official history for:",name)
+    return None
+
+
+def official_name_map():
+    """NSE-supplied mapping; keep original display names if it is offline."""
+    url="https://iislliveblob.niftyindices.com/assets/json/IndexMapping.json"
     try:
-        response=requests.post(url,json={"cinfo":json.dumps(payload)},
-                               headers=headers,timeout=20)
-        response.raise_for_status()
-        data=response.json()
-        raw=data.get("d",data) if isinstance(data,dict) else data
-        if isinstance(raw,str):raw=json.loads(raw)
-        if not isinstance(raw,list) or len(raw)<25:return None
-        frame=pd.DataFrame(raw)
-        date_col=next((k for k in ("HistoricalDate","Date","date") if k in frame),None)
-        if not date_col:return None
-        frame.index=pd.to_datetime(frame[date_col],errors="coerce",dayfirst=True)
-        for out,options in {"Open":["OPEN","Open"],"High":["HIGH","High"],
-                            "Low":["LOW","Low"],"Close":["CLOSE","Close"]}.items():
-            k=next((k for k in options if k in frame),None)
-            if k is None:return None
-            frame[out]=pd.to_numeric(frame[k],errors="coerce")
-        frame=frame[["Open","High","Low","Close"]].dropna(subset=["Close"])
-        for col in ("Open","High","Low"):frame[col]=frame[col].fillna(frame["Close"])
-        frame["Volume"]=0
-        frame=frame[~frame.index.isna()].sort_index()
-        frame=frame[~frame.index.duplicated(keep="last")]
-        print("Official NSE index fallback:",name,len(frame),"rows")
-        return frame if len(frame)>=25 else None
-    except (requests.RequestException,ValueError,TypeError,KeyError) as exc:
-        print("Official NSE fallback unavailable:",name,str(exc)[:130])
-        return None
+        payload=requests.get(url,timeout=10).json()
+        if not isinstance(payload,list):return {}
+        mapped={}
+        for entry in payload:
+            if not isinstance(entry,dict):continue
+            trading=str(entry.get("Trading_Index_Name") or "").strip()
+            long_name=str(entry.get("Index_long_name") or "").strip()
+            if trading and long_name:
+                mapped[trading.upper()]=long_name
+                mapped[long_name.upper()]=long_name
+        print("Official index names loaded:",len(mapped))
+        return mapped
+    except (requests.RequestException,ValueError) as exc:
+        print("NSE name mapping unavailable:",str(exc)[:100])
+        return {}
 
 
 def metrics(df):
@@ -201,12 +240,25 @@ def main():
     series={}
     for sym in sorted(all_symbols):
         series[sym]=download(sym)
-    # Fallback is only for true NSE index OHLC, not representative ETFs.
-    for category,name,symbol,pool in universe:
-        if series.get(symbol) is None:
-            series[symbol]=official_nse_index(name)
+    # Multiple index endpoints can be slow, so fetch missing indices in
+    # parallel. Avoid inaccurate proxy ETFs or synthetic prices.
+    mapping=official_name_map()
+    missing={(name,symbol) for _,name,symbol,_ in universe
+             if series.get(symbol) is None and name.upper().startswith("NIFTY")}
     if series.get("^NSEI") is None:
-        series["^NSEI"]=official_nse_index("NIFTY 50")
+        missing.add(("NIFTY 50","^NSEI"))
+    if missing:
+        print("Checking official NSE price histories:",len(missing))
+        with ThreadPoolExecutor(max_workers=5) as pool:
+            jobs={pool.submit(official_nse_index,name,mapping):(name,symbol)
+                  for name,symbol in missing}
+            for future in as_completed(jobs):
+                name,symbol=jobs[future]
+                try:df=future.result()
+                except Exception as exc:
+                    print("Index fallback task error:",name,str(exc)[:130])
+                    df=None
+                if df is not None:series[symbol]=df
     bench=metrics(series.get("^NSEI"))
     if bench is None or bench["1m"]=="" or bench["3m"]=="":
         raise RuntimeError("NIFTY 50 benchmark data missing: cannot label outperform; try another run")
