@@ -283,6 +283,87 @@ def output(book,name,header,rows,signal_col=None):
     if name==LEADERS:
         tab.format("F2:L"+str(max(150,len(rows)+2)),
                    {"numberFormat":{"type":"NUMBER","pattern":"0.00"}})
+def style_leader_sheet(book, rows):
+    """Readable sector groups and positive/negative strength, reapplied each run."""
+    tab=book.worksheet(LEADERS)
+    sid=tab.id
+    navy={"red":0.07,"green":0.16,"blue":0.27}
+    white={"red":1,"green":1,"blue":1}
+    ink={"red":0.12,"green":0.20,"blue":0.31}
+    positive={"red":0.08,"green":0.45,"blue":0.27}
+    negative={"red":0.74,"green":0.15,"blue":0.18}
+    requests=[
+        {"repeatCell":{"range":{"sheetId":sid,"startRowIndex":0,"endRowIndex":1},
+            "cell":{"userEnteredFormat":{"backgroundColor":navy,
+                "textFormat":{"bold":True,"foregroundColor":white,"fontSize":10},
+                "verticalAlignment":"MIDDLE","wrapStrategy":"WRAP"}},
+            "fields":"userEnteredFormat(backgroundColor,textFormat,verticalAlignment,wrapStrategy)"}},
+        {"updateDimensionProperties":{"range":{"sheetId":sid,"dimension":"ROWS",
+                "startIndex":0,"endIndex":1},"properties":{"pixelSize":58},"fields":"pixelSize"}},
+        {"repeatCell":{"range":{"sheetId":sid,"startRowIndex":1,"endRowIndex":max(150,len(rows)+2)},
+            "cell":{"userEnteredFormat":{"verticalAlignment":"MIDDLE",
+                "textFormat":{"foregroundColor":ink,"fontSize":10}}},
+            "fields":"userEnteredFormat(verticalAlignment,textFormat)"}},
+        {"repeatCell":{"range":{"sheetId":sid,"startRowIndex":1,"endRowIndex":max(150,len(rows)+2),
+                "startColumnIndex":5,"endColumnIndex":12},
+            "cell":{"userEnteredFormat":{"numberFormat":{"type":"NUMBER","pattern":"0.00"}}},
+            "fields":"userEnteredFormat.numberFormat"}},
+        {"repeatCell":{"range":{"sheetId":sid,"startRowIndex":1,"endRowIndex":max(150,len(rows)+2),
+                "startColumnIndex":2,"endColumnIndex":3},
+            "cell":{"userEnteredFormat":{"numberFormat":{"type":"NUMBER","pattern":"+0.00;-0.00;0.00"}}},
+            "fields":"userEnteredFormat.numberFormat"}},
+    ]
+    # Widths are in pixels; sector name / return comparison columns get more space.
+    widths=[74,212,112,82,116,98,98,126,140,95,95,130,113,103,152,172]
+    for j,width in enumerate(widths):
+        requests.append({"updateDimensionProperties":{"range":{"sheetId":sid,
+                         "dimension":"COLUMNS","startIndex":j,"endIndex":j+1},
+                         "properties":{"pixelSize":width},"fields":"pixelSize"}})
+    last_sector=None
+    for i,row in enumerate(rows,start=1):
+        sector=str(row[1])
+        group=int(row[0])
+        pale=({"red":0.93,"green":0.96,"blue":0.99} if group%2
+              else {"red":0.96,"green":0.98,"blue":0.97})
+        requests.append({"repeatCell":{"range":{"sheetId":sid,"startRowIndex":i,
+            "endRowIndex":i+1},
+            "cell":{"userEnteredFormat":{"backgroundColor":pale}},
+            "fields":"userEnteredFormat.backgroundColor"}})
+        # First leader of each sector has an amber stock/rank highlight.
+        if int(row[3])==1:
+            requests.append({"repeatCell":{"range":{"sheetId":sid,"startRowIndex":i,
+                "endRowIndex":i+1,"startColumnIndex":3,"endColumnIndex":5},
+                "cell":{"userEnteredFormat":{"backgroundColor":{"red":1,"green":0.91,"blue":0.69},
+                    "textFormat":{"bold":True,"foregroundColor":ink}}},
+                "fields":"userEnteredFormat(backgroundColor,textFormat)"}})
+        if sector!=last_sector:
+            requests.append({"repeatCell":{"range":{"sheetId":sid,"startRowIndex":i,
+                "endRowIndex":i+1,"startColumnIndex":0,"endColumnIndex":3},
+                "cell":{"userEnteredFormat":{"textFormat":{"bold":True,
+                    "foregroundColor":navy}}},
+                "fields":"userEnteredFormat.textFormat"}})
+        last_sector=sector
+    # Conditional formatting survives updated data and adjusts as returns change.
+    # Clean only existing rules on this purpose-built sheet, preventing duplicates.
+    existing=book.fetch_sheet_metadata(params={"fields":"sheets(properties(sheetId),conditionalFormats)"})
+    target=next((x for x in existing.get("sheets",[])
+                 if x.get("properties",{}).get("sheetId")==sid),{})
+    for idx in reversed(range(len(target.get("conditionalFormats",[])))):
+        requests.append({"deleteConditionalFormatRule":{"sheetId":sid,"index":idx}})
+    ranges=[{"sheetId":sid,"startRowIndex":1,"endRowIndex":max(150,len(rows)+2),
+             "startColumnIndex":a,"endColumnIndex":b}
+            for a,b in [(2,3),(5,12)]]
+    for val,color,bg in [("NUMBER_GREATER",positive,{"red":0.85,"green":0.96,"blue":0.88}),
+                         ("NUMBER_LESS",negative,{"red":1,"green":0.90,"blue":0.90})]:
+        requests.append({"addConditionalFormatRule":{"index":0,"rule":{
+            "ranges":ranges,"booleanRule":{"condition":{"type":val,"values":[{"userEnteredValue":"0"}]},
+            "format":{"textFormat":{"foregroundColor":color,"bold":True},
+                      "backgroundColor":bg}}}}})
+    for j in range(0,len(requests),90):
+        book.batch_update({"requests":requests[j:j+90]})
+    print("Index Leaders styling applied:",len(rows),"rows, 9 sectors grouped")
+
+
 def main():
     book=connect();universe=source(book)
     all_symbols={"^NSEI"}
@@ -376,6 +457,7 @@ def main():
     leaders.sort(key=lambda row:(row[0],row[3]))
     output(book,RESULTS,COLS,strength,signal_col=10)
     output(book,LEADERS,LHEAD,leaders)
+    style_leader_sheet(book,leaders)
     CHART.parent.mkdir(parents=True,exist_ok=True)
     template=Path("scripts/indian_index_chart_template.html").read_text(encoding="utf-8")
     CHART.write_text(template.replace("/*DATA_PAYLOAD*/",json.dumps({"indices":chartdata,"benchmark":bench},separators=(",",":"))),encoding="utf-8")
