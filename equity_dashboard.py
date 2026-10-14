@@ -42,7 +42,8 @@ def sheet(b, name, cols=12):
 
 def bootstrap(b):
     config = sheet(b, SETTINGS, 4)
-    if not config.get_all_values():
+    existing_config = config.get_all_values()
+    if not any(any(str(v).strip() for v in row) for row in existing_config):
         config.update([["EQUITY SETTINGS", "Value", "Instructions"],
                        ["Opening Equity ₹", 400000,
                         "Example opening amount. Edit B2 to your actual starting equity."],
@@ -56,7 +57,8 @@ def bootstrap(b):
         "textFormat": {"bold": True,
                        "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
     inp = sheet(b, INPUT, 6)
-    if not inp.get_all_values():
+    existing_input = inp.get_all_values()
+    if not any(any(str(v).strip() for v in row) for row in existing_input):
         inp.update([
             ["Week Ending Date", "Net P/L ₹", "Mode", "Notes"],
             ["2026-10-04", 12000, "DEMO", "Sample week 1; replace with LIVE figures"],
@@ -68,6 +70,18 @@ def bootstrap(b):
         "textFormat": {"bold": True,
                        "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
     raw_amount = str(config.acell("B2").value or "").replace(",", "").replace("₹", "").strip()
+    if not raw_amount:
+        # Existing blank/headers-only settings can occur after an earlier run.
+        # Fill ONLY the empty B2 cell; never replace a user-entered value.
+        existing = config.get_all_values()
+        if not existing or not existing[0] or not any(str(x).strip() for x in existing[0]):
+            config.update([["EQUITY SETTINGS", "Value", "Instructions"]],
+                          range_name="A1:C1", value_input_option="RAW")
+        if len(existing) < 2 or not existing[1] or not str(existing[1][0]).strip():
+            config.update_acell("A2", "Opening Equity ₹")
+        config.update_acell("B2", 400000)
+        print("Initialized blank Equity Settings!B2 with ₹400000 DEMO opening balance")
+        raw_amount = "400000"
     try:
         opening = float(raw_amount)
     except ValueError as exc:
