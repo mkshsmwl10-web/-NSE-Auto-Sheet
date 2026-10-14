@@ -50,7 +50,10 @@ HEAD=["Category","Index Name","Yahoo Symbol","Tracked Stock Candidates (comma-se
 COLS=["Rank","Category","Index","Ticker","Price Date","CMP","1M Return %","3M Return %",
       "NIFTY50 1M %","1M Excess %","1M Outperform?","3M Excess %",
       "3M Outperform?","Data Status","Index Chart"]
-LHEAD=["Index","Leader Rank","NSE Stock","Stock 1M %","Stock 3M %","Index 3M %","3M Excess %","Stock CMP","Price Date","Stock Chart","Universe"]
+LHEAD=["Sector Rank","Index","Sector 1M Excess %","Leader Rank","NSE Stock",
+       "Stock 1M %","Index 1M %","Stock vs Index 1M %",
+       "Stock vs NIFTY50 1M %","Stock 3M %","Index 3M %",
+       "Stock vs Index 3M %","Price Date","Stock CMP","Stock Chart","Universe"]
 def connect():
     raw=os.environ["GCP_CREDENTIALS"].strip()
     scope=["https://www.googleapis.com/auth/spreadsheets","https://www.googleapis.com/auth/drive"]
@@ -193,15 +196,64 @@ def official_name_map():
         return {}
 
 
-def metrics(df):
+def aligned_metrics(df, target_date, start_1m, start_3m, max_lag_days=5):
+    """Same benchmark anchor dates for every sector and stock.
+
+    A snapshot must be recent enough on all three dates. We do not use
+    a series' independent latest date or an arbitrary distant old price.
+    """
     if df is None or df.empty:return None
-    now=float(df["Close"].iloc[-1])
-    latest=df.index[-1]
-    out={"cmp":number(now),"date":str(latest.date())}
-    for key,delta in (("1m",pd.DateOffset(months=1)),("3m",pd.DateOffset(months=3))):
-        earlier=df[df.index<=latest-delta]
-        out[key]=number(100*(now/float(earlier["Close"].iloc[-1])-1)) if not earlier.empty else ""
-    return out
+    prices=df.copy()
+    prices.index=pd.to_datetime(prices.index).tz_localize(None).normalize()
+    prices=prices[~prices.index.duplicated(keep="last")].sort_index()
+    result={}
+    for label,dt in (("end",target_date),("1m",start_1m),("3m",start_3m)):
+        eligible=prices.loc[prices.index<=dt].dropna(subset=["Close"])
+        if eligible.empty:return None
+        when=eligible.index[-1]
+        if (dt-when).days>max_lag_days:return None
+        val=float(eligible["Close"].iloc[-1])
+        if not math.isfinite(val) or val<=0:return None
+        result[label]=val
+        result[label+"_date"]=str(when.date())
+    # If the source has too few months of history, it cannot be a 3M leader.
+    result["cmp"]=number(result["end"])
+    result["date"]=str(target_date.date())
+    result["1m"]=number(100*(result["end"]/result["1m"]-1))
+    result["3m"]=number(100*(result["end"]/result["3m"]-1))
+    return result
+
+
+def benchmark_dates(df, all_index_series):
+    """Select the latest shared index trading date, then benchmark anchors.
+
+    Only include indices with recent usable data. Any genuinely stale index
+    will be DATA UNAVAILABLE, rather than making the comparison very old.
+    """
+    benchmark=df.dropna(subset=["Close"]).sort_index()
+    if benchmark.empty:raise RuntimeError("NIFTY50 benchmark missing")
+    latest=benchmark.index[-1].normalize()
+    recent=[]
+    for series in all_index_series:
+        if series is None or series.empty:continue
+        candidate=series.dropna(subset=["Close"])
+        if candidate.empty:continue
+        dt=candidate.index[-1].normalize()
+        if (latest-dt).days<=5:recent.append(dt)
+    end=min(recent) if recent else latest
+    if (latest-end).days>5:raise RuntimeError("Indices are too stale for common comparison")
+    anchor=benchmark.loc[benchmark.index<=end]
+    if anchor.empty:raise RuntimeError("No benchmark close at common date")
+    end=anchor.index[-1].normalize()
+    starts=[]
+    for offset in (pd.DateOffset(months=1),pd.DateOffset(months=3)):
+        before=benchmark.loc[benchmark.index<=end-offset]
+        if before.empty:raise RuntimeError("Insufficient NIFTY50 history")
+        starts.append(before.index[-1].normalize())
+    print("COMMON COMPARISON DATES",str(end.date()),str(starts[0].date()),str(starts[1].date()))
+    return end,starts[0],starts[1]
+
+
 def chart_link(index,asset):
     return URL+"?index="+quote(index,safe="")+"&asset="+quote(asset,safe="")
 def output(book,name,header,rows,signal_col=None):
@@ -250,49 +302,78 @@ def main():
         print("Recovered sector index histories:",covered,"of",len(missing))
     # Do not use synthetic prices, ETFs, or incomplete snippets as index data.
     # Missing indices are explicitly DATA UNAVAILABLE.
-    bench=metrics(series.get("^NSEI"))
-    if bench is None or bench["1m"]=="" or bench["3m"]=="":
-        raise RuntimeError("NIFTY 50 benchmark data missing: cannot label outperform; try another run")
-    strength=[];leaders=[];chartdata={};valid=[]
+    reference=series.get("^NSEI")
+    if reference is None:
+        raise RuntimeError("NIFTY50 benchmark data missing")
+    end_date, one_month, three_month=benchmark_dates(reference,
+        [series.get(symbol) for _,_,symbol,_ in universe])
+    bench=aligned_metrics(reference,end_date,one_month,three_month)
+    if bench is None:
+        raise RuntimeError("NIFTY50 common-date return unavailable")
+
+    strength=[];leaders=[];chartdata={};qualified_sectors=[]
     for category,name,symbol,pool in universe:
-        df=series.get(symbol);m=metrics(df)
-        if m is None or m["1m"]=="" or m["3m"]=="":
+        df=series.get(symbol)
+        m=aligned_metrics(df,end_date,one_month,three_month)
+        if m is None:
             status="DATA UNAVAILABLE";one=three=cmpv=ex1=ex3="";dt=""
+            print("Common-date OHLC missing/stale:",name)
         else:
-            status="OK";one,three,cmpv,dt=m["1m"],m["3m"],m["cmp"],m["date"]
+            status="OK"
+            one,three,cmpv,dt=m["1m"],m["3m"],m["cmp"],m["date"]
             ex1=number(one-bench["1m"]);ex3=number(three-bench["3m"])
-            valid.append((name,ex1))
+            if ex1>0:qualified_sectors.append(name)
         out1="YES" if status=="OK" and ex1>0 else "NO" if status=="OK" else ""
         out3="YES" if status=="OK" and ex3>0 else "NO" if status=="OK" else ""
         strength.append([0,category,name,symbol,dt,cmpv,one,three,bench["1m"],
-                        ex1,out1,ex3,out3,status,
-                        '=HYPERLINK("'+chart_link(name,symbol)+'","OPEN INDEX CHART")'])
+                         ex1,out1,ex3,out3,status,
+                         '=HYPERLINK("'+chart_link(name,symbol)+'","OPEN INDEX CHART")'])
+        # Index and qualifying stock leaders remain available in chart menu.
         chartdata[name]={"name":name,"index":symbol,"assets":[]}
         if df is not None:chartdata[name]["assets"].append(serialize(symbol,df))
-        picks=[]
+    strength.sort(key=lambda row:(0 if row[13]=="OK" else 1,
+                    -row[9] if isinstance(row[9],(int,float)) else 0,row[2]))
+    rank_lookup={}
+    for i,row in enumerate(strength,start=1):
+        row[0]=i if row[13]=="OK" else ""
+        if row[13]=="OK":rank_lookup[row[2]]=i
+
+    # Leaders only in 1M outperforming sectors, using exactly the same
+    # benchmark start/end dates as Index Strength.
+    for category,name,symbol,pool in universe:
+        row=next(r for r in strength if r[2]==name)
+        if row[10]!="YES":continue
+        index_1m,index_3m=row[6],row[7]
+        candidates=[]
         for stock in pool:
-            sm=metrics(series.get(stock+".NS"))
-            if sm and sm["3m"]!="" and sm["1m"]!="":
-                picks.append((stock,sm))
-        picks.sort(key=lambda x:x[1]["3m"],reverse=True)
-        for rank,(stock,sm) in enumerate(picks[:3],start=1):
-            leaders.append([name,rank,stock,sm["1m"],sm["3m"],three,
-                           number(sm["3m"]-three) if three!="" else "",
-                           sm["cmp"],sm["date"],
-                           '=HYPERLINK("'+chart_link(name,stock+".NS")+'","OPEN STOCK CHART")',
-                           "TRACKED CANDIDATES"])
+            ticker=stock+".NS"
+            sm=aligned_metrics(series.get(ticker),end_date,one_month,three_month)
+            if sm is None:continue
+            excess_index=number(sm["1m"]-index_1m)
+            excess_nifty=number(sm["1m"]-bench["1m"])
+            # A leader must outperform BOTH its index and NIFTY50 in 1M.
+            if excess_index<=0 or excess_nifty<=0:continue
+            candidates.append((stock,sm,excess_index,excess_nifty))
+        candidates.sort(key=lambda x:(-x[2],-x[1]["1m"],x[0]))
+        for rank,(stock,sm,excess_index,excess_nifty) in enumerate(candidates[:3],start=1):
+            leaders.append([rank_lookup[name],name,row[9],rank,stock,
+                            sm["1m"],index_1m,excess_index,excess_nifty,
+                            sm["3m"],index_3m,number(sm["3m"]-index_3m),
+                            sm["date"],sm["cmp"],
+                            '=HYPERLINK("'+chart_link(name,stock+".NS")+'","OPEN STOCK CHART")',
+                            "TRACKED CANDIDATES ONLY"])
             sdf=series.get(stock+".NS")
             if sdf is not None:chartdata[name]["assets"].append(serialize(stock+".NS",sdf))
-        if len(picks)<3:print("Only",len(picks),"tracked leaders for",name)
-    strength.sort(key=lambda r:(0 if r[13]=="OK" else 1,-r[9] if isinstance(r[9],(int,float)) else 0,r[2]))
-    for i,row in enumerate(strength,start=1):row[0]=i if row[13]=="OK" else ""
+        print("Outperforming sector",name,": qualifying tracked leaders",len(candidates),
+              "shown",min(3,len(candidates)))
+    leaders.sort(key=lambda row:(row[0],row[3]))
     output(book,RESULTS,COLS,strength,signal_col=10)
     output(book,LEADERS,LHEAD,leaders)
     CHART.parent.mkdir(parents=True,exist_ok=True)
     template=Path("scripts/indian_index_chart_template.html").read_text(encoding="utf-8")
     CHART.write_text(template.replace("/*DATA_PAYLOAD*/",json.dumps({"indices":chartdata,"benchmark":bench},separators=(",",":"))),encoding="utf-8")
     print("Done:",len(strength),"indices,",sum(r[13]=="OK" for r in strength),"with index data;",
-          len(leaders),"tracked stock leader rows, chart:",CHART)
+          len(leaders),"qualifying outperforming stock leader rows, chart:",CHART)
 
 def serialize(symbol,df):
     df=df.tail(270)
