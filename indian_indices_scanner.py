@@ -15,6 +15,7 @@ from urllib.parse import quote
 import gspread
 import pandas as pd
 import yfinance as yf
+from nse_sector_archive import load_index_archive, index_from_archive
 from google.oauth2.service_account import Credentials
 
 SHEET_ID=os.getenv("SPREADSHEET_ID","1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E")
@@ -233,25 +234,22 @@ def main():
     series={}
     for sym in sorted(all_symbols):
         series[sym]=download(sym)
-    # Multiple index endpoints can be slow, so fetch missing indices in
-    # parallel. Avoid inaccurate proxy ETFs or synthetic prices.
-    mapping=official_name_map()
-    missing={(name,symbol) for _,name,symbol,_ in universe
-             if series.get(symbol) is None and name.upper().startswith("NIFTY")}
-    if series.get("^NSEI") is None:
-        missing.add(("NIFTY 50","^NSEI"))
+    # NSE's official all-index daily file contains most sector price indices.
+    # Existing downloaded OHLC is cached between runs in the repository.
+    missing=[(name,symbol) for _,name,symbol,_ in universe
+             if series.get(symbol) is None]
     if missing:
-        print("Checking official NSE price histories:",len(missing))
-        with ThreadPoolExecutor(max_workers=5) as pool:
-            jobs={pool.submit(official_nse_index,name,mapping):(name,symbol)
-                  for name,symbol in missing}
-            for future in as_completed(jobs):
-                name,symbol=jobs[future]
-                try:df=future.result()
-                except Exception as exc:
-                    print("Index fallback task error:",name,str(exc)[:130])
-                    df=None
-                if df is not None:series[symbol]=df
+        archive=load_index_archive(days=125)
+        covered=0
+        for name,symbol in missing:
+            recovered=index_from_archive(name,archive)
+            if recovered is not None:
+                series[symbol]=recovered
+                covered+=1
+                print("NSE daily snapshot supplied:",name,len(recovered),"sessions")
+        print("Recovered sector index histories:",covered,"of",len(missing))
+    # Do not use synthetic prices, ETFs, or incomplete snippets as index data.
+    # Missing indices are explicitly DATA UNAVAILABLE.
     bench=metrics(series.get("^NSEI"))
     if bench is None or bench["1m"]=="" or bench["3m"]=="":
         raise RuntimeError("NIFTY 50 benchmark data missing: cannot label outperform; try another run")
