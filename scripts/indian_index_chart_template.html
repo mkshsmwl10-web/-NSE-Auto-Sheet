@@ -10,7 +10,7 @@ h1{font-size:23px;margin:0 0 6px}p{margin:6px 0}.sub{color:#d1e4e4;font-size:13p
 label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#42606b;font-weight:700}
 select,button,input:not([type="checkbox"]){border:1px solid #b5ccd0;border-radius:8px;background:white;color:#183945;padding:9px;font:inherit}
 input[type="checkbox"]{width:18px;height:18px;margin:6px auto;accent-color:#13856c;cursor:pointer}button{cursor:pointer}button.on{background:#156657;color:white}
-#chart{height:570px}#rsiPanel{height:200px}#notice{color:#7b480c;font-size:13px}
+#chart{height:530px}#volumePanel{height:145px}#rsiPanel{height:190px}#notice{color:#7b480c;font-size:13px}
 .hint{font-size:12px;color:#56717c}#draw{width:100%;height:65px;resize:vertical;font-family:monospace}
 </style></head><body><main>
 <header><h1>India Index Strength | Interactive Chart</h1><p class="sub">Index + top 3 tracked leaders • Candles • SMA20 / SMA50 / EMA20 • RSI14 • Zoom • Compare • Annotation</p></header>
@@ -21,18 +21,26 @@ input[type="checkbox"]{width:18px;height:18px;margin:6px auto;accent-color:#1385
 <label><span>SMA 20</span><input type="checkbox" id="sma20" checked></label>
 <label><span>SMA 50</span><input type="checkbox" id="sma50"></label>
 <label><span>EMA 20</span><input type="checkbox" id="ema20"></label>
-<label><span>RSI 14</span><input type="checkbox" id="rsiToggle" checked></label>
+<label><span>RSI 14</span><input type="checkbox" id="rsiToggle" checked></label><label><span>VOLUME</span><input type="checkbox" id="volumeToggle" checked></label>
 <label>COMPARE INDEX<select id="compare"><option value="">None</option></select></label>
-<button id="reset">Reset view</button>
+<button id="reset">Reset Zoom</button><button id="clearDrawings">Clear Drawings</button>
 </div><p class="hint">Draw trendlines/rectangles/freehand using Plotly toolbar. Drag to zoom. Use screenshot icon to export. Edit note below; use browser's print to save a PDF.</p>
 <p id="notice"></p></section>
-<section class="panel"><div id="chart"></div><div id="rsiPanel"></div></section>
-<section class="panel"><label>CHART NOTES (editable; local page only)<textarea id="draw" placeholder="Write chart observations, buy/stop levels or research notes here. These are not saved to Google Sheets."></textarea></label></section>
+<section class="panel"><div id="chart"></div><div id="volumePanel"></div><div id="rsiPanel"></div></section>
+<section class="panel"><label>CHART NOTES (auto-saved in this browser)<textarea id="draw" placeholder="Write chart observations, buy/stop levels or research notes here. Saved locally on this browser, not Google Sheets."></textarea></label></section>
 </main>
 <script>
 const db=/*DATA_PAYLOAD*/;
 const $=id=>document.getElementById(id);
 const keys=Object.keys(db.indices);
+const chartElement=$('chart');
+function storageKey(){return 'nse-index-drawings-v1:'+ $('idx').value +':'+ $('asset').value}
+function savedData(){try{return JSON.parse(localStorage.getItem(storageKey())||'{}')}catch(e){return {}}}
+function saveShapes(){try{const r=savedData();r.shapes=chartElement.layout?.shapes||[];localStorage.setItem(storageKey(),JSON.stringify(r))}catch(e){console.warn('Browser storage disabled',e)}}
+let eventsAttached=false;
+function attachShapeEvents(){if(eventsAttached)return;chartElement.on('plotly_relayout',ev=>{if(Object.keys(ev).some(k=>k.indexOf('shapes')===0))saveShapes()});eventsAttached=true}
+$('draw').addEventListener('input',()=>{try{let r=savedData();r.note=$('draw').value;localStorage.setItem(storageKey(),JSON.stringify(r))}catch(e){}});
+
 function option(sel,value,label){let x=document.createElement('option');x.value=value;x.textContent=label;sel.appendChild(x)}
 keys.forEach(k=>{option($('idx'),k,k);option($('compare'),k,k)});$('compare').value='';
 const params=new URLSearchParams(location.search);let initial=params.get('index');
@@ -51,10 +59,13 @@ g/=n;l/=n;out[n]=l===0?100:100-100/(1+g/l);
 for(let i=n+1;i<a.length;i++){let ch=a[i].c-a[i-1].c;g=(g*(n-1)+Math.max(ch,0))/n;l=(l*(n-1)+Math.max(-ch,0))/n;
 out[i]=l===0?100:100-100/(1+g/l)}return out}
 function draw(){let group=db.indices[$('idx').value],asset=group?.assets.find(z=>z.symbol===$('asset').value);
-if(!asset){$('notice').textContent='Data unavailable for this index/asset. Check Yahoo symbol in Index Universe.';Plotly.purge('chart');Plotly.purge('rsi');return}
+if(!asset){$('notice').textContent='Data unavailable for this index/asset. Check Yahoo symbol in Index Universe.';Plotly.purge('chart');Plotly.purge('rsiPanel');Plotly.purge('volumePanel');return}
 $('notice').textContent='Price returns, not total returns. Tracked stock list is editable and not necessarily the complete official index membership.';
 let values=series(asset), months={'1m':31,'3m':93,'6m':186,'1y':366}[$('period').value],limit=new Date(values.at(-1).d.getTime()-months*86400000);
 let x=values.map(z=>z.x), trace=[];
+const saved=savedData();$('draw').value=saved.note||'';
+const last=values[values.length-1];
+const liveColor=last.c>=last.o?'#0b8864':'#d04d55';
 if($('style').value==='candlestick'){trace.push({type:'candlestick',x,open:values.map(z=>z.o),high:values.map(z=>z.h),low:values.map(z=>z.l),close:values.map(z=>z.c),name:asset.symbol,increasing:{line:{color:'#0e886c'}},decreasing:{line:{color:'#c84b54'}}})}
 else trace.push({type:'scatter',mode:'lines',x,y:values.map(z=>z.c),name:asset.symbol,line:{color:'#19657b',width:2}});
 for(let [id,title,fn,color,n] of [['sma20','SMA20',sma,'#dd991e',20],['sma50','SMA50',sma,'#934fad',50],['ema20','EMA20',ema,'#2e73b2',20]]){
@@ -62,6 +73,7 @@ if($(id).checked)trace.push({type:'scatter',mode:'lines',x,y:fn(values,n),name:t
 let compare=$('compare').value;
 if(compare&&compare!==$('idx').value){let other=db.indices[compare]?.assets.find(z=>z.symbol===db.indices[compare].index);
 if(other){let a=series(other);let base=a[0]?.c||1;trace.push({type:'scatter',mode:'lines',x:a.map(z=>z.x),y:a.map(z=>z.c/base*values[0].c),name:'Compare '+compare+' (normalized)',line:{dash:'dot',color:'#596f78'}})}}
+trace.push({type:'scatter',mode:'lines',x:[values[0].x,last.x],y:[last.c,last.c],name:'CURRENT '+last.c.toFixed(2),line:{color:liveColor,width:1.5,dash:'dot'},hoverinfo:'skip'});
 let xEnd=values.at(-1).x;let xStart=values.find(z=>z.d>=limit)?.x||values[0].x;
 const config={responsive:true,displaylogo:false,modeBarButtonsToAdd:['drawline','drawopenpath','drawclosedpath','drawcircle','drawrect','eraseshape']};
 Plotly.react('chart',trace,{title:asset.symbol+' — '+group.name,xaxis:{type:'date',range:[xStart,xEnd],rangeslider:{visible:false}},yaxis:{title:'Price'},paper_bgcolor:'#fff',plot_bgcolor:'#fff',dragmode:'pan',hovermode:'x unified',legend:{orientation:'h'},margin:{l:65,r:25,t:70,b:55},uirevision:'user-annotations'},config);
@@ -69,7 +81,8 @@ $('rsiPanel').style.display=$('rsiToggle').checked?'block':'none';
 if($('rsiToggle').checked){Plotly.react('rsiPanel',[{type:'scatter',mode:'lines',x,y:rsi(values),line:{color:'#7652ae'},name:'RSI 14'}],{xaxis:{type:'date',range:[xStart,xEnd]},yaxis:{range:[0,100],title:'RSI'},shapes:[{type:'line',x0:0,x1:1,xref:'paper',y0:70,y1:70,line:{color:'#cb6969',dash:'dot'}},{type:'line',x0:0,x1:1,xref:'paper',y0:30,y1:30,line:{color:'#3aa88a',dash:'dot'}}],margin:{l:65,r:25,t:15,b:40}}, {responsive:true,displaylogo:false})}
 }
 $('idx').onchange=()=>{candidates();draw()};$('asset').onchange=draw;
-['period','style','sma20','sma50','ema20','rsiToggle','compare'].forEach(id=>$(id).onchange=draw);
-$('reset').onclick=()=>{Plotly.relayout('chart',{shapes:[], 'xaxis.autorange':true, 'yaxis.autorange':true})};
+['period','style','sma20','sma50','ema20','rsiToggle','volumeToggle','compare'].forEach(id=>$(id).onchange=draw);
+$('reset').onclick=()=>{Plotly.relayout('chart',{'xaxis.autorange':true,'yaxis.autorange':true})};
+$('clearDrawings').onclick=()=>{const r=savedData();r.shapes=[];try{localStorage.setItem(storageKey(),JSON.stringify(r))}catch(e){}Plotly.relayout('chart',{shapes:[]})};
 candidates();draw();
 </script></body></html>
