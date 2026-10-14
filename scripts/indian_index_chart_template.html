@@ -76,7 +76,21 @@ if(other){let a=series(other);let base=a[0]?.c||1;trace.push({type:'scatter',mod
 trace.push({type:'scatter',mode:'lines',x:[values[0].x,last.x],y:[last.c,last.c],name:'CURRENT '+last.c.toFixed(2),line:{color:liveColor,width:1.5,dash:'dot'},hoverinfo:'skip'});
 let xEnd=values.at(-1).x;let xStart=values.find(z=>z.d>=limit)?.x||values[0].x;
 const config={responsive:true,displaylogo:false,modeBarButtonsToAdd:['drawline','drawopenpath','drawclosedpath','drawcircle','drawrect','eraseshape']};
-Plotly.react('chart',trace,{title:asset.symbol+' — '+group.name,xaxis:{type:'date',range:[xStart,xEnd],rangeslider:{visible:false}},yaxis:{title:'Price'},paper_bgcolor:'#fff',plot_bgcolor:'#fff',dragmode:'pan',hovermode:'x unified',legend:{orientation:'h'},margin:{l:65,r:25,t:70,b:55},uirevision:'user-annotations'},config);
+Plotly.react('chart',trace,{
+title:asset.symbol+' — '+group.name,
+xaxis:{type:'date',range:[xStart,xEnd],rangeslider:{visible:false},showspikes:true,spikemode:'across',spikesnap:'cursor',spikecolor:'#7b9ba2'},
+yaxis:{title:'Price',showspikes:true,spikemode:'across',spikesnap:'cursor',spikecolor:'#7b9ba2'},
+paper_bgcolor:'#fff',plot_bgcolor:'#fff',dragmode:'pan',hovermode:'x unified',
+legend:{orientation:'h'},margin:{l:65,r:25,t:70,b:55},
+uirevision:asset.symbol,shapes:saved.shapes||[]
+},config).then(attachShapeEvents);
+const hasVolume=values.some(z=>Number(z.v)>0);
+$('volumePanel').style.display=$('volumeToggle').checked&&hasVolume?'block':'none';
+if($('volumeToggle').checked&&hasVolume)Plotly.react('volumePanel',[
+{type:'bar',x,y:values.map(z=>z.v),name:'Volume',marker:{color:values.map(z=>z.c>=z.o?'#71bcaa':'#dfa1a5')}}],
+{margin:{l:65,r:25,t:12,b:36},xaxis:{type:'date',range:[xStart,xEnd]},yaxis:{title:'Volume',tickformat:'~s'},
+paper_bgcolor:'#fff',plot_bgcolor:'#fff'}, {responsive:true,displaylogo:false});
+if(!hasVolume && $('volumeToggle').checked)$('notice').textContent+=' Volume not published by data source for this symbol.';
 $('rsiPanel').style.display=$('rsiToggle').checked?'block':'none';
 if($('rsiToggle').checked){Plotly.react('rsiPanel',[{type:'scatter',mode:'lines',x,y:rsi(values),line:{color:'#7652ae'},name:'RSI 14'}],{xaxis:{type:'date',range:[xStart,xEnd]},yaxis:{range:[0,100],title:'RSI'},shapes:[{type:'line',x0:0,x1:1,xref:'paper',y0:70,y1:70,line:{color:'#cb6969',dash:'dot'}},{type:'line',x0:0,x1:1,xref:'paper',y0:30,y1:30,line:{color:'#3aa88a',dash:'dot'}}],margin:{l:65,r:25,t:15,b:40}}, {responsive:true,displaylogo:false})}
 }
