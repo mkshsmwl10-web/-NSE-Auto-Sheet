@@ -26,22 +26,6 @@ URL="https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/charts/indian-index-s
 # Core India/NSE index catalog; Yahoo coverage may vary by ticker.
 # Users can update symbols/candidate baskets in the Index Universe tab.
 SEED=[
-("Broad","NIFTY 50","^NSEI","RELIANCE,HDFCBANK,ICICIBANK,BHARTIARTL,SBIN,LT,TCS,INFY"),
-("BSE","BSE SENSEX","^BSESN","RELIANCE,HDFCBANK,ICICIBANK,BHARTIARTL,LT,TCS,INFY,AXISBANK"),
-("BSE","BSE 100","^BSE100","RELIANCE,HDFCBANK,ICICIBANK,SBIN,LT,TCS,INFY"),
-("BSE","BSE 200","^BSE200","RELIANCE,HDFCBANK,ICICIBANK,SBIN,LT,TCS,INFY"),
-("BSE","BSE 500","^BSE500","RELIANCE,HDFCBANK,ICICIBANK,SBIN,LT,TCS,INFY"),
-("Broad","NIFTY NEXT 50","^NSMIDCP","BEL,HAL,DMART,TRENT,INDIGO,SIEMENS,ABB"),
-("Broad","NIFTY 100","^CNX100","RELIANCE,HDFCBANK,ICICIBANK,BHARTIARTL,SBIN,LT,TCS"),
-("Broad","NIFTY 200","^NSE200","RELIANCE,HDFCBANK,ICICIBANK,BHARTIARTL,SBIN,LT,TCS"),
-("Broad","NIFTY 500","^CRSLDX","RELIANCE,HDFCBANK,ICICIBANK,BHARTIARTL,SBIN,TCS"),
-("Broad","NIFTY MIDCAP 50","^NSEMDCP50","BSE,CDSL,COFORGE,PERSISTENT,FEDERALBNK"),
-("Broad","NIFTY MIDCAP 100","^NSEMDCP100","BSE,CDSL,COFORGE,PERSISTENT,FEDERALBNK"),
-("Broad","NIFTY MIDCAP 150","^NSEMDCP150","BSE,CDSL,COFORGE,PERSISTENT,FEDERALBNK"),
-("Broad","NIFTY SMALLCAP 50","^NSESMCP50","CAMS,IEX,IRCON,RVNL,HUDCO"),
-("Broad","NIFTY SMALLCAP 100","^NSESMCP100","CAMS,IEX,IRCON,RVNL,HUDCO"),
-("Broad","NIFTY SMALLCAP 250","^NSESMCP250","CAMS,IEX,IRCON,RVNL,HUDCO"),
-("Broad","NIFTY MIDCAP SELECT","^NSEMDCPSELECT","PERSISTENT,COFORGE,MAXHEALTH,POLYCAB"),
 ("Sector","NIFTY BANK","^NSEBANK","HDFCBANK,ICICIBANK,SBIN,AXISBANK,KOTAKBANK,INDUSINDBK"),
 ("Sector","NIFTY PRIVATE BANK","^NIFTYPVTBANK","HDFCBANK,ICICIBANK,AXISBANK,KOTAKBANK,INDUSINDBK"),
 ("Sector","NIFTY PSU BANK","^CNXPSUBANK","SBIN,BANKBARODA,PNB,CANBK,UNIONBANK"),
@@ -60,12 +44,6 @@ SEED=[
 ("Sector","NIFTY HEALTHCARE","^NIFTYHEALTHCARE","MAXHEALTH,APOLLOHOSP,FORTIS,SUNPHARMA,CIPLA"),
 ("Sector","NIFTY PSE","^CNXPSE","NTPC,ONGC,POWERGRID,COALINDIA,BEL"),
 ("Sector","NIFTY COMMODITIES","^CNXCOMMODITIES","TATASTEEL,JSWSTEEL,ULTRACEMCO,HINDALCO,ONGC"),
-("Thematic","NIFTY INDIA CONSUMPTION","^CNXCONSUMPTION","BHARTIARTL,ITC,TITAN,INDHOTEL,DMART"),
-("Thematic","NIFTY DEFENCE","^NIFTYDEFENCE","BEL,HAL,BDL,MAZDOCK,COCHINSHIP"),
-("Thematic","NIFTY INDIA DIGITAL","^NIFTYINDIADIGITAL","BHARTIARTL,INFY,TCS,PERSISTENT,NAUKRI"),
-("Thematic","NIFTY EV & NEW AGE AUTO","^NIFTYEV","M&M,TVSMOTOR,EICHERMOT,BAJAJ-AUTO,TATAMOTORS"),
-("Strategy","NIFTY 100 LOW VOLATILITY 30","^NIFTY100LV30","HINDUNILVR,ITC,POWERGRID,NTPC,BRITANNIA"),
-("Strategy","NIFTY 500 MOMENTUM 50","^NIFTY500MOM50","BEL,HAL,BSE,CDSL,PERSISTENT"),
 ]
 HEAD=["Category","Index Name","Yahoo Symbol","Tracked Stock Candidates (comma-separated)","Enabled (YES/NO)"]
 COLS=["Rank","Category","Index","Ticker","Price Date","CMP","1M Return %","3M Return %",
@@ -87,24 +65,39 @@ def number(x):
         return round(f,2) if math.isfinite(f) else ""
     except (ValueError,TypeError):return ""
 def source(book):
+    """Keep only sector indices; preserve edited candidate lists within sector rows."""
     tab=ws(book,UNIVERSE,6)
     values=tab.get_all_values()
-    if not any(any(str(c).strip() for c in row) for row in values):
-        contents=[HEAD]+[[a,b,c,d,"YES"] for a,b,c,d in SEED]
-        tab.resize(rows=max(150,len(contents)+2),cols=6)
-        tab.update(contents,range_name="A1:E"+str(len(contents)),value_input_option="RAW")
-        values=contents
+    meaningful=[row for row in values if any(str(x).strip() for x in row)]
+    if not meaningful:
+        meaningful=[HEAD]+[[a,b,c,d,"YES"] for a,b,c,d in SEED if a=="Sector"]
+    else:
+        # Sector list only. Drop broad market, BSE, thematic and strategy rows.
+        sector_rows=[]
+        for row in meaningful[1:]:
+            row=(row+[""]*5)[:5]
+            if row[0].strip().upper()=="SECTOR" and row[1].strip() and row[2].strip():
+                sector_rows.append(row)
+        meaningful=[HEAD]+sector_rows
+    # Rewrite editable tab after category cleanup; do not overwrite sector edits.
+    tab.clear()
+    tab.resize(rows=max(150,len(meaningful)+2),cols=6)
+    tab.update(meaningful,range_name="A1:E"+str(len(meaningful)),value_input_option="RAW")
     tab.freeze(rows=1)
     tab.format("A1:E1",{"backgroundColor":{"red":0.10,"green":0.22,"blue":0.32},
           "textFormat":{"bold":True,"foregroundColor":{"red":1,"green":1,"blue":1}}})
     result=[]
-    for row in values[1:]:
+    for row in meaningful[1:]:
         row=(row+[""]*5)[:5]
         cat,name,ticker,candidates,enabled=[x.strip() for x in row]
-        if not name or not ticker or enabled.upper() in ("NO","FALSE","0"):continue
-        pool=list(dict.fromkeys(x.strip().upper().removesuffix(".NS") for x in candidates.split(",") if x.strip()))
+        if enabled.upper() in ("NO","FALSE","0"):continue
+        pool=list(dict.fromkeys(x.strip().upper().removesuffix(".NS")
+                                 for x in candidates.split(",") if x.strip()))
         result.append((cat,name,ticker,pool))
+    if not result:raise ValueError("No enabled Sector indices in Index Universe")
     return result
+
+
 def download(ticker):
     for attempt in range(2):
         try:
