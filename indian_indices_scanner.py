@@ -276,6 +276,13 @@ def output(book,name,header,rows,signal_col=None):
                    "cell":{"userEnteredFormat":{"backgroundColor":bg}},
                    "fields":"userEnteredFormat.backgroundColor"}})
     for j in range(0,len(fmt),100):book.batch_update({"requests":fmt[j:j+100]})
+    # Google Sheets retains existing column formats across clear()/update().
+    # Without explicitly resetting I (and its neighboring return columns),
+    # a previously applied DATE format displays numeric excess returns as
+    # 1900-01-xx dates. These columns are percentage POINTS, not ratios.
+    if name==LEADERS:
+        tab.format("F2:L"+str(max(150,len(rows)+2)),
+                   {"numberFormat":{"type":"NUMBER","pattern":"0.00"}})
 def main():
     book=connect();universe=source(book)
     all_symbols={"^NSEI"}
