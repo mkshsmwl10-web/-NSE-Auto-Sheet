@@ -6,6 +6,8 @@ Tracked leaders are chosen from user-editable candidate stocks, not a claim of
 ranking all official constituents. Price returns are not total returns.
 """
 import json, os, math, time
+import requests
+from datetime import timedelta
 from pathlib import Path
 from datetime import date
 from urllib.parse import quote
@@ -115,6 +117,49 @@ def download(ticker):
             print("Fetch error",ticker,str(ex)[:90])
             time.sleep(attempt+1)
     return None
+def official_nse_index(name):
+    """Best-effort official price-index OHLC fallback, never ETF proxy.
+    NSE's undocumented historical endpoint can block runners; leave unavailable
+    on error rather than display an invented index price.
+    """
+    if not name.upper().startswith("NIFTY"):return None
+    finish=date.today();start=finish-timedelta(days=350)
+    payload={"name":name,"startDate":start.strftime("%d-%b-%Y"),
+             "endDate":finish.strftime("%d-%b-%Y"),"indexName":name}
+    url="https://www.niftyindices.com/Backpage.aspx/getHistoricaldatatabletoString"
+    headers={"Content-Type":"application/json; charset=UTF-8",
+             "X-Requested-With":"XMLHttpRequest",
+             "Referer":"https://www.niftyindices.com/reports/historical-data",
+             "User-Agent":"Mozilla/5.0 (compatible; IndexStrengthResearch/1.0)"}
+    try:
+        response=requests.post(url,json={"cinfo":json.dumps(payload)},
+                               headers=headers,timeout=20)
+        response.raise_for_status()
+        data=response.json()
+        raw=data.get("d",data) if isinstance(data,dict) else data
+        if isinstance(raw,str):raw=json.loads(raw)
+        if not isinstance(raw,list) or len(raw)<25:return None
+        frame=pd.DataFrame(raw)
+        date_col=next((k for k in ("HistoricalDate","Date","date") if k in frame),None)
+        if not date_col:return None
+        frame.index=pd.to_datetime(frame[date_col],errors="coerce",dayfirst=True)
+        for out,options in {"Open":["OPEN","Open"],"High":["HIGH","High"],
+                            "Low":["LOW","Low"],"Close":["CLOSE","Close"]}.items():
+            k=next((k for k in options if k in frame),None)
+            if k is None:return None
+            frame[out]=pd.to_numeric(frame[k],errors="coerce")
+        frame=frame[["Open","High","Low","Close"]].dropna(subset=["Close"])
+        for col in ("Open","High","Low"):frame[col]=frame[col].fillna(frame["Close"])
+        frame["Volume"]=0
+        frame=frame[~frame.index.isna()].sort_index()
+        frame=frame[~frame.index.duplicated(keep="last")]
+        print("Official NSE index fallback:",name,len(frame),"rows")
+        return frame if len(frame)>=25 else None
+    except (requests.RequestException,ValueError,TypeError,KeyError) as exc:
+        print("Official NSE fallback unavailable:",name,str(exc)[:130])
+        return None
+
+
 def metrics(df):
     if df is None or df.empty:return None
     now=float(df["Close"].iloc[-1])
@@ -156,6 +201,12 @@ def main():
     series={}
     for sym in sorted(all_symbols):
         series[sym]=download(sym)
+    # Fallback is only for true NSE index OHLC, not representative ETFs.
+    for category,name,symbol,pool in universe:
+        if series.get(symbol) is None:
+            series[symbol]=official_nse_index(name)
+    if series.get("^NSEI") is None:
+        series["^NSEI"]=official_nse_index("NIFTY 50")
     bench=metrics(series.get("^NSEI"))
     if bench is None or bench["1m"]=="" or bench["3m"]=="":
         raise RuntimeError("NIFTY 50 benchmark data missing: cannot label outperform; try another run")
