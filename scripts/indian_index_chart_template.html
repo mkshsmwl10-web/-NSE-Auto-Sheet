@@ -1,0 +1,75 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Indian Index Strength • Interactive Technical Chart</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+:root{font-family:system-ui,Arial;background:#eef3f5;color:#17323d}body{margin:0}
+main{max-width:1460px;margin:18px auto;padding:0 18px}header{background:#153946;color:#fff;border-radius:15px;padding:18px 22px}
+h1{font-size:23px;margin:0 0 6px}p{margin:6px 0}.sub{color:#d1e4e4;font-size:13px}
+.panel{background:white;padding:15px;border-radius:13px;margin:12px 0;box-shadow:0 1px 5px #16384c19}
+.controls{display:flex;flex-wrap:wrap;gap:11px;align-items:end}
+label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#42606b;font-weight:700}
+select,button,input{border:1px solid #b5ccd0;border-radius:8px;background:white;color:#183945;padding:9px;font:inherit}
+button{cursor:pointer}button.on{background:#156657;color:white}
+#chart{height:570px}#rsi{height:200px}#notice{color:#7b480c;font-size:13px}
+.hint{font-size:12px;color:#56717c}#draw{width:100%;height:65px;resize:vertical;font-family:monospace}
+</style></head><body><main>
+<header><h1>India Index Strength | Interactive Chart</h1><p class="sub">Index + top 3 tracked leaders • Candles • SMA20 / SMA50 / EMA20 • RSI14 • Zoom • Compare • Annotation</p></header>
+<section class="panel"><div class="controls">
+<label>INDEX<select id="idx"></select></label><label>ASSET<select id="asset"></select></label>
+<label>TIMEFRAME<select id="period"><option value="1m">1 month</option><option value="3m" selected>3 months</option><option value="6m">6 months</option><option value="1y">1 year</option></select></label>
+<label>CHART STYLE<select id="style"><option value="candlestick">Candles</option><option value="line">Line</option></select></label>
+<label><span>SMA 20</span><input type="checkbox" id="sma20" checked></label>
+<label><span>SMA 50</span><input type="checkbox" id="sma50"></label>
+<label><span>EMA 20</span><input type="checkbox" id="ema20"></label>
+<label><span>RSI 14</span><input type="checkbox" id="rsi" checked></label>
+<label>COMPARE INDEX<select id="compare"><option value="">None</option></select></label>
+<button id="reset">Reset view</button>
+</div><p class="hint">Draw trendlines/rectangles/freehand using Plotly toolbar. Drag to zoom. Use screenshot icon to export. Edit note below; use browser's print to save a PDF.</p>
+<p id="notice"></p></section>
+<section class="panel"><div id="chart"></div><div id="rsi"></div></section>
+<section class="panel"><label>CHART NOTES (editable; local page only)<textarea id="draw" placeholder="Write chart observations, buy/stop levels or research notes here. These are not saved to Google Sheets."></textarea></label></section>
+</main>
+<script>
+const db=/*DATA_PAYLOAD*/;
+const $=id=>document.getElementById(id);
+const keys=Object.keys(db.indices);
+function option(sel,value,label){let x=document.createElement('option');x.value=value;x.textContent=label;sel.appendChild(x)}
+keys.forEach(k=>{option($('idx'),k,k);option($('compare'),k,k)});$('compare').value='';
+const params=new URLSearchParams(location.search);let initial=params.get('index');
+if(initial&&!db.indices[initial])initial='';
+$('idx').value=initial||keys[0]||'';
+function candidates(){let index=db.indices[$('idx').value];$('asset').innerHTML='';if(!index)return;
+(index.assets||[]).forEach(a=>option($('asset'),a.symbol,a.symbol));
+const requested=params.get('asset');if(requested&&Array.from($('asset').options).some(o=>o.value===requested))$('asset').value=requested;
+}
+function series(a){return (a?.d||[]).map(z=>({d:new Date(z[0]),x:z[0],o:z[1],h:z[2],l:z[3],c:z[4],v:z[5]}))}
+function sma(a,n){return a.map((_,i)=>i+1<n?null:a.slice(i+1-n,i+1).reduce((v,z)=>v+z.c,0)/n)}
+function ema(a,n){const p=2/(n+1);let last=null;return a.map(z=>last=(last===null?z.c:(z.c*p+last*(1-p))))}
+function rsi(a,n=14){let g=0,l=0;const out=a.map(()=>null);if(a.length<n+1)return out;
+for(let i=1;i<=n;i++){let ch=a[i].c-a[i-1].c;g+=Math.max(0,ch);l+=Math.max(0,-ch)}
+g/=n;l/=n;out[n]=l===0?100:100-100/(1+g/l);
+for(let i=n+1;i<a.length;i++){let ch=a[i].c-a[i-1].c;g=(g*(n-1)+Math.max(ch,0))/n;l=(l*(n-1)+Math.max(-ch,0))/n;
+out[i]=l===0?100:100-100/(1+g/l)}return out}
+function draw(){let group=db.indices[$('idx').value],asset=group?.assets.find(z=>z.symbol===$('asset').value);
+if(!asset){$('notice').textContent='Data unavailable for this index/asset. Check Yahoo symbol in Index Universe.';Plotly.purge('chart');Plotly.purge('rsi');return}
+$('notice').textContent='Price returns, not total returns. Tracked stock list is editable and not necessarily the complete official index membership.';
+let values=series(asset), months={'1m':31,'3m':93,'6m':186,'1y':366}[$('period').value],limit=new Date(values.at(-1).d.getTime()-months*86400000);
+let x=values.map(z=>z.x), trace=[];
+if($('style').value==='candlestick'){trace.push({type:'candlestick',x,open:values.map(z=>z.o),high:values.map(z=>z.h),low:values.map(z=>z.l),close:values.map(z=>z.c),name:asset.symbol,increasing:{line:{color:'#0e886c'}},decreasing:{line:{color:'#c84b54'}}})}
+else trace.push({type:'scatter',mode:'lines',x,y:values.map(z=>z.c),name:asset.symbol,line:{color:'#19657b',width:2}});
+for(let [id,title,fn,color,n] of [['sma20','SMA20',sma,'#dd991e',20],['sma50','SMA50',sma,'#934fad',50],['ema20','EMA20',ema,'#2e73b2',20]]){
+if($(id).checked)trace.push({type:'scatter',mode:'lines',x,y:fn(values,n),name:title,line:{color,width:1.5}})}
+let compare=$('compare').value;
+if(compare&&compare!==$('idx').value){let other=db.indices[compare]?.assets.find(z=>z.symbol===db.indices[compare].index);
+if(other){let a=series(other);let base=a[0]?.c||1;trace.push({type:'scatter',mode:'lines',x:a.map(z=>z.x),y:a.map(z=>z.c/base*values[0].c),name:'Compare '+compare+' (normalized)',line:{dash:'dot',color:'#596f78'}})}}
+let xEnd=values.at(-1).x;let xStart=values.find(z=>z.d>=limit)?.x||values[0].x;
+const config={responsive:true,displaylogo:false,modeBarButtonsToAdd:['drawline','drawopenpath','drawclosedpath','drawcircle','drawrect','eraseshape']};
+Plotly.react('chart',trace,{title:asset.symbol+' — '+group.name,xaxis:{type:'date',range:[xStart,xEnd],rangeslider:{visible:false}},yaxis:{title:'Price'},paper_bgcolor:'#fff',plot_bgcolor:'#fff',dragmode:'pan',hovermode:'x unified',legend:{orientation:'h'},margin:{l:65,r:25,t:70,b:55},uirevision:'user-annotations'},config);
+$('rsi').style.display=$('rsi').checked?'block':'none';
+if($('rsi').checked){Plotly.react('rsi',[{type:'scatter',mode:'lines',x,y:rsi(values),line:{color:'#7652ae'},name:'RSI 14'}],{xaxis:{type:'date',range:[xStart,xEnd]},yaxis:{range:[0,100],title:'RSI'},shapes:[{type:'line',x0:0,x1:1,xref:'paper',y0:70,y1:70,line:{color:'#cb6969',dash:'dot'}},{type:'line',x0:0,x1:1,xref:'paper',y0:30,y1:30,line:{color:'#3aa88a',dash:'dot'}}],margin:{l:65,r:25,t:15,b:40}}, {responsive:true,displaylogo:false})}
+}
+$('idx').onchange=()=>{candidates();draw()};$('asset').onchange=draw;
+['period','style','sma20','sma50','ema20','rsi','compare'].forEach(id=>$(id).onchange=draw);
+$('reset').onclick=()=>{Plotly.relayout('chart',{shapes:[], 'xaxis.autorange':true, 'yaxis.autorange':true})};
+candidates();draw();
+</script></body></html>
