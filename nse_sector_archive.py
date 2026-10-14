@@ -113,11 +113,10 @@ def load_index_archive(days=120):
     present=set(cache["Date"].dropna().astype(str).tolist())
     candidates=[since+timedelta(days=i) for i in range((today-since).days+1)]
     weekdays=[d for d in candidates if d.weekday()<5]
-    missing=[d for d in weekdays if str(d) not in present and
-             not (checked.get(str(d))=="UNAVAILABLE" and
-                  d<today-timedelta(days=2))]
-    # Retry missing historic dates, while bounding requests per run.
-    # Divide the backlog across successive workflow runs.
+    # Always retry absent historical trading days on later runs. A network
+    # failure must never become a permanent "holiday" marker.
+    missing=[d for d in weekdays if str(d) not in present]
+    # Bound each run; all requested days fit the normal 125-day lookback.
     if len(missing)>95:missing=missing[-95:]
     print("NSE daily archive cache:",len(present),"days; requests:",len(missing))
     incoming=[]
