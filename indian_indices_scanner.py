@@ -24,6 +24,10 @@ URL="https://mkshsmwl10-web.github.io/-NSE-Auto-Sheet/docs/charts/indian-index-s
 # Users can update symbols/candidate baskets in the Index Universe tab.
 SEED=[
 ("Broad","NIFTY 50","^NSEI","RELIANCE,HDFCBANK,ICICIBANK,BHARTIARTL,SBIN,LT,TCS,INFY"),
+("BSE","BSE SENSEX","^BSESN","RELIANCE,HDFCBANK,ICICIBANK,BHARTIARTL,LT,TCS,INFY,AXISBANK"),
+("BSE","BSE 100","^BSE100","RELIANCE,HDFCBANK,ICICIBANK,SBIN,LT,TCS,INFY"),
+("BSE","BSE 200","^BSE200","RELIANCE,HDFCBANK,ICICIBANK,SBIN,LT,TCS,INFY"),
+("BSE","BSE 500","^BSE500","RELIANCE,HDFCBANK,ICICIBANK,SBIN,LT,TCS,INFY"),
 ("Broad","NIFTY NEXT 50","^NSMIDCP","BEL,HAL,DMART,TRENT,INDIGO,SIEMENS,ABB"),
 ("Broad","NIFTY 100","^CNX100","RELIANCE,HDFCBANK,ICICIBANK,BHARTIARTL,SBIN,LT,TCS"),
 ("Broad","NIFTY 200","^NSE200","RELIANCE,HDFCBANK,ICICIBANK,BHARTIARTL,SBIN,LT,TCS"),
@@ -101,7 +105,7 @@ def source(book):
 def download(ticker):
     for attempt in range(2):
         try:
-            df=yf.Ticker(ticker).history(period="14mo",interval="1d",auto_adjust=False)
+            df=yf.Ticker(ticker).history(period="1y",interval="1d",auto_adjust=False)
             if df is None or df.empty:return None
             df=df[["Open","High","Low","Close","Volume"]].dropna(subset=["Close"]).copy()
             df.index=pd.to_datetime(df.index).tz_localize(None).normalize()
