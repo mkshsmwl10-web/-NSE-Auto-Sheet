@@ -5,6 +5,20 @@ from swing_accumulation import evaluate, completed_bars, IST
 
 
 class SwingTests(unittest.TestCase):
+    def test_google_transient_retry_policy(self):
+        from swing_accumulation import sheets_retry_policy
+        from urllib3.response import HTTPResponse
+        policy = sheets_retry_policy()
+        self.assertTrue(policy.is_retry('GET', 502))
+        self.assertTrue(policy.is_retry('PUT', 503))
+        self.assertFalse(policy.is_retry('GET', 403))
+        self.assertFalse(policy.is_retry('POST', 502))
+        for _ in range(5):
+            policy = policy.increment(method='GET', response=HTTPResponse(status=502))
+        from urllib3.exceptions import MaxRetryError
+        with self.assertRaises(MaxRetryError):
+            policy.increment(method='GET', response=HTTPResponse(status=502))
+
     def bars(self):
         closes = [60+i*.15 for i in range(210)]
         closes += [94+(i%2)*.5+i*.03 for i in range(20)]
