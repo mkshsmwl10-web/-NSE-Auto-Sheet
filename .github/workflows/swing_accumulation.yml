@@ -1,0 +1,33 @@
+name: Swing Accumulation Scanner
+on:
+  schedule:
+    - cron: '0 15 * * 1-5'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: swing-accumulation-scanner
+  cancel-in-progress: false
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: python -m pip install pandas yfinance gspread google-auth
+      - name: Test setup rules
+        run: python -m unittest test_swing_accumulation.py -v
+      - name: Scan and update Swing Accumulation
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+        run: python swing_accumulation.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: swing-accumulation-results
+          path: swing_output/
+          if-no-files-found: ignore
