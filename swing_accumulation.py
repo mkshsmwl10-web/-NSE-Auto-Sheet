@@ -70,11 +70,42 @@ def evaluate(raw):
             'Institutional Evidence': 'UNVERIFIED: delivery / holdings / deals not loaded'}
 
 
+def sheets_retry_policy():
+    from urllib3.util.retry import Retry
+    return Retry(total=5, connect=5, read=5, status=5, backoff_factor=4,
+                 status_forcelist=(429, 500, 502, 503, 504),
+                 allowed_methods=frozenset({'GET', 'HEAD', 'PUT'}),
+                 raise_on_status=False, respect_retry_after_header=True)
+
+
+def open_swing_book():
+    import os
+    import gspread
+    from google.oauth2.service_account import Credentials
+    from google.auth.transport.requests import AuthorizedSession
+    from requests.adapters import HTTPAdapter
+    from update_sheet import SHEET_ID
+    raw = os.environ.get('GCP_CREDENTIALS', '').strip()
+    if not raw:
+        raise RuntimeError('GCP_CREDENTIALS missing')
+    scopes = ['https://www.googleapis.com/auth/spreadsheets',
+              'https://www.googleapis.com/auth/drive']
+    creds = (Credentials.from_service_account_info(json.loads(raw), scopes=scopes)
+             if raw.startswith('{') else Credentials.from_service_account_file(raw, scopes=scopes))
+    session = AuthorizedSession(creds)
+    # Retry HTTP responses before gspread attempts to parse Google's HTML error.
+    # POST is excluded so worksheet creation cannot be accidentally repeated.
+    session.mount('https://', HTTPAdapter(max_retries=sheets_retry_policy()))
+    client = gspread.Client(auth=creds, session=session)
+    client.set_timeout((15, 60))
+    return client.open_by_key(SHEET_ID)
+
+
 def main():
     import gspread
     import yfinance as yf
-    from update_sheet import google_book, get_stocks
-    book = google_book()
+    from update_sheet import get_stocks
+    book = open_swing_book()
     stocks = get_stocks(book)
     rows, errors = [], []
     now = datetime.now(IST)
