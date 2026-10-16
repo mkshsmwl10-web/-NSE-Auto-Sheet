@@ -414,11 +414,23 @@ def update_results(book, rows, excluded=0):
                 bg = {"red": 0.05, "green": 0.42, "blue": 0.27}
             elif stale:
                 bg = {"red": 0.99, "green": 0.96, "blue": 0.88}
-            cell_format = {"backgroundColor": bg, "verticalAlignment": "MIDDLE"}
+            # Always reset foreground color. A formerly triggered green/white
+            # row would otherwise keep invisible WHITE text on its new pale
+            # background after the half-month period rolls over.
+            cell_format = {
+                "backgroundColor": bg,
+                "verticalAlignment": "MIDDLE",
+                "textFormat": {
+                    "bold": bool(triggered),
+                    "fontSize": 11 if triggered else 10,
+                    "foregroundColor": (
+                        {"red": 1, "green": 1, "blue": 1}
+                        if triggered else
+                        {"red": 0.12, "green": 0.20, "blue": 0.27}
+                    )
+                }
+            }
             if triggered:
-                cell_format["textFormat"] = {
-                    "bold": True, "fontSize": 11,
-                    "foregroundColor": {"red": 1, "green": 1, "blue": 1}}
                 cell_format["borders"] = {
                     edge: {"style": "SOLID_MEDIUM",
                            "color": {"red": 0.02, "green": 0.30, "blue": 0.19}}
@@ -430,7 +442,8 @@ def update_results(book, rows, excluded=0):
                 "cell": {"userEnteredFormat": cell_format},
                 "fields": ("userEnteredFormat" if triggered else
                            "userEnteredFormat.backgroundColor,"
-                           "userEnteredFormat.verticalAlignment")}})
+                           "userEnteredFormat.verticalAlignment,"
+                           "userEnteredFormat.textFormat")}})
             # Profit and loss cells keep their own high-contrast distinction.
             if row[21] != "":
                 positive = float(row[21]) >= 0
