@@ -7,6 +7,8 @@ An editable Google worksheet controls the user-selected ETF/stock universe.
 Daily candle High/Low detects a touch; CMP records the latest available Close.
 """
 import calendar
+import io
+import requests
 import json
 import os
 import re
@@ -154,7 +156,96 @@ def fetch_daily(symbol):
     return None, last_error[:100]
 
 
-def build_row(item, df, error, today):
+def load_nse_recent(today):
+    """Fetch official NSE security-wise daily bhavcopies once for all symbols.
+
+    These are actual NSE daily OHLC records (not live quotes). Only valid
+    exchange-published days are accepted; no missing day is fabricated.
+    """
+    reports={}
+    source_dates=[]
+    headers={
+        "User-Agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
+        "Accept":"text/csv,application/csv,text/plain,*/*",
+        "Referer":"https://www.nseindia.com/all-reports",
+    }
+    session=requests.Session()
+    session.headers.update(headers)
+    # Do not treat a partial in-session candle as final close.
+    now_ist=pd.Timestamp.now(tz="Asia/Kolkata")
+    latest_day=today if now_ist.hour>=19 else today-timedelta(days=1)
+    archive="https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_{}.csv"
+    for age in range(11):
+        day=latest_day-timedelta(days=age)
+        if day.weekday()>=5:continue
+        url=archive.format(day.strftime("%d%m%Y"))
+        try:
+            response=session.get(url,timeout=13)
+            if response.status_code==404:continue
+            response.raise_for_status()
+            if len(response.content)<100 or len(response.content)>8000000:
+                continue
+            table=pd.read_csv(io.BytesIO(response.content),low_memory=False)
+            table.columns=[str(c).strip().upper().lstrip("\ufeff") for c in table.columns]
+            needed={"SYMBOL","SERIES","HIGH_PRICE","LOW_PRICE","CLOSE_PRICE"}
+            if not needed.issubset(table.columns):
+                print("NSE fallback unexpected columns:",day,list(table.columns)[:12])
+                continue
+            table["SYMBOL"]=table["SYMBOL"].astype(str).str.strip().str.upper()
+            table["SERIES"]=table["SERIES"].astype(str).str.strip().str.upper()
+            table=table[table["SERIES"].isin(("EQ","BE","BZ","SM","ST"))].copy()
+            if table.empty:continue
+            # Explicit date check if source includes it.
+            if "DATE1" in table.columns:
+                record_dates=pd.to_datetime(table["DATE1"].astype(str).str.strip(),
+                                            errors="coerce",dayfirst=True)
+                table=table.loc[record_dates.dt.date==day]
+                if table.empty:
+                    print("NSE fallback archive date mismatch:",day)
+                    continue
+            source_dates.append(day)
+            for row in table.itertuples(index=False):
+                rec=dict(zip(table.columns,row))
+                symbol=rec["SYMBOL"]
+                try:
+                    hi=float(str(rec["HIGH_PRICE"]).replace(",","").strip())
+                    lo=float(str(rec["LOW_PRICE"]).replace(",","").strip())
+                    close=float(str(rec["CLOSE_PRICE"]).replace(",","").strip())
+                except (TypeError,ValueError):
+                    continue
+                if not (0<lo<=hi and 0<close and lo-0.01<=close<=hi+0.01):
+                    continue
+                # NSE EQ series is the preferred regular-market record.
+                priority=0 if rec["SERIES"]=="EQ" else 1
+                old=reports.get((symbol,day))
+                if old is None or priority<old[0]:
+                    reports[(symbol,day)]=(priority,hi,lo,close)
+            print("NSE full bhavcopy confirmed:",day,"symbols:",len(table))
+        except (requests.RequestException,ValueError,pd.errors.ParserError,
+                UnicodeError) as exc:
+            print("NSE bhavcopy unavailable:",day,str(exc)[:120])
+    session.close()
+    print("NSE fallback available trading days:",len(source_dates),
+          "most recent:",max(source_dates) if source_dates else "NONE")
+    return reports,(max(source_dates) if source_dates else None)
+
+
+def merge_nse_recent(df,symbol,reports):
+    """Append genuinely newer NSE daily OHLC; don't overwrite Yahoo bars."""
+    matched=sorted([(d,ohlc) for (sym,d),ohlc in reports.items() if sym==symbol])
+    if not matched:return df,0
+    rows=[[pd.Timestamp(d),ohlc[1],ohlc[2],ohlc[3]] for d,ohlc in matched]
+    archive=pd.DataFrame(rows,columns=["Date","High","Low","Close"]).set_index("Date")
+    if df is None or df.empty:
+        return archive, len(archive)
+    newer=archive[archive.index>df.index[-1]]
+    if newer.empty:return df,0
+    merged=pd.concat([df,newer]).sort_index()
+    merged=merged[~merged.index.duplicated(keep="first")]
+    return merged,len(newer)
+
+
+def build_row(item, df, error, today, confirmed_market_day=None):
     kind, sector, name, symbol = item
     if today.day <= 15:
         prev_end = date(today.year, today.month, 1) - timedelta(days=1)
@@ -205,8 +296,14 @@ def build_row(item, df, error, today):
         status = "BUY TRIGGERED"
     else:
         status = "WAIT ABOVE HIGH" if kind == "STOCK" else "WAIT BELOW LOW"
-    if quote_date < today - timedelta(days=3):
-        status += " | STALE PRICE"
+    # Prefer an exchange-confirmed market day. Do not assume holidays traded.
+    if confirmed_market_day is not None:
+        if quote_date < confirmed_market_day:
+            status += " | STALE PRICE"
+    elif quote_date < today - timedelta(days=3):
+        status += " | STALE PRICE | NSE VERIFY UNAVAILABLE"
+    elif quote_date < today-timedelta(days=1) and today.weekday()<5:
+        status += " | CHECK PRICE DATE (NSE UNAVAILABLE)"
 
     # Hypothetical full-share allocation at reference level; not an executed fill.
     # Do not compute paper P/L before entry.
@@ -378,9 +475,15 @@ def main():
         raise ValueError("HalfMonth Watchlist has no valid symbols")
     rows = []
     excluded = 0
+    official_prices,confirmed_day=load_nse_recent(today)
     for item in watchlist:
         df, error = fetch_daily(item[3])
-        row = build_row(item, df, error, today)
+        df,added=merge_nse_recent(df,item[3],official_prices)
+        if added:
+            print("NSE fallback filled:",item[3],added,"new daily bars")
+            error=""
+        # If the official source is blocked, the old day stays visible.
+        row = build_row(item, df, error, today,confirmed_day)
         qty = row[16]
         # Keep user watchlist untouched, but exclude anything with <2 whole
         # units at the prior half-period's reference entry price.
