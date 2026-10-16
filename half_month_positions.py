@@ -12,8 +12,6 @@ import gspread
 
 HISTORY_TAB="HalfMonth History"
 HOLDINGS_TAB="HalfMonth Holdings"
-MONTHLY_BUDGET=50000
-BUDGET_START=date(2026,10,16) # Do not reconstruct signals prior to the new rule.
 HISTORY_HEADER=[
     "Signal ID","Half Start","Half End","Type","Sector / Theme","Name",
     "NSE Code","Trigger Date","Paper Entry","Qty","Record Source",
@@ -81,43 +79,19 @@ def persist_paper_signals(book,watchlist,market_data,today):
         raise ValueError("HalfMonth History columns changed. Existing ledger preserved; fix headers before rerun.")
     existing={str(row[0]).strip() for row in raw[1:] if row and row[0]}
     start,end=half_window(today)
-    # Count old paper entries too, even if their symbols are no longer
-    # in the new watchlist. Never delete or change historical positions.
-    month_start=date(today.year,today.month,1)
-    month_spent=0.0
-    for line in raw[1:]:
-        if len(line)<10 or not line[0]:continue
-        try:
-            bought=date.fromisoformat(str(line[7]).strip())
-            amount=float(str(line[8]).replace(",",""))*int(
-                float(str(line[9]).replace(",","")))
-        except (TypeError,ValueError):continue
-        if month_start<=bought<=today:
-            month_spent+=amount
+    # No monthly cap. Record every valid PAPER signal from the current half,
+    # at most once per symbol and period. Existing history is append-only.
+    # Don't retrospectively create trades in prior half periods.
     pending=[]
-    skipped=set()
-    candidates=[]
-    # Only consider this half: never backfill newly shortlisted stocks into
-    # previous half periods, which could silently eat the current budget.
-    for priority,item in enumerate(watchlist):
+    for item in watchlist:
         df=market_data.get(item[3])
         key=str(start)+":"+item[3]
         if key in existing:continue
         signal=historic_signal(item,df,start,end,today,"CURRENT OHLC (PAPER)")
         if signal is not None:
-            candidates.append((signal[7],priority,signal))
-    # One buy per symbol per half, deterministic earliest trigger first.
-    candidates.sort(key=lambda x:(x[0],x[1]))
-    for _,_,signal in candidates:
-        cost=float(signal[8])*int(signal[9])
-        if month_spent+cost>MONTHLY_BUDGET+0.00001:
-            skipped.add(signal[6])
-            print("MONTHLY BUDGET LIMIT:",signal[6],"needed",cost,
-                  "available",round(MONTHLY_BUDGET-month_spent,2))
-            continue
-        pending.append(signal)
-        existing.add(signal[0])
-        month_spent+=cost
+            pending.append(signal)
+            existing.add(key)
+    pending.sort(key=lambda row:(row[7],row[6]))
     if pending:
         history.append_rows(pending,value_input_option="RAW",
                             insert_data_option="INSERT_ROWS")
@@ -233,5 +207,4 @@ def persist_paper_signals(book,watchlist,market_data,today):
         book.batch_update({"requests":requests[i:i+90]})
     print("HalfMonth History:",len(raw)-1,"recorded paper signals;",
           len(pending),"new; Holdings:",len(open_rows),"open paper lots")
-    return {"new":len(pending),"holdings":len(open_rows),
-            "month_spent":round(month_spent,2),"skipped":skipped}
+    return {"new":len(pending),"holdings":len(open_rows)}
