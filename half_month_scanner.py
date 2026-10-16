@@ -319,7 +319,7 @@ def build_row(item, df, error, today, confirmed_market_day=None):
                    entry, invested, current, pnl, pnl_pct]
 
 
-def update_results(book, rows, excluded=0, month_spent=None):
+def update_results(book, rows, excluded=0):
     """Refresh a clean, readable 23-column dashboard and its paper positions."""
     ws = worksheet(book, SIGNALS_TAB, len(RESULT_COLS))
     ws.clear()
@@ -339,10 +339,7 @@ def update_results(book, rows, excluded=0, month_spent=None):
     # Use two columns per KPI for less visual crowding.
     data = [["HALF-MONTH | STOCK BREAKOUT + ETF DIP",
              "₹5,000 per symbol • Minimum 1 unit • Paper P/L only"]]
-    data.append(["Monthly PAPER BUY cap: ₹50,000",
-                 ("Used ₹"+format(month_spent,",.2f")+
-                  " | Remaining ₹"+format(max(0,50000-month_spent),",.2f"))
-                 if month_spent is not None else ""])
+    data.append(["MONTHLY LIMIT: NONE", "Paper signal purchases; up to ₹5,000 per symbol each half"])
     label_row, value_row = [""] * 23, [""] * 23
     for i, (label, value) in enumerate(zip(summary_labels, summary_values)):
         label_row[i * 2] = label
@@ -562,18 +559,11 @@ def main():
         df, error = fetch_daily(old_symbol)
         df, added = merge_nse_recent(df, old_symbol, official_prices)
         market_data[old_symbol] = df
-    # Append only signal buys within the monthly cap.
     ledger = persist_paper_signals(book, watchlist, market_data, today)
     for row in rows:
-        if "BUY TRIGGERED" not in str(row[11]):continue
-        if row[3] in ledger["skipped"]:
-            row[11] = "BUY SIGNAL | MONTHLY BUDGET LIMIT"
-            row[17:23] = [""]*6
-        else:
-            row[11] = str(row[11]).replace(
-                "BUY TRIGGERED", "BUY TRIGGERED | PAPER RECORDED")
-    update_results(book, rows, excluded, ledger["month_spent"])
-    print("Monthly PAPER BUY budget:",ledger["month_spent"],"/ 50000")
+        if "BUY TRIGGERED" in str(row[11]):
+            row[11] = str(row[11]).replace("BUY TRIGGERED", "BUY TRIGGERED | PAPER RECORDED")
+    update_results(book, rows, excluded)
     print("HalfMonth Signals updated:", len(rows), "symbols on", today)
 
 
