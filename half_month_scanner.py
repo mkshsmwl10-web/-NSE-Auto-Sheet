@@ -19,6 +19,7 @@ import gspread
 import pandas as pd
 import yfinance as yf
 from google.oauth2.service_account import Credentials
+from half_month_positions import persist_paper_signals
 
 SHEET_ID = os.getenv("SPREADSHEET_ID", "1bNXvVoDXgBmB-R_w6nJr4sBVYK6bksrv35BVYkiNe2E")
 WATCHLIST_TAB = os.getenv("HALF_MONTH_WATCHLIST", "HalfMonth Watchlist")
@@ -475,6 +476,7 @@ def main():
         raise ValueError("HalfMonth Watchlist has no valid symbols")
     rows = []
     excluded = 0
+    market_data = {}
     official_prices,confirmed_day=load_nse_recent(today)
     for item in watchlist:
         df, error = fetch_daily(item[3])
@@ -482,6 +484,8 @@ def main():
         if added:
             print("NSE fallback filled:",item[3],added,"new daily bars")
             error=""
+        # Store the same verified market series for prior/current paper lots.
+        market_data[item[3]] = df
         # If the official source is blocked, the old day stays visible.
         row = build_row(item, df, error, today,confirmed_day)
         qty = row[16]
@@ -496,6 +500,9 @@ def main():
     rows.sort(key=lambda row: (0 if row[0] == "STOCK" else 1,
                                0 if "BUY TRIGGERED" in row[11] else 1,
                                row[1], row[3]))
+    # Save historic triggers BEFORE regenerating the current-period dashboard.
+    # OPEN lots survive half changes; SELL is a user edit in History column L.
+    persist_paper_signals(book, watchlist, market_data, today)
     update_results(book, rows, excluded)
     print("HalfMonth Signals updated:", len(rows), "symbols on", today)
 
