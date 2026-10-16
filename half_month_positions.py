@@ -145,6 +145,66 @@ def persist_paper_signals(book,watchlist,market_data,today):
             "numberFormat":{"type":"NUMBER","pattern":"#,##0.00"}})
         holdings.format("A2:P"+str(len(open_rows)+1),{
             "verticalAlignment":"MIDDLE"})
+    # Persistent color styling: reapplied after every scanner run.
+    navy={"red":0.10,"green":0.25,"blue":0.36}
+    white={"red":1,"green":1,"blue":1}
+    dark={"red":0.13,"green":0.22,"blue":0.32}
+    pale_blue={"red":0.91,"green":0.96,"blue":1}
+    pale_mint={"red":0.90,"green":0.98,"blue":0.94}
+    pale_red={"red":1,"green":0.91,"blue":0.91}
+    pale_gold={"red":1,"green":0.96,"blue":0.83}
+    requests=[]
+    for idx,row in enumerate(open_rows,start=1):
+        positive=isinstance(row[13],(float,int)) and row[13]>=0
+        bg=pale_mint if positive else pale_red
+        if not isinstance(row[13],(float,int)):bg=pale_gold
+        requests.append({"repeatCell":{
+            "range":{"sheetId":holdings.id,"startRowIndex":idx,"endRowIndex":idx+1,
+                     "startColumnIndex":0,"endColumnIndex":16},
+            "cell":{"userEnteredFormat":{"backgroundColor":
+                pale_blue if idx%2 else {"red":0.95,"green":0.97,"blue":0.99},
+                "textFormat":{"foregroundColor":dark}}},
+            "fields":"userEnteredFormat.backgroundColor,userEnteredFormat.textFormat"}})
+        requests.append({"repeatCell":{
+            "range":{"sheetId":holdings.id,"startRowIndex":idx,"endRowIndex":idx+1,
+                     "startColumnIndex":13,"endColumnIndex":15},
+            "cell":{"userEnteredFormat":{"backgroundColor":bg,
+                "textFormat":{"bold":True,"foregroundColor":
+                    {"red":0.05,"green":0.40,"blue":0.24} if positive
+                    else {"red":0.71,"green":0.15,"blue":0.20}}}},
+            "fields":"userEnteredFormat.backgroundColor,userEnteredFormat.textFormat"}})
+        requests.append({"repeatCell":{
+            "range":{"sheetId":holdings.id,"startRowIndex":idx,"endRowIndex":idx+1,
+                     "startColumnIndex":15,"endColumnIndex":16},
+            "cell":{"userEnteredFormat":{"backgroundColor":pale_gold,
+                "textFormat":{"bold":True,"foregroundColor":dark}}},
+            "fields":"userEnteredFormat.backgroundColor,userEnteredFormat.textFormat"}})
+    for idx,row in enumerate(raw[1:],start=1):
+        if not row or not row[0]:continue
+        closed=len(row)>11 and str(row[11]).strip().upper()=="SELL"
+        bg=pale_red if closed else pale_mint if idx%2 else pale_blue
+        requests.append({"repeatCell":{
+            "range":{"sheetId":history.id,"startRowIndex":idx,"endRowIndex":idx+1,
+                     "startColumnIndex":0,"endColumnIndex":15},
+            "cell":{"userEnteredFormat":{"backgroundColor":bg,
+                "textFormat":{"foregroundColor":dark}}},
+            "fields":"userEnteredFormat.backgroundColor,userEnteredFormat.textFormat"}})
+        requests.append({"repeatCell":{
+            "range":{"sheetId":history.id,"startRowIndex":idx,"endRowIndex":idx+1,
+                     "startColumnIndex":11,"endColumnIndex":12},
+            "cell":{"userEnteredFormat":{"textFormat":{"bold":True,
+                "foregroundColor":{"red":0.66,"green":0.15,"blue":0.17} if closed
+                   else {"red":0.07,"green":0.42,"blue":0.26}}}},
+            "fields":"userEnteredFormat.textFormat"}})
+    for tab,col_widths in [(holdings,{0:215,1:120,3:215,4:150,5:115,6:115,11:115,15:175}),
+                            (history,{0:215,4:150,5:215,6:120,10:205,11:165,14:340})]:
+        for col,width in col_widths.items():
+            requests.append({"updateDimensionProperties":{
+                "range":{"sheetId":tab.id,"dimension":"COLUMNS",
+                         "startIndex":col,"endIndex":col+1},
+                "properties":{"pixelSize":width},"fields":"pixelSize"}})
+    for i in range(0,len(requests),90):
+        book.batch_update({"requests":requests[i:i+90]})
     print("HalfMonth History:",len(raw)-1,"recorded paper signals;",
           len(pending),"new; Holdings:",len(open_rows),"open paper lots")
     return len(pending),len(open_rows)
