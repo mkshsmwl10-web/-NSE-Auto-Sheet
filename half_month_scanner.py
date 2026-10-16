@@ -319,7 +319,7 @@ def build_row(item, df, error, today, confirmed_market_day=None):
                    entry, invested, current, pnl, pnl_pct]
 
 
-def update_results(book, rows, excluded=0):
+def update_results(book, rows, excluded=0, month_spent=None):
     """Refresh a clean, readable 23-column dashboard and its paper positions."""
     ws = worksheet(book, SIGNALS_TAB, len(RESULT_COLS))
     ws.clear()
@@ -331,15 +331,18 @@ def update_results(book, rows, excluded=0):
     return_pct = round(profit / invested * 100, 2) if invested else 0
     summary_labels = ["SYMBOLS", "STOCKS", "ETFs", "BUY TRIGGERED",
                       "INVESTED ₹", "CURRENT ₹", "P/L ₹", "RETURN %",
-                      "EXCLUDED QTY < 2"]
+                      "EXCLUDED QTY < 1"]
     summary_values = [len(rows), sum(r[0] == "STOCK" for r in rows),
                       sum(r[0] == "ETF" for r in rows), len(triggered),
                       invested, current, profit, return_pct, excluded]
     # Row 1 dashboard title, rows 3-4 KPIs, row 6 actual data headers.
     # Use two columns per KPI for less visual crowding.
     data = [["HALF-MONTH | STOCK BREAKOUT + ETF DIP",
-             "₹5,000 per symbol • Minimum 2 units • Paper P/L only"]]
-    data.append([])
+             "₹5,000 per symbol • Minimum 1 unit • Paper P/L only"]]
+    data.append(["Monthly PAPER BUY cap: ₹50,000",
+                 ("Used ₹"+format(month_spent,",.2f")+
+                  " | Remaining ₹"+format(max(0,50000-month_spent),",.2f"))
+                 if month_spent is not None else ""])
     label_row, value_row = [""] * 23, [""] * 23
     for i, (label, value) in enumerate(zip(summary_labels, summary_values)):
         label_row[i * 2] = label
@@ -538,7 +541,7 @@ def main():
         qty = row[16]
         # Keep user watchlist untouched, but exclude anything with <2 whole
         # units at the prior half-period's reference entry price.
-        if isinstance(qty, (int, float)) and qty < 2:
+        if isinstance(qty, (int, float)) and qty < 1:
             excluded += 1
             print("EXCLUDED (quantity under 2):", item[0], item[3], qty)
             continue
@@ -547,10 +550,30 @@ def main():
     rows.sort(key=lambda row: (0 if row[0] == "STOCK" else 1,
                                0 if "BUY TRIGGERED" in row[11] else 1,
                                row[1], row[3]))
-    # Save historic triggers BEFORE regenerating the current-period dashboard.
-    # OPEN lots survive half changes; SELL is a user edit in History column L.
-    persist_paper_signals(book, watchlist, market_data, today)
-    update_results(book, rows, excluded)
+    # Keep prices updating for old holdings removed from the active watchlist.
+    try:
+        previous = book.worksheet("HalfMonth History").get_all_values()
+    except gspread.WorksheetNotFound:
+        previous = []
+    for entry in previous[1:]:
+        if len(entry)<7 or not entry[6]:continue
+        old_symbol = entry[6].strip().upper()
+        if old_symbol in market_data:continue
+        df, error = fetch_daily(old_symbol)
+        df, added = merge_nse_recent(df, old_symbol, official_prices)
+        market_data[old_symbol] = df
+    # Append only signal buys within the monthly cap.
+    ledger = persist_paper_signals(book, watchlist, market_data, today)
+    for row in rows:
+        if "BUY TRIGGERED" not in str(row[11]):continue
+        if row[3] in ledger["skipped"]:
+            row[11] = "BUY SIGNAL | MONTHLY BUDGET LIMIT"
+            row[17:23] = [""]*6
+        else:
+            row[11] = str(row[11]).replace(
+                "BUY TRIGGERED", "BUY TRIGGERED | PAPER RECORDED")
+    update_results(book, rows, excluded, ledger["month_spent"])
+    print("Monthly PAPER BUY budget:",ledger["month_spent"],"/ 50000")
     print("HalfMonth Signals updated:", len(rows), "symbols on", today)
 
 
