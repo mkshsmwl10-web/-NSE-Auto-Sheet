@@ -27,7 +27,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install gspread pandas yfinance google-auth
+          python -m pip install gspread pandas yfinance google-auth requests
 
       - name: Update editable watchlist and signals
         env:
