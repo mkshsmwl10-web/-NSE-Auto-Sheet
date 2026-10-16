@@ -444,6 +444,40 @@ def update_results(book, rows, excluded=0):
                            "userEnteredFormat.backgroundColor,"
                            "userEnteredFormat.verticalAlignment,"
                            "userEnteredFormat.textFormat")}})
+            # High-contrast accents on actionable numbers and state, kept
+            # after row-level styling so text remains readable.
+            if not triggered:
+                accents = [
+                    (3, 4, {"red":0.10,"green":0.30,"blue":0.62},
+                     {"red":0.86,"green":0.93,"blue":1.00}),
+                    (7, 8, {"red":0.38,"green":0.25,"blue":0.66},
+                     {"red":0.94,"green":0.89,"blue":1.00}),
+                    (8, 9, {"red":0.05,"green":0.40,"blue":0.46},
+                     {"red":0.85,"green":0.97,"blue":0.98}),
+                    (11, 12, {"red":0.47,"green":0.31,"blue":0.06},
+                     {"red":1.00,"green":0.94,"blue":0.75}),
+                    (12, 13, {"red":0.24,"green":0.33,"blue":0.49},
+                     {"red":0.90,"green":0.94,"blue":0.98}),
+                ]
+                if "DATA ERROR" in status or "NO REFERENCE DATA" in status:
+                    accents[3] = (11, 12,
+                        {"red":0.64,"green":0.08,"blue":0.08},
+                        {"red":1.00,"green":0.79,"blue":0.79})
+                if stale:
+                    accents[3] = (11, 12,
+                        {"red":0.61,"green":0.26,"blue":0.04},
+                        {"red":1.00,"green":0.85,"blue":0.58})
+                for c0,c1,fg,fill in accents:
+                    styles.append({"repeatCell":{
+                        "range":{"sheetId":ws.id,"startRowIndex":row_no-1,
+                                 "endRowIndex":row_no,
+                                 "startColumnIndex":c0,"endColumnIndex":c1},
+                        "cell":{"userEnteredFormat":{
+                            "backgroundColor":fill,
+                            "textFormat":{"bold":True,
+                                          "foregroundColor":fg}}},
+                        "fields":"userEnteredFormat.backgroundColor,"
+                                 "userEnteredFormat.textFormat"}})
             # Profit and loss cells keep their own high-contrast distinction.
             if row[21] != "":
                 positive = float(row[21]) >= 0
