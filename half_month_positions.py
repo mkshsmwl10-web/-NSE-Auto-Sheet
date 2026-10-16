@@ -50,7 +50,7 @@ def historic_signal(item,df,start,end,today,source):
     level=round(high if kind=="STOCK" else low,2)
     if level<=0:return None
     qty=int(5000//level)
-    if qty<2:return None
+    if qty<1:return None
     hits=(bars[bars["High"]>high] if kind=="STOCK"
           else bars[bars["Low"]<low])
     if hits.empty:return None
