@@ -20,7 +20,8 @@ HISTORY_HEADER=[
 HOLDING_HEADER=[
     "Position ID","NSE Code","Type","Name","Sector / Theme","First Half",
     "Latest Trigger","Avg Buy Price","Total Qty","Invested ₹","CMP",
-    "Price Date","Current Value ₹","P/L ₹","P/L %","Status / Action"
+    "Price Date","Current Value ₹","P/L ₹","P/L %","Status / Action",
+    "Target Price +10%","Target Profit ₹","Book Qty 50%"
 ]
 
 def half_window(d):
@@ -180,6 +181,15 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
             max(str(x[6]) for x in lots),
             avg,qty,invested,cmp,price_date,value,pnl,pct,status
         ])
+    # Indicative targets on cumulative average cost, not automatic exit orders.
+    # Target Profit is the whole position's hypothetical gain at target price.
+    # Partial booking rounds DOWN to whole units; a 1-unit lot cannot be halved.
+    for position in cumulative:
+        q=int(position[8])
+        target=round(float(position[7])*1.10+0.00000001,2)
+        potential=round(target*q-float(position[9]),2)
+        book_qty=q//2
+        position.extend([target,potential,book_qty])
     open_rows=cumulative
     open_rows.sort(key=lambda r:(r[5],r[1]))
     holdings=_tab(book,HOLDINGS_TAB,len(HOLDING_HEADER))
@@ -197,25 +207,25 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
         ["HALF-MONTH HOLDINGS | PAPER PORTFOLIO","Illustrative signals, not broker trades"],
         ["INVESTED CAPITAL","","MARKET VALUE","","UNREALIZED P/L","","RETURN %","","SYMBOLS HELD","","PROFIT SYMBOLS","","LOSS SYMBOLS"],
         [invested_total,"",market_value,"",unrealized,"",return_pct,"",len(open_rows),"",winners,"",losers],
-        ["PROFIT PLAN","Profit below 5%: HOLD/REVIEW | 5-10%: REVIEW | 10%+: CONSIDER PARTIAL BOOKING; no auto sell"],
+        ["PROFIT PLAN","Target = average buy x 1.10; target profit = whole holding gain; book qty = floor(50% of units). Review only, no auto sell."],
         ["DATA NOTE","Individual paper lots="+str(lot_count)+"; unpriced positions="+str(len(open_rows)-len(priced))+
          "; excludes fees and taxes. Consult risk and asset allocation before selling."],
         [""],
         HOLDING_HEADER,
     ]
     holdings.update(summary+open_rows,
-                    range_name="A1:P"+str(len(summary)+len(open_rows)),
+                    range_name="A1:S"+str(len(summary)+len(open_rows)),
                     value_input_option="RAW")
-    for tab,width in [(history,"A1:O1"),(holdings,"A7:P7")]:
+    for tab,width in [(history,"A1:O1"),(holdings,"A7:S7")]:
         tab.freeze(rows=1)
         tab.format(width,{"backgroundColor":{"red":0.10,"green":0.25,"blue":0.36},
                 "textFormat":{"bold":True,"foregroundColor":{
                     "red":1,"green":1,"blue":1}},"wrapStrategy":"WRAP"})
     holdings.freeze(rows=7,cols=0)
     if open_rows:
-        holdings.format("H8:O"+str(len(open_rows)+7),{
+        holdings.format("H8:S"+str(len(open_rows)+7),{
             "numberFormat":{"type":"NUMBER","pattern":"#,##0.00"}})
-        holdings.format("A8:P"+str(len(open_rows)+7),{
+        holdings.format("A8:S"+str(len(open_rows)+7),{
             "verticalAlignment":"MIDDLE"})
     # Persistent color styling: reapplied after every scanner run.
     navy={"red":0.10,"green":0.25,"blue":0.36}
@@ -232,7 +242,7 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
         if not isinstance(row[13],(float,int)):bg=pale_gold
         requests.append({"repeatCell":{
             "range":{"sheetId":holdings.id,"startRowIndex":idx,"endRowIndex":idx+1,
-                     "startColumnIndex":0,"endColumnIndex":16},
+                     "startColumnIndex":0,"endColumnIndex":19},
             "cell":{"userEnteredFormat":{"backgroundColor":
                 pale_blue if idx%2 else {"red":0.95,"green":0.97,"blue":0.99},
                 "textFormat":{"foregroundColor":dark}}},
@@ -293,7 +303,7 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
                 "foregroundColor":{"red":0.66,"green":0.15,"blue":0.17} if closed
                    else {"red":0.07,"green":0.42,"blue":0.26}}}},
             "fields":"userEnteredFormat.textFormat"}})
-    for tab,col_widths in [(holdings,{0:215,1:120,3:215,4:150,5:115,6:115,11:115,15:175}),
+    for tab,col_widths in [(holdings,{0:215,1:120,3:215,4:150,5:115,6:115,11:115,15:220,16:150,17:150,18:135}),
                             (history,{0:215,4:150,5:215,6:120,10:205,11:165,14:340})]:
         for col,width in col_widths.items():
             requests.append({"updateDimensionProperties":{
