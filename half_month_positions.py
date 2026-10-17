@@ -134,7 +134,7 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
     open_rows.sort(key=lambda r:(r[5],r[1]))
     holdings=_tab(book,HOLDINGS_TAB,len(HOLDING_HEADER))
     holdings.clear()
-    holdings.resize(rows=max(100,len(open_rows)+3),cols=len(HOLDING_HEADER))
+    holdings.resize(rows=max(100,len(open_rows)+10),cols=len(HOLDING_HEADER))
     holdings.update([HOLDING_HEADER]+open_rows,
                     range_name="A1:P"+str(len(open_rows)+1),
                     value_input_option="RAW")
