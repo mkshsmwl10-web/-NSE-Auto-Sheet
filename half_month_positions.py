@@ -67,7 +67,7 @@ def _tab(book,title,columns):
     return tab
 
 
-def persist_paper_signals(book,watchlist,market_data,today):
+def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None):
     """Append-only history, derived live holdings, never lose prior halves."""
     history=_tab(book,HISTORY_TAB,len(HISTORY_HEADER))
     raw=history.get_all_values()
@@ -84,6 +84,9 @@ def persist_paper_signals(book,watchlist,market_data,today):
     # Don't retrospectively create trades in prior half periods.
     pending=[]
     for item in watchlist:
+        if verified_symbols is not None and item[3] not in verified_symbols:
+            print("UNVERIFIED: suppressing new paper buy",item[3])
+            continue
         df=market_data.get(item[3])
         key=str(start)+":"+item[3]
         if key in existing:continue
