@@ -135,18 +135,37 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
     holdings=_tab(book,HOLDINGS_TAB,len(HOLDING_HEADER))
     holdings.clear()
     holdings.resize(rows=max(100,len(open_rows)+10),cols=len(HOLDING_HEADER))
-    holdings.update([HOLDING_HEADER]+open_rows,
-                    range_name="A1:P"+str(len(open_rows)+1),
+    invested_total=round(sum(float(x[9]) for x in open_rows),2)
+    priced=[x for x in open_rows if isinstance(x[12],(float,int))]
+    priced_invested=round(sum(float(x[9]) for x in priced),2)
+    market_value=round(sum(float(x[12]) for x in priced),2)
+    unrealized=round(market_value-priced_invested,2)
+    return_pct=round(100*unrealized/priced_invested,2) if priced_invested else 0
+    winners=sum(1 for x in priced if x[13]>0)
+    losers=sum(1 for x in priced if x[13]<0)
+    summary=[
+        ["HALF-MONTH HOLDINGS | PAPER PORTFOLIO","Illustrative signals, not broker trades"],
+        ["INVESTED CAPITAL","","MARKET VALUE","","UNREALIZED P/L","","RETURN %","","OPEN LOTS","","PROFIT LOTS","","LOSS LOTS"],
+        [invested_total,"",market_value,"",unrealized,"",return_pct,"",len(open_rows),"",winners,"",losers],
+        ["PROFIT PLAN","Profit below 5%: HOLD/REVIEW | 5-10%: REVIEW | 10%+: CONSIDER PARTIAL BOOKING; no auto sell"],
+        ["DATA NOTE","Last market prices by row; unpriced lots="+str(len(open_rows)-len(priced))+
+         "; excludes fees and taxes. Consult risk and asset allocation before selling."],
+        [""],
+        HOLDING_HEADER,
+    ]
+    holdings.update(summary+open_rows,
+                    range_name="A1:P"+str(len(summary)+len(open_rows)),
                     value_input_option="RAW")
-    for tab,width in [(history,"A1:O1"),(holdings,"A1:P1")]:
+    for tab,width in [(history,"A1:O1"),(holdings,"A7:P7")]:
         tab.freeze(rows=1)
         tab.format(width,{"backgroundColor":{"red":0.10,"green":0.25,"blue":0.36},
                 "textFormat":{"bold":True,"foregroundColor":{
                     "red":1,"green":1,"blue":1}},"wrapStrategy":"WRAP"})
+    holdings.freeze(rows=7,cols=0)
     if open_rows:
-        holdings.format("H2:O"+str(len(open_rows)+1),{
+        holdings.format("H8:O"+str(len(open_rows)+7),{
             "numberFormat":{"type":"NUMBER","pattern":"#,##0.00"}})
-        holdings.format("A2:P"+str(len(open_rows)+1),{
+        holdings.format("A8:P"+str(len(open_rows)+7),{
             "verticalAlignment":"MIDDLE"})
     # Persistent color styling: reapplied after every scanner run.
     navy={"red":0.10,"green":0.25,"blue":0.36}
@@ -157,7 +176,7 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
     pale_red={"red":1,"green":0.91,"blue":0.91}
     pale_gold={"red":1,"green":0.96,"blue":0.83}
     requests=[]
-    for idx,row in enumerate(open_rows,start=1):
+    for idx,row in enumerate(open_rows,start=7):
         positive=isinstance(row[13],(float,int)) and row[13]>=0
         bg=pale_mint if positive else pale_red
         if not isinstance(row[13],(float,int)):bg=pale_gold
@@ -182,6 +201,31 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
             "cell":{"userEnteredFormat":{"backgroundColor":pale_gold,
                 "textFormat":{"bold":True,"foregroundColor":dark}}},
             "fields":"userEnteredFormat.backgroundColor,userEnteredFormat.textFormat"}})
+    requests.extend([
+        {"repeatCell":{
+            "range":{"sheetId":holdings.id,"startRowIndex":0,"endRowIndex":2},
+            "cell":{"userEnteredFormat":{"backgroundColor":navy,
+                "textFormat":{"bold":True,"foregroundColor":white,"fontSize":12}}},
+            "fields":"userEnteredFormat.backgroundColor,userEnteredFormat.textFormat"}},
+        {"repeatCell":{
+            "range":{"sheetId":holdings.id,"startRowIndex":2,"endRowIndex":3},
+            "cell":{"userEnteredFormat":{
+                "backgroundColor":pale_mint if unrealized>=0 else pale_red,
+                "textFormat":{"bold":True,"foregroundColor":dark,"fontSize":14},
+                "numberFormat":{"type":"NUMBER","pattern":"#,##0.00"}}},
+            "fields":"userEnteredFormat"}},
+        {"repeatCell":{
+            "range":{"sheetId":holdings.id,"startRowIndex":3,"endRowIndex":5},
+            "cell":{"userEnteredFormat":{"backgroundColor":pale_gold,
+                "textFormat":{"bold":True,"foregroundColor":dark}}},
+            "fields":"userEnteredFormat.backgroundColor,userEnteredFormat.textFormat"}},
+        {"updateDimensionProperties":{
+            "range":{"sheetId":holdings.id,"dimension":"ROWS","startIndex":2,"endIndex":3},
+            "properties":{"pixelSize":36},"fields":"pixelSize"}},
+        {"updateDimensionProperties":{
+            "range":{"sheetId":holdings.id,"dimension":"ROWS","startIndex":3,"endIndex":5},
+            "properties":{"pixelSize":30},"fields":"pixelSize"}}
+    ])
     for idx,row in enumerate(raw[1:],start=1):
         if not row or not row[0]:continue
         closed=len(row)>11 and str(row[11]).strip().upper()=="SELL"
