@@ -239,11 +239,16 @@ def merge_nse_recent(df,symbol,reports):
     archive=pd.DataFrame(rows,columns=["Date","High","Low","Close"]).set_index("Date")
     if df is None or df.empty:
         return archive, len(archive)
-    newer=archive[archive.index>df.index[-1]]
-    if newer.empty:return df,0
-    merged=pd.concat([df,newer]).sort_index()
-    merged=merged[~merged.index.duplicated(keep="first")]
-    return merged,len(newer)
+    # NSE archive is the authoritative exchange OHLC. Fill MISSING
+    # intermediate dates and replace mismatched Yahoo bars, not just dates
+    # newer than Yahoo's final row. Otherwise a missing reference-period
+    # low (e.g. 2026-10-15) silently corrupts half-month trigger levels.
+    merged=df.copy()
+    merged.update(archive)
+    missing=archive.loc[~archive.index.isin(merged.index)]
+    merged=pd.concat([merged,missing]).sort_index()
+    merged=merged[~merged.index.duplicated(keep="last")]
+    return merged,len(missing)
 
 
 def build_row(item, df, error, today, confirmed_market_day=None):
