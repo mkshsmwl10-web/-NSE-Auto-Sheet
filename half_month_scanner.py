@@ -176,7 +176,7 @@ def load_nse_recent(today):
     now_ist=pd.Timestamp.now(tz="Asia/Kolkata")
     latest_day=today if now_ist.hour>=19 else today-timedelta(days=1)
     archive="https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_{}.csv"
-    for age in range(42):
+    for age in range(25):
         day=latest_day-timedelta(days=age)
         if day.weekday()>=5:continue
         url=archive.format(day.strftime("%d%m%Y"))
@@ -553,6 +553,7 @@ def main():
     market_data = {}
     official_prices,confirmed_day=load_nse_recent(today)
     audit_rows=[]
+    verified_symbols=set()
     for item in watchlist:
         df, error = fetch_daily(item[3])
         df,added=merge_nse_recent(df,item[3],official_prices)
@@ -563,8 +564,10 @@ def main():
         audit_rows.append([item[3],check])
         if not verified:
             error=check
-        # An unverified series is not eligible for a NEW paper entry.
-        market_data[item[3]] = df if verified else None
+        else:
+            verified_symbols.add(item[3])
+        # Retain OHLC for P/L of old positions even when new buys are blocked.
+        market_data[item[3]] = df
         # If the official source is blocked, the old day stays visible.
         row = build_row(item, df, error, today,confirmed_day)
         qty = row[16]
@@ -572,7 +575,7 @@ def main():
         # units at the prior half-period's reference entry price.
         if isinstance(qty, (int, float)) and qty < 1:
             excluded += 1
-            print("EXCLUDED (quantity under 2):", item[0], item[3], qty)
+            print("EXCLUDED (quantity under 1):", item[0], item[3], qty)
             continue
         rows.append(row)
         print(item[0], item[3], row[11])
@@ -598,7 +601,8 @@ def main():
                  range_name="A1:B"+str(len(audit_rows)+1),
                  value_input_option="RAW")
     audit.freeze(rows=1)
-    ledger = persist_paper_signals(book, watchlist, market_data, today)
+    ledger = persist_paper_signals(book, watchlist, market_data, today,
+                                   verified_symbols=verified_symbols)
     for row in rows:
         if "BUY TRIGGERED" in str(row[11]):
             row[11] = str(row[11]).replace("BUY TRIGGERED", "BUY TRIGGERED | PAPER RECORDED")
