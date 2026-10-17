@@ -18,8 +18,8 @@ HISTORY_HEADER=[
     "Status (OPEN/SELL)","Sell Date","Sell Price","Notes"
 ]
 HOLDING_HEADER=[
-    "Signal ID","NSE Code","Type","Name","Sector / Theme","Half Start",
-    "Trigger Date","Paper Entry","Qty","Invested ₹","CMP",
+    "Position ID","NSE Code","Type","Name","Sector / Theme","First Half",
+    "Latest Trigger","Avg Buy Price","Total Qty","Invested ₹","CMP",
     "Price Date","Current Value ₹","P/L ₹","P/L %","Status / Action"
 ]
 
@@ -140,6 +140,47 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
             row[0],row[6],row[3],row[5],row[4],row[1],row[7],
             entry,qty,invested,cmp_value,price_date,current,pnl,pct,status
         ])
+    # Consolidate all OPEN paper lots of the SAME NSE symbol into one row.
+    # History stays untouched and remains the per-purchase audit trail.
+    lot_count=len(open_rows)
+    by_symbol={}
+    for lot in open_rows:
+        sym=lot[1]
+        if sym not in by_symbol:
+            by_symbol[sym]=[]
+        by_symbol[sym].append(lot)
+    cumulative=[]
+    for sym,lots in by_symbol.items():
+        first=lots[0]
+        qty=sum(int(x[8]) for x in lots)
+        invested=round(sum(float(x[9]) for x in lots),2)
+        avg=round(invested/qty,4) if qty else 0
+        # All lots of one NSE symbol refer to the same latest market quote.
+        latest_quote=max((x for x in lots if isinstance(x[10],(int,float))),
+                         key=lambda x:str(x[11]),default=None)
+        cmp=latest_quote[10] if latest_quote else ""
+        price_date=latest_quote[11] if latest_quote else ""
+        value=round(qty*cmp,2) if latest_quote else ""
+        pnl=round(value-invested,2) if latest_quote else ""
+        pct=round(100*pnl/invested,2) if latest_quote and invested else ""
+        status="OPEN | PRICE UNAVAILABLE"
+        if latest_quote:
+            status="OPEN | HOLD / MONITOR"
+            if "STALE" in str(latest_quote[15]):
+                status="OPEN | STALE PRICE"
+            elif pct>=10:
+                status="OPEN | REVIEW PARTIAL BOOKING"
+            elif pct>=5:
+                status="OPEN | REVIEW PROFIT"
+            elif pct<=-7:
+                status="OPEN | REVIEW RISK"
+        cumulative.append([
+            "TOTAL:"+sym,sym,first[2],first[3],first[4],
+            min(str(x[5]) for x in lots),
+            max(str(x[6]) for x in lots),
+            avg,qty,invested,cmp,price_date,value,pnl,pct,status
+        ])
+    open_rows=cumulative
     open_rows.sort(key=lambda r:(r[5],r[1]))
     holdings=_tab(book,HOLDINGS_TAB,len(HOLDING_HEADER))
     holdings.clear()
@@ -154,10 +195,10 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
     losers=sum(1 for x in priced if x[13]<0)
     summary=[
         ["HALF-MONTH HOLDINGS | PAPER PORTFOLIO","Illustrative signals, not broker trades"],
-        ["INVESTED CAPITAL","","MARKET VALUE","","UNREALIZED P/L","","RETURN %","","OPEN LOTS","","PROFIT LOTS","","LOSS LOTS"],
+        ["INVESTED CAPITAL","","MARKET VALUE","","UNREALIZED P/L","","RETURN %","","SYMBOLS HELD","","PROFIT SYMBOLS","","LOSS SYMBOLS"],
         [invested_total,"",market_value,"",unrealized,"",return_pct,"",len(open_rows),"",winners,"",losers],
         ["PROFIT PLAN","Profit below 5%: HOLD/REVIEW | 5-10%: REVIEW | 10%+: CONSIDER PARTIAL BOOKING; no auto sell"],
-        ["DATA NOTE","Last market prices by row; unpriced lots="+str(len(open_rows)-len(priced))+
+        ["DATA NOTE","Individual paper lots="+str(lot_count)+"; unpriced positions="+str(len(open_rows)-len(priced))+
          "; excludes fees and taxes. Consult risk and asset allocation before selling."],
         [""],
         HOLDING_HEADER,
@@ -262,5 +303,5 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
     for i in range(0,len(requests),90):
         book.batch_update({"requests":requests[i:i+90]})
     print("HalfMonth History:",len(raw)-1,"recorded paper signals;",
-          len(pending),"new; Holdings:",len(open_rows),"open paper lots")
+          len(pending),"new; Holdings:",len(open_rows),"unique open symbols from",lot_count,"paper lots")
     return {"new":len(pending),"holdings":len(open_rows)}
