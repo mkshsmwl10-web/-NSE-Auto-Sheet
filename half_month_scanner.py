@@ -176,7 +176,7 @@ def load_nse_recent(today):
     now_ist=pd.Timestamp.now(tz="Asia/Kolkata")
     latest_day=today if now_ist.hour>=19 else today-timedelta(days=1)
     archive="https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_{}.csv"
-    for age in range(11):
+    for age in range(42):
         day=latest_day-timedelta(days=age)
         if day.weekday()>=5:continue
         url=archive.format(day.strftime("%d%m%Y"))
@@ -249,6 +249,28 @@ def merge_nse_recent(df,symbol,reports):
     merged=pd.concat([merged,missing]).sort_index()
     merged=merged[~merged.index.duplicated(keep="last")]
     return merged,len(missing)
+
+
+
+def validate_reference(symbol,reports,today):
+    """Block buys unless official NSE archive covers the reference half."""
+    if today.day<=15:
+        end=date(today.year,today.month,1)-timedelta(days=1)
+        start=date(end.year,end.month,16)
+    else:
+        start=date(today.year,today.month,1)
+        end=date(today.year,today.month,15)
+    weekdays={start+timedelta(days=i) for i in range((end-start).days+1)
+              if (start+timedelta(days=i)).weekday()<5}
+    archive_days={d for (_sym,d) in reports if start<=d<=end}
+    symbol_days={d for (sym,d) in reports if sym==symbol and start<=d<=end}
+    missing=archive_days-symbol_days
+    archive_gap=weekdays-archive_days
+    if missing or len(symbol_days)<7 or len(archive_gap)>2:
+        return False, ("DATA UNVERIFIED | NO NEW BUY | NSE ref days "
+                       +str(len(symbol_days))+" | missing symbol "
+                       +str(len(missing))+" | archive gaps "+str(len(archive_gap)))
+    return True, "NSE VERIFIED "+str(len(symbol_days))+" days"
 
 
 def build_row(item, df, error, today, confirmed_market_day=None):
@@ -530,14 +552,19 @@ def main():
     excluded = 0
     market_data = {}
     official_prices,confirmed_day=load_nse_recent(today)
+    audit_rows=[]
     for item in watchlist:
         df, error = fetch_daily(item[3])
         df,added=merge_nse_recent(df,item[3],official_prices)
         if added:
             print("NSE fallback filled:",item[3],added,"new daily bars")
             error=""
-        # Store the same verified market series for prior/current paper lots.
-        market_data[item[3]] = df
+        verified, check = validate_reference(item[3], official_prices, today)
+        audit_rows.append([item[3],check])
+        if not verified:
+            error=check
+        # An unverified series is not eligible for a NEW paper entry.
+        market_data[item[3]] = df if verified else None
         # If the official source is blocked, the old day stays visible.
         row = build_row(item, df, error, today,confirmed_day)
         qty = row[16]
@@ -564,6 +591,13 @@ def main():
         df, error = fetch_daily(old_symbol)
         df, added = merge_nse_recent(df, old_symbol, official_prices)
         market_data[old_symbol] = df
+    audit=worksheet(book,"HalfMonth Data Audit",2)
+    audit.clear()
+    audit.resize(rows=max(50,len(audit_rows)+2),cols=2)
+    audit.update([["NSE Code","Reference OHLC Verification"]]+audit_rows,
+                 range_name="A1:B"+str(len(audit_rows)+1),
+                 value_input_option="RAW")
+    audit.freeze(rows=1)
     ledger = persist_paper_signals(book, watchlist, market_data, today)
     for row in rows:
         if "BUY TRIGGERED" in str(row[11]):
