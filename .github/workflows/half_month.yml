@@ -29,6 +29,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install gspread pandas yfinance google-auth requests
 
+      - name: Check targets and SELL accounting
+        run: python -m unittest -v test_half_month_positions.py
+
       - name: Update editable watchlist and signals
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
