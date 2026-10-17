@@ -2,9 +2,11 @@
 
 History is the source of truth and is never cleared by scheduled runs.
 Users can manually set History column L to SELL to close a PAPER holding,
-and optionally record exit date/price in columns M/N.
+and record exit date/price in columns M/N to calculate booked paper profit.
 """
 import calendar
+import math
+from decimal import Decimal, ROUND_CEILING
 from datetime import date, timedelta
 
 import pandas as pd
@@ -12,6 +14,10 @@ import gspread
 
 HISTORY_TAB="HalfMonth History"
 HOLDINGS_TAB="HalfMonth Holdings"
+REALIZED_TAB="HalfMonth Realized"
+REALIZED_HEADER=["NSE Code","Type","Name","SELL Records","Sold Qty",
+                 "Sold Cost ₹","Sale Proceeds ₹","Realized P/L ₹",
+                 "Last Sell Date","Pending SELL Records","Open Qty","Status"]
 HISTORY_HEADER=[
     "Signal ID","Half Start","Half End","Type","Sector / Theme","Name",
     "NSE Code","Trigger Date","Paper Entry","Qty","Record Source",
@@ -21,8 +27,103 @@ HOLDING_HEADER=[
     "Position ID","NSE Code","Type","Name","Sector / Theme","First Half",
     "Latest Trigger","Avg Buy Price","Total Qty","Invested ₹","CMP",
     "Price Date","Current Value ₹","P/L ₹","P/L %","Status / Action",
-    "Target Price +10%","Target Profit ₹","Book Qty 50%"
+    "Target Price","Target Profit ₹","Exit Qty (Target Hit)",
+    "Target %","Realized P/L ₹","Total P/L ₹"
 ]
+
+def _positive(value):
+    try:
+        number=float(str(value).replace(",", "").replace("₹", "").strip())
+        return number if math.isfinite(number) and number>0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def build_portfolio(records, market_data, today):
+    """Derive cumulative OPEN lots and booked SELL P/L without editing the ledger.
+
+    SELL closes a complete history lot. Missing/invalid exit details stay pending;
+    neither CMP nor the profit target is ever substituted for an execution price.
+    Amounts are gross PAPER accounting, not broker/tax FIFO accounting.
+    """
+    groups={}
+    for line in records:
+        row=(list(line)+[""]*len(HISTORY_HEADER))[:len(HISTORY_HEADER)]
+        symbol=str(row[6]).strip().upper()
+        state=str(row[11]).strip().upper()
+        if not row[0] or not symbol or state not in ("", "OPEN", "SELL"):
+            continue  # INVALID DATA and other archived states stay excluded.
+        group=groups.setdefault(symbol,{"first":row,"open":[],"sells":0,
+                    "pending":0,"sold_qty":0,"cost":0.,"proceeds":0.,"dates":[]})
+        qty=_positive(row[9]); entry=_positive(row[8])
+        if state=="SELL":
+            group["sells"]+=1
+            exit_price=_positive(row[13])
+            try:
+                exit_day=date.fromisoformat(str(row[12]).strip())
+                entry_day=date.fromisoformat(str(row[7]).strip())
+                dates_valid=entry_day<=exit_day<=today
+            except (ValueError,TypeError):
+                dates_valid=False
+            if not qty or not qty.is_integer() or not entry or not exit_price or not dates_valid:
+                group["pending"]+=1
+                continue
+            group["sold_qty"]+=int(qty)
+            group["cost"]+=entry*qty
+            group["proceeds"]+=exit_price*qty
+            group["dates"].append(exit_day.isoformat())
+        elif qty and qty.is_integer() and entry:
+            group["open"].append((row,int(qty),entry))
+
+    holdings=[]; booked=[]; realized_total=0.; pending_total=0; lot_count=0
+    for symbol,group in groups.items():
+        first=group["first"]; lots=group["open"]
+        realized=round(group["proceeds"]-group["cost"],2)
+        realized_total+=realized; pending_total+=group["pending"]
+        qty=sum(lot[1] for lot in lots)
+        if group["sells"]:
+            booked.append([symbol,first[3],first[5],group["sells"],group["sold_qty"],
+                           round(group["cost"],2),round(group["proceeds"],2),realized,
+                           max(group["dates"],default=""),group["pending"],qty,
+                           "PENDING EXIT DETAILS" if group["pending"] else "BOOKED | GROSS PAPER P/L"])
+        if not lots:
+            continue
+        lot_count+=len(lots)
+        first=lots[0][0]
+        invested=round(sum(lot[1]*lot[2] for lot in lots),2)
+        average=invested/qty
+        target_pct=15 if str(first[3]).strip().upper()=="STOCK" else 8
+        target=float((Decimal(str(invested))/Decimal(qty)*
+                      (Decimal(1)+Decimal(target_pct)/100)).quantize(Decimal("0.01"),rounding=ROUND_CEILING))
+        cmp=""; quote_day=""; value=""; pnl=""; pct=""
+        status="OPEN | PRICE UNAVAILABLE"
+        frame=market_data.get(symbol)
+        if frame is not None and not frame.empty:
+            # Ignore future, missing, zero and non-finite prices.
+            for stamp,bar in frame.sort_index(ascending=False).iterrows():
+                day=pd.Timestamp(stamp).date()
+                price=_positive(bar.get("Close"))
+                if day<=today and price:
+                    cmp=round(price,2); quote_day=day.isoformat()
+                    value=round(qty*cmp,2); pnl=round(value-invested,2)
+                    pct=round(100*pnl/invested,2)
+                    status="OPEN | HOLD / MONITOR"
+                    if (today-day).days>3:
+                        status="OPEN | STALE PRICE"
+                    elif cmp>=target:
+                        status="TARGET HIT | EXIT ALERT (FULL QTY)"
+                    elif pct<=-7:
+                        status="OPEN | REVIEW RISK"
+                    break
+        total=round(realized+pnl,2) if isinstance(pnl,(float,int)) else ""
+        holdings.append(["TOTAL:"+symbol,symbol,first[3],first[5],first[4],
+                         min(str(lot[0][1]) for lot in lots),max(str(lot[0][7]) for lot in lots),
+                         round(average,4),qty,invested,cmp,quote_day,value,pnl,pct,status,
+                         target,round(target*qty-invested,2),qty if "TARGET HIT" in status else 0,
+                         target_pct,realized,total])
+    holdings.sort(key=lambda row:(row[5],row[1])); booked.sort(key=lambda row:row[0])
+    return holdings,booked,{"open_lots":lot_count,"invested":round(sum(row[9] for row in holdings),2),
+                            "realized":round(realized_total,2),"pending_sells":pending_total}
 
 def half_window(d):
     if d.day<=15:
@@ -101,101 +202,12 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
                             insert_data_option="INSERT_ROWS")
     # Re-read after append so manually edited SELL states are honored.
     raw=history.get_all_values()
-    open_rows=[]
-    for line in raw[1:]:
-        row=(line+[""]*len(HISTORY_HEADER))[:len(HISTORY_HEADER)]
-        if not row[0] or not row[6]:continue
-        if row[11].strip().upper()=="SELL":continue
-        if row[11].strip().upper() not in ("","OPEN"):
-            print("Holdings status needs OPEN/SELL:",row[0],row[11])
-            continue
-        try:
-            qty=int(float(str(row[9]).replace(",","")))
-            entry=float(str(row[8]).replace(",",""))
-            if qty<=0 or entry<=0:continue
-        except (TypeError,ValueError):continue
-        df=market_data.get(row[6])
-        cmp_value="";price_date="";current="";pnl="";pct=""
-        status="OPEN | PRICE UNAVAILABLE"
-        invested=round(qty*entry,2)
-        if df is not None and not df.empty:
-            latest=df.iloc[-1]
-            cmp_value=round(float(latest["Close"]),2)
-            price_date=str(df.index[-1].date())
-            current=round(qty*cmp_value,2)
-            pnl=round(current-invested,2)
-            pct=round(100*pnl/invested,2)
-            status="OPEN"
-            if (today-df.index[-1].date()).days>3:
-                status="OPEN | STALE PRICE"
-        if status=="OPEN":
-            if pct>=10:
-                status="OPEN | REVIEW PARTIAL BOOKING"
-            elif pct>=5:
-                status="OPEN | REVIEW PROFIT"
-            elif pct<=-7:
-                status="OPEN | REVIEW RISK"
-            else:
-                status="OPEN | HOLD / MONITOR"
-        open_rows.append([
-            row[0],row[6],row[3],row[5],row[4],row[1],row[7],
-            entry,qty,invested,cmp_value,price_date,current,pnl,pct,status
-        ])
-    # Consolidate all OPEN paper lots of the SAME NSE symbol into one row.
-    # History stays untouched and remains the per-purchase audit trail.
-    lot_count=len(open_rows)
-    by_symbol={}
-    for lot in open_rows:
-        sym=lot[1]
-        if sym not in by_symbol:
-            by_symbol[sym]=[]
-        by_symbol[sym].append(lot)
-    cumulative=[]
-    for sym,lots in by_symbol.items():
-        first=lots[0]
-        qty=sum(int(x[8]) for x in lots)
-        invested=round(sum(float(x[9]) for x in lots),2)
-        avg=round(invested/qty,4) if qty else 0
-        # All lots of one NSE symbol refer to the same latest market quote.
-        latest_quote=max((x for x in lots if isinstance(x[10],(int,float))),
-                         key=lambda x:str(x[11]),default=None)
-        cmp=latest_quote[10] if latest_quote else ""
-        price_date=latest_quote[11] if latest_quote else ""
-        value=round(qty*cmp,2) if latest_quote else ""
-        pnl=round(value-invested,2) if latest_quote else ""
-        pct=round(100*pnl/invested,2) if latest_quote and invested else ""
-        status="OPEN | PRICE UNAVAILABLE"
-        if latest_quote:
-            status="OPEN | HOLD / MONITOR"
-            if "STALE" in str(latest_quote[15]):
-                status="OPEN | STALE PRICE"
-            elif pct>=10:
-                status="OPEN | REVIEW PARTIAL BOOKING"
-            elif pct>=5:
-                status="OPEN | REVIEW PROFIT"
-            elif pct<=-7:
-                status="OPEN | REVIEW RISK"
-        cumulative.append([
-            "TOTAL:"+sym,sym,first[2],first[3],first[4],
-            min(str(x[5]) for x in lots),
-            max(str(x[6]) for x in lots),
-            avg,qty,invested,cmp,price_date,value,pnl,pct,status
-        ])
-    # Indicative targets on cumulative average cost, not automatic exit orders.
-    # Target Profit is the whole position's hypothetical gain at target price.
-    # Partial booking rounds DOWN to whole units; a 1-unit lot cannot be halved.
-    for position in cumulative:
-        q=int(position[8])
-        target=round(float(position[7])*1.10+0.00000001,2)
-        potential=round(target*q-float(position[9]),2)
-        book_qty=q//2
-        position.extend([target,potential,book_qty])
-    open_rows=cumulative
-    open_rows.sort(key=lambda r:(r[5],r[1]))
+    open_rows, realized_rows, metrics = build_portfolio(raw[1:], market_data, today)
+    lot_count=metrics["open_lots"]
     holdings=_tab(book,HOLDINGS_TAB,len(HOLDING_HEADER))
     holdings.clear()
-    holdings.resize(rows=max(100,len(open_rows)+10),cols=len(HOLDING_HEADER))
-    invested_total=round(sum(float(x[9]) for x in open_rows),2)
+    holdings.resize(rows=max(holdings.row_count,100,len(open_rows)+10),cols=len(HOLDING_HEADER))
+    invested_total=metrics["invested"]
     priced=[x for x in open_rows if isinstance(x[12],(float,int))]
     priced_invested=round(sum(float(x[9]) for x in priced),2)
     market_value=round(sum(float(x[12]) for x in priced),2)
@@ -207,26 +219,33 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
         ["HALF-MONTH HOLDINGS | PAPER PORTFOLIO","Illustrative signals, not broker trades"],
         ["INVESTED CAPITAL","","MARKET VALUE","","UNREALIZED P/L","","RETURN %","","SYMBOLS HELD","","PROFIT SYMBOLS","","LOSS SYMBOLS"],
         [invested_total,"",market_value,"",unrealized,"",return_pct,"",len(open_rows),"",winners,"",losers],
-        ["PROFIT PLAN","Target = average buy x 1.10; target profit = whole holding gain; book qty = floor(50% of units). Review only, no auto sell."],
-        ["DATA NOTE","Individual paper lots="+str(lot_count)+"; unpriced positions="+str(len(open_rows)-len(priced))+
-         "; excludes fees and taxes. Consult risk and asset allocation before selling."],
+        ["PROFIT PLAN","Stock target 15%; ETF target 8% on cumulative average cost. TARGET HIT = full-position EXIT ALERT; no automatic sale."],
+        ["DATA NOTE","Paper lots="+str(lot_count)+"; unpriced="+str(len(open_rows)-len(priced))+
+         "; SELL needs M=Sell Date and N=Sell Price. L=SELL closes the entire history lot; excludes fees and taxes."],
         [""],
         HOLDING_HEADER,
     ]
+    summary[1].extend(["", "REALIZED P/L", "", "TOTAL P/L", "", "SELL PENDING", "", "TARGET HITS"])
+    summary[2].extend(["", metrics["realized"], "", round(unrealized+metrics["realized"],2), "", metrics["pending_sells"], "", sum("TARGET HIT" in row[15] for row in open_rows)])
     holdings.update(summary+open_rows,
-                    range_name="A1:S"+str(len(summary)+len(open_rows)),
+                    range_name="A1:V"+str(len(summary)+len(open_rows)),
                     value_input_option="RAW")
-    for tab,width in [(history,"A1:O1"),(holdings,"A7:S7")]:
+    for tab,width in [(history,"A1:O1"),(holdings,"A7:V7")]:
         tab.freeze(rows=1)
         tab.format(width,{"backgroundColor":{"red":0.10,"green":0.25,"blue":0.36},
                 "textFormat":{"bold":True,"foregroundColor":{
                     "red":1,"green":1,"blue":1}},"wrapStrategy":"WRAP"})
-    holdings.freeze(rows=7,cols=0)
+    holdings.freeze(rows=7,cols=1)
     if open_rows:
-        holdings.format("H8:S"+str(len(open_rows)+7),{
+        holdings.format("H8:V"+str(len(open_rows)+7),{
             "numberFormat":{"type":"NUMBER","pattern":"#,##0.00"}})
-        holdings.format("A8:S"+str(len(open_rows)+7),{
+        holdings.format("A8:V"+str(len(open_rows)+7),{
             "verticalAlignment":"MIDDLE"})
+    # Whole quantities/counts and calendar dates are not money values.
+    for column in ("I", "S", "T"):
+        if open_rows:
+            holdings.format(f"{column}8:{column}{len(open_rows)+7}",{
+                "numberFormat":{"type":"NUMBER","pattern":"0"}})
     # Persistent color styling: reapplied after every scanner run.
     navy={"red":0.10,"green":0.25,"blue":0.36}
     white={"red":1,"green":1,"blue":1}
@@ -242,7 +261,7 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
         if not isinstance(row[13],(float,int)):bg=pale_gold
         requests.append({"repeatCell":{
             "range":{"sheetId":holdings.id,"startRowIndex":idx,"endRowIndex":idx+1,
-                     "startColumnIndex":0,"endColumnIndex":19},
+                     "startColumnIndex":0,"endColumnIndex":22},
             "cell":{"userEnteredFormat":{"backgroundColor":
                 pale_blue if idx%2 else {"red":0.95,"green":0.97,"blue":0.99},
                 "textFormat":{"foregroundColor":dark}}},
@@ -258,7 +277,7 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
         requests.append({"repeatCell":{
             "range":{"sheetId":holdings.id,"startRowIndex":idx,"endRowIndex":idx+1,
                      "startColumnIndex":15,"endColumnIndex":16},
-            "cell":{"userEnteredFormat":{"backgroundColor":pale_gold,
+            "cell":{"userEnteredFormat":{"backgroundColor":pale_mint if "TARGET HIT" in row[15] else pale_gold,
                 "textFormat":{"bold":True,"foregroundColor":dark}}},
             "fields":"userEnteredFormat.backgroundColor,userEnteredFormat.textFormat"}})
     requests.extend([
@@ -303,15 +322,31 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
                 "foregroundColor":{"red":0.66,"green":0.15,"blue":0.17} if closed
                    else {"red":0.07,"green":0.42,"blue":0.26}}}},
             "fields":"userEnteredFormat.textFormat"}})
-    for tab,col_widths in [(holdings,{0:215,1:120,3:215,4:150,5:115,6:115,11:115,15:220,16:150,17:150,18:135}),
+    for tab,col_widths in [(holdings,{0:215,1:120,3:215,4:150,5:115,6:115,11:115,15:220,16:150,17:150,18:160,19:100,20:155,21:155}),
                             (history,{0:215,4:150,5:215,6:120,10:205,11:165,14:340})]:
         for col,width in col_widths.items():
             requests.append({"updateDimensionProperties":{
                 "range":{"sheetId":tab.id,"dimension":"COLUMNS",
                          "startIndex":col,"endIndex":col+1},
                 "properties":{"pixelSize":width},"fields":"pixelSize"}})
+    # Dedicated per-symbol report retains profits after the last open lot is sold.
+    booked=_tab(book,REALIZED_TAB,len(REALIZED_HEADER))
+    booked.clear()
+    booked.resize(rows=max(booked.row_count,100,len(realized_rows)+8),cols=len(REALIZED_HEADER))
+    booked.update([REALIZED_HEADER]+realized_rows,
+                  range_name="A1:L"+str(len(realized_rows)+1),value_input_option="RAW")
+    booked.freeze(rows=1)
+    booked.format("A1:L1",{"backgroundColor":navy,"textFormat":{"bold":True,"foregroundColor":white},"wrapStrategy":"WRAP"})
+    if realized_rows:
+        booked.format("E2:H"+str(len(realized_rows)+1),{"numberFormat":{"type":"NUMBER","pattern":"#,##0.00"}})
+    requests.extend([
+        {"updateDimensionProperties":{"range":{"sheetId":booked.id,"dimension":"COLUMNS","startIndex":0,"endIndex":12},"properties":{"pixelSize":145},"fields":"pixelSize"}},
+        {"updateDimensionProperties":{"range":{"sheetId":booked.id,"dimension":"COLUMNS","startIndex":2,"endIndex":3},"properties":{"pixelSize":215},"fields":"pixelSize"}},
+        {"updateDimensionProperties":{"range":{"sheetId":booked.id,"dimension":"COLUMNS","startIndex":11,"endIndex":12},"properties":{"pixelSize":310},"fields":"pixelSize"}},
+    ])
     for i in range(0,len(requests),90):
         book.batch_update({"requests":requests[i:i+90]})
     print("HalfMonth History:",len(raw)-1,"recorded paper signals;",
           len(pending),"new; Holdings:",len(open_rows),"unique open symbols from",lot_count,"paper lots")
     return {"new":len(pending),"holdings":len(open_rows)}
+
