@@ -127,6 +127,15 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
             status="OPEN"
             if (today-df.index[-1].date()).days>3:
                 status="OPEN | STALE PRICE"
+        if status=="OPEN":
+            if pct>=10:
+                status="OPEN | REVIEW PARTIAL BOOKING"
+            elif pct>=5:
+                status="OPEN | REVIEW PROFIT"
+            elif pct<=-7:
+                status="OPEN | REVIEW RISK"
+            else:
+                status="OPEN | HOLD / MONITOR"
         open_rows.append([
             row[0],row[6],row[3],row[5],row[4],row[1],row[7],
             entry,qty,invested,cmp_value,price_date,current,pnl,pct,status
