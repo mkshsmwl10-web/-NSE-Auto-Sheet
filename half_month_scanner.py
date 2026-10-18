@@ -377,7 +377,7 @@ def update_results(book, rows, excluded=0):
                  RESULT_COLS])
     data.extend(rows)
     ws.update(data, range_name="A1:W" + str(len(data)), value_input_option="RAW")
-    ws.freeze(rows=6, cols=4)
+    ws.freeze(rows=6, cols=0)
 
     navy = {"red": 0.16, "green": 0.25, "blue": 0.35}
     ivory = {"red": 0.97, "green": 0.98, "blue": 0.98}
