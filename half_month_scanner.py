@@ -402,7 +402,15 @@ def update_results(book, rows, excluded=0):
                  ["Stocks: above previous half HIGH   |   ETFs: below previous half LOW"
                   "   |   Price Date and STALE PRICE warnings matter."],
                  RESULT_COLS])
-    data.extend(rows)
+    # Planned budget/quantity stay live when the user edits compounding SIP B.
+    # Keep the numerical rows for statistics and styling; only output P/Q formulas.
+    display_rows=[list(row) for row in rows]
+    for rn,row in enumerate(display_rows,start=7):
+        row[15]=(f'=IF(D{rn}="","",IFERROR(VLOOKUP(D{rn},'
+                 f"'HalfMonth Watchlist'!$D$2:$E$100,2,FALSE),5000))")
+        row[16]=(f'=IF(D{rn}="","",IFERROR(IF(AND(ISNUMBER(P{rn}),'
+                 f'ISNUMBER(H{rn}),H{rn}>0),INT(P{rn}/H{rn}),""),""))')
+    data.extend(display_rows)
     ws.update(data, range_name="A1:W" + str(len(data)), value_input_option="RAW")
     ws.freeze(rows=6, cols=0)
 
