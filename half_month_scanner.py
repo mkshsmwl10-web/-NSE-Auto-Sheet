@@ -7,6 +7,7 @@ An editable Google worksheet controls the user-selected ETF/stock universe.
 Daily candle High/Low detects a touch; CMP records the latest available Close.
 """
 import calendar
+import math
 import io
 import requests
 import json
@@ -135,6 +136,32 @@ def get_watchlist(book):
             "Existing user data was left unchanged."
         )
     return items
+
+
+
+def get_sip_budgets(book, watchlist):
+    """Read per-symbol planned budgets; REAL allocations come from compounding B.
+
+    This controls new paper plans only. It never creates executed investments.
+    Blank/duplicate/invalid REAL configurations must not silently use Rs 5,000.
+    """
+    raw=book.worksheet(WATCHLIST_TAB).get_all_values()
+    linked={str(r[3]).strip().upper():r for r in raw[1:] if len(r)>3}
+    budgets={}
+    for item in watchlist:
+        symbol=item[3]; row=linked.get(symbol,[])
+        real=len(row)>5 and str(row[5]).strip().upper()=="REAL"
+        if not real:
+            budgets[symbol]=BUDGET
+            continue
+        try:
+            value=float(str(row[4]).replace(",", "").replace("₹", "").strip())
+        except (ValueError,TypeError,IndexError):
+            raise ValueError(f"Invalid/duplicate SIP for {symbol}: check ETF Compounding G/B and Watchlist E")
+        if not math.isfinite(value) or value<0:
+            raise ValueError(f"SIP must be a finite nonnegative amount: {symbol}")
+        budgets[symbol]=value
+    return budgets
 
 
 def fetch_daily(symbol):
@@ -273,7 +300,7 @@ def validate_reference(symbol,reports,today):
     return True, "NSE VERIFIED "+str(len(symbol_days))+" days"
 
 
-def build_row(item, df, error, today, confirmed_market_day=None):
+def build_row(item, df, error, today, confirmed_market_day=None, budget=BUDGET):
     kind, sector, name, symbol = item
     if today.day <= 15:
         prev_end = date(today.year, today.month, 1) - timedelta(days=1)
@@ -290,7 +317,7 @@ def build_row(item, df, error, today, confirmed_market_day=None):
     base = [kind, sector, name, symbol,
             "BUY ABOVE HIGH" if kind == "STOCK" else "BUY BELOW LOW"]
     labels = [str(valid_from), str(valid_until)]
-    empty_position = [BUDGET, "", "", "", "", "", "", ""]
+    empty_position = [budget, "", "", "", "", "", "", ""]
     if error or df is None:
         return base + ["", "", "", "", "", "", "DATA ERROR: " + (error or "no data"),
                        "", *labels, *empty_position]
@@ -312,7 +339,7 @@ def build_row(item, df, error, today, confirmed_market_day=None):
     hi = round(float(ref["High"].max()), 2)
     lo = round(float(ref["Low"].min()), 2)
     level = hi if kind == "STOCK" else lo
-    qty = int(BUDGET // level) if level > 0 else 0
+    qty = int(budget // level) if level > 0 else 0
     valid_bars = df[(df.index.date >= valid_from) &
                     (df.index.date <= min(today, valid_until))]
     hits = (valid_bars[valid_bars["High"] > hi] if kind == "STOCK"
@@ -342,7 +369,7 @@ def build_row(item, df, error, today, confirmed_market_day=None):
     pnl_pct = round(100 * pnl / invested, 2) if invested != "" and invested else ""
     return base + [hi, lo, level, cmp_value, day_high, day_low,
                    status, str(quote_date), *labels,
-                   BUDGET, qty, str(first_hit) if first_hit else "",
+                   budget, qty, str(first_hit) if first_hit else "",
                    entry, invested, current, pnl, pnl_pct]
 
 
@@ -365,8 +392,8 @@ def update_results(book, rows, excluded=0):
     # Row 1 dashboard title, rows 3-4 KPIs, row 6 actual data headers.
     # Use two columns per KPI for less visual crowding.
     data = [["HALF-MONTH | STOCK BREAKOUT + ETF DIP",
-             "₹5,000 per symbol • Minimum 1 unit • Paper P/L only"]]
-    data.append(["MONTHLY LIMIT: NONE", "Paper signal purchases; up to ₹5,000 per symbol each half"])
+             "SIP from ETF Compounding B for REAL symbols • Paper P/L only"]]
+    data.append(["MONTHLY LIMIT: NONE", "Paper plans: linked SIP budget for REAL symbols; ₹5,000 for other watchlist symbols"])
     label_row, value_row = [""] * 23, [""] * 23
     for i, (label, value) in enumerate(zip(summary_labels, summary_values)):
         label_row[i * 2] = label
@@ -548,6 +575,7 @@ def main():
     watchlist = get_watchlist(book)
     if not watchlist:
         raise ValueError("HalfMonth Watchlist has no valid symbols")
+    budgets = get_sip_budgets(book, watchlist)
     rows = []
     excluded = 0
     market_data = {}
@@ -569,7 +597,7 @@ def main():
         # Retain OHLC for P/L of old positions even when new buys are blocked.
         market_data[item[3]] = df
         # If the official source is blocked, the old day stays visible.
-        row = build_row(item, df, error, today,confirmed_day)
+        row = build_row(item, df, error, today,confirmed_day, budget=budgets[item[3]])
         qty = row[16]
         # Keep user watchlist untouched, but exclude anything with <2 whole
         # units at the prior half-period's reference entry price.
@@ -602,7 +630,7 @@ def main():
                  value_input_option="RAW")
     audit.freeze(rows=1)
     ledger = persist_paper_signals(book, watchlist, market_data, today,
-                                   verified_symbols=verified_symbols)
+                                   verified_symbols=verified_symbols, budgets=budgets)
     for row in rows:
         if "BUY TRIGGERED" in str(row[11]):
             row[11] = str(row[11]).replace("BUY TRIGGERED", "BUY TRIGGERED | PAPER RECORDED")
@@ -612,3 +640,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
