@@ -30,7 +30,7 @@ jobs:
           python -m pip install gspread pandas yfinance google-auth requests
 
       - name: Check targets and SELL accounting
-        run: python -m unittest -v test_half_month_positions.py
+        run: python -m unittest -v test_half_month_positions.py test_half_month_sip.py
 
       - name: Update editable watchlist and signals
         env:
