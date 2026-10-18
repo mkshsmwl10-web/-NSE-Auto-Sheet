@@ -136,7 +136,7 @@ def reference_window(start):
     return half_window(start-timedelta(days=1))
 
 
-def historic_signal(item,df,start,end,today,source):
+def historic_signal(item,df,start,end,today,source,budget=5000):
     """Reconstruct a model trigger ONLY from historical OHLC evidence."""
     if df is None or df.empty:return None
     kind,sector,name,symbol=item
@@ -149,7 +149,7 @@ def historic_signal(item,df,start,end,today,source):
     low=float(ref["Low"].min())
     level=round(high if kind=="STOCK" else low,2)
     if level<=0:return None
-    qty=int(5000//level)
+    qty=int(budget//level)
     if qty<1:return None
     hits=(bars[bars["High"]>high] if kind=="STOCK"
           else bars[bars["Low"]<low])
@@ -169,7 +169,7 @@ def _tab(book,title,columns):
     return tab
 
 
-def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None):
+def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None,budgets=None):
     """Append-only history, derived live holdings, never lose prior halves."""
     history=_tab(book,HISTORY_TAB,len(HISTORY_HEADER))
     raw=history.get_all_values()
@@ -192,7 +192,8 @@ def persist_paper_signals(book,watchlist,market_data,today,verified_symbols=None
         df=market_data.get(item[3])
         key=str(start)+":"+item[3]
         if key in existing:continue
-        signal=historic_signal(item,df,start,end,today,"CURRENT OHLC (PAPER)")
+        signal=historic_signal(item,df,start,end,today,"CURRENT OHLC (PAPER)",
+                               budget=(budgets or {}).get(item[3],5000))
         if signal is not None:
             pending.append(signal)
             existing.add(key)
