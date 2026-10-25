@@ -50,6 +50,31 @@ HEAD=["Category","Index Name","Yahoo Symbol","Tracked Stock Candidates (comma-se
 COLS=["Rank","Category","Index","Ticker","Price Date","CMP","1M Return %","3M Return %",
       "NIFTY50 1M %","1M Excess %","1M Outperform?","3M Excess %",
       "3M Outperform?","Data Status","Index Chart"]
+# One representative ETF per exact benchmark; not a liquidity ranking.
+# Sources: NSE ETF market watch and NSE circular CML72721 (GROWWPSE).
+INDEX_ETFS = {
+    "NIFTY IT": "ITBEES",
+    "NIFTY PSU BANK": "PSUBNKBEES",
+    "NIFTY PRIVATE BANK": "PVTBANIETF",
+    "NIFTY BANK": "BANKBEES",
+    "NIFTY OIL & GAS": "OILIETF",
+    "NIFTY INFRA": "INFRAIETF",
+    "NIFTY PHARMA": "PHARMABEES",
+    "NIFTY FMCG": "FMCGIETF",
+    "NIFTY PSE": "GROWWPSE",
+    "NIFTY COMMODITIES": "COMMOIETF",
+    "NIFTY REALTY": "MOREALTY",
+    "NIFTY ENERGY": "MOENERGY",
+    "NIFTY HEALTHCARE": "HEALTHIETF",
+    "NIFTY AUTO": "AUTOIETF",
+    "NIFTY METAL": "METALIETF",
+}
+
+def strength_with_etfs(rows):
+    """Add the display column without shifting internal ranking/chart indexes."""
+    return [row[:3] + [INDEX_ETFS.get(row[2], "EXACT ETF NOT VERIFIED")] + row[3:]
+            for row in rows]
+
 LHEAD=["Sector Rank","Index","Sector 1M Excess %","Leader Rank","NSE Stock",
        "Stock 1M %","Index 1M %","Stock vs Index 1M %",
        "Stock vs NIFTY50 1M %","Stock 3M %","Index 3M %",
@@ -280,6 +305,14 @@ def output(book,name,header,rows,signal_col=None):
     # Without explicitly resetting I (and its neighboring return columns),
     # a previously applied DATE format displays numeric excess returns as
     # 1900-01-xx dates. These columns are percentage POINTS, not ratios.
+    if name==RESULTS:
+        tab.format("D2:E150", {"numberFormat":{"type":"TEXT"}})
+        tab.format("F2:F150", {"numberFormat":{"type":"DATE","pattern":"yyyy-mm-dd"}})
+        tab.format("G2:K150", {"numberFormat":{"type":"NUMBER","pattern":"0.00"}})
+        tab.format("M2:M150", {"numberFormat":{"type":"NUMBER","pattern":"0.00"}})
+        book.batch_update({"requests":[{"updateDimensionProperties":{
+            "range":{"sheetId":tab.id,"dimension":"COLUMNS","startIndex":3,"endIndex":4},
+            "properties":{"pixelSize":210},"fields":"pixelSize"}}]})
     if name==LEADERS:
         tab.format("F2:L"+str(max(150,len(rows)+2)),
                    {"numberFormat":{"type":"NUMBER","pattern":"0.00"}})
@@ -455,7 +488,8 @@ def main():
         print("Outperforming sector",name,": qualifying tracked leaders",len(candidates),
               "shown",min(3,len(candidates)))
     leaders.sort(key=lambda row:(row[0],row[3]))
-    output(book,RESULTS,COLS,strength,signal_col=10)
+    output(book,RESULTS,COLS[:3]+["Main ETF (NSE)"]+COLS[3:],
+           strength_with_etfs(strength),signal_col=11)
     output(book,LEADERS,LHEAD,leaders)
     style_leader_sheet(book,leaders)
     CHART.parent.mkdir(parents=True,exist_ok=True)
